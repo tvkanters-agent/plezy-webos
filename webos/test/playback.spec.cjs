@@ -1,14 +1,14 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page) {
+async function setup(page, extra = {}) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
     simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write'}})));
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
-    Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm',Stream:[]}]}]};
+    Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm',Stream:[]}]}],...extra};
   await page.route('https://api.simkl.com/**',route=>{
     events.push({path:new URL(route.request().url()).pathname,body:route.request().postDataJSON()});
     return route.fulfill({json:{}});
@@ -64,4 +64,17 @@ test('failed Simkl stop is saved and can be retried from settings',async({page})
   await page.getByRole('button',{name:'Retry saved Simkl stops (1)',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(0);
   expect(attempts).toBe(2);
+});
+
+test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async({page})=>{
+ const {events,calls}=await setup(page,{Marker:[{type:'intro',startTimeOffset:0,endTimeOffset:15000}],
+ Chapter:[{title:'Beginning',startTimeOffset:0},{title:'Later',startTimeOffset:45000}]});
+ await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Skip intro',exact:true}).click();
+ await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(15);
+ await page.getByLabel('Chapter',{exact:true}).selectOption('45');
+ await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(45);
+ await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeHidden();
+ expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
+ expect(calls.find(u=>u.pathname==='/library/metadata/movie').searchParams.get('includeMarkers')).toBe('1');
 });

@@ -29,9 +29,11 @@
         <button data-action="pause">Pause</button>
         <button data-action="forward">+30 seconds</button>
         <button data-action="stop">Stop</button>
+        <button data-action="skip" hidden>Skip intro</button>
         <button data-action="transcode">Compatible playback</button>
       </div>
       <div class="track-controls">
+        <label data-chapters hidden>Chapters <select aria-label="Chapter" data-chapter></select></label>
         <label>Audio <select data-track="audio" aria-label="Audio track"></select></label>
         <label>Subtitles <select data-track="subtitle" aria-label="Subtitle track"></select></label>
       </div>

@@ -127,3 +127,7 @@ GPL-3.0, as in the repository's [LICENSE](../LICENSE). Plezy and its original as
 ### Failed Simkl updates
 
 Final stop events are saved with the linked Simkl session before delivery (up to 50). Failed stops survive app restarts and retry on the next real playback action, or through **Retry saved Simkl stops** in settings. Simkl cooldowns are saved too; retrying during a quota hold sends no traffic. Disconnecting Simkl clears its queue. An explicit watched/unwatched change overrides a queued stop for the same title. No periodic scrobble heartbeat or retry loop is used. Force-closing the app before it can record a stop, or unavailable TV storage, can still lose progress.
+
+### Plex chapters and skips
+
+Titles with server-provided chapters offer a chapter selector during playback. Intro and credits markers show a skip button only while the marker is active. These controls seek within the current stream and update Plex progress without creating extra Simkl playback events. Marker availability depends on your Plex server and library analysis.

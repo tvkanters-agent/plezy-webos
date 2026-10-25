@@ -24,6 +24,10 @@ export class Player {
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
     root.querySelector('[data-action="stop"]').onclick = () => this.close();
+    root.querySelector('[data-action="skip"]').onclick = () => { if (this.marker) this.seekTo(this.marker.end); };
+    root.querySelector('[data-chapter]').onchange = event => {
+      if (event.target.value !== '') this.seekTo(Number(event.target.value));
+    };
     root.querySelector('[data-action="transcode"]').onclick = () => this.reopen({transcode: true});
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => this.reopen({[kind]: Number(event.target.value), transcode: true});
@@ -43,6 +47,8 @@ export class Player {
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = 'Preparing video…';
+    this.root.querySelector('[data-chapters]').hidden = true;
+    this.root.querySelector('[data-action="skip"]').hidden = true; this.marker = null;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
     this.root.querySelector('[data-action="stop"]').focus();
@@ -64,6 +70,13 @@ export class Player {
         });
         select.value = options[kind] === undefined ? defaultOption.value : String(options[kind]);
       }
+      const chapters = this.root.querySelector('[data-chapter]'); chapters.textContent = '';
+      const heading = document.createElement('option'); heading.value = ''; heading.textContent = 'Jump to chapter'; chapters.append(heading);
+      (session.chapters || []).forEach(chapter => {
+        const option = document.createElement('option'); option.value = chapter.start;
+        option.textContent = time(chapter.start) + ' · ' + chapter.title; chapters.append(option);
+      });
+      this.root.querySelector('[data-chapters]').hidden = !session.chapters?.length;
       this.video.src = session.url;
       this.video.load();
       this.report('start');
@@ -89,6 +102,11 @@ export class Player {
     clearTimeout(this.startTimeout);
   }
   update() {
+    const marker = (this.session?.markers || []).find(m => this.video.currentTime >= m.start && this.video.currentTime < m.end);
+    const skip = this.root.querySelector('[data-action="skip"]');
+    if (!marker && document.activeElement === skip) this.root.querySelector('[data-action="pause"]').focus();
+    skip.hidden = !marker; skip.textContent = marker?.type === 'credits' ? 'Skip credits' : 'Skip intro';
+    this.marker = marker;
     this.root.querySelector('.elapsed').textContent = time(this.video.currentTime) + ' / ' + time(this.video.duration || (this.item && this.item.duration));
     const fraction = this.video.duration ? clamp(this.video.currentTime / this.video.duration, 0, 1) : 0;
     this.root.querySelector('progress').value = fraction;
@@ -161,10 +179,11 @@ export class Player {
     if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
     this.reveal();
   }
-  seek(delta) {
-    if (!this.session || this.video.readyState < 1) return;
+  seek(delta) { this.seekTo(this.video.currentTime + delta); }
+  seekTo(position) {
+    if (!this.session || this.video.readyState < 1 || !Number.isFinite(position)) return;
     const duration = Number.isFinite(this.video.duration) ? this.video.duration : this.item.duration;
-    this.video.currentTime = clamp(this.video.currentTime + delta, 0, Math.max(0, duration - 1));
+    this.video.currentTime = clamp(position, 0, Math.max(0, duration - 0.1));
     this.report(this.video.paused ? 'paused' : 'playing'); this.reveal();
   }
   reveal() {

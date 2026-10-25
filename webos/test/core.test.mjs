@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {baseUrl, endpoint, time, seconds, nextFocus, readState, request, id} from '../src/core.js';
-import {Plex, Jellyfin, plexPin, plexServers} from '../src/api.js';
+import {Plex, Jellyfin, plexPin, plexServers, plexNavigation} from '../src/api.js';
 const server = {url: 'https://media.test/prefix', token: 'secret&token', userId: 'user', kind: 'jellyfin'};
 const json = value => new Response(JSON.stringify(value));
 function mock(fn) { const old = global.fetch; global.fetch = fn; return () => { global.fetch = old; }; }
@@ -251,4 +251,12 @@ test('Plex episode posters prefer the series poster',async()=>{
     const detail=await plex.detail('ep');
     assert.match(plex.image(detail),/series.jpg/);
   }finally{restore();}
+});
+
+
+test('Plex chapters and intro markers use seconds, sorted and clipped to the title',()=>{
+ const navigation=plexNavigation({duration:100000,Chapter:[{startTimeOffset:50000,title:'Middle'},{startTimeOffset:0},{startTimeOffset:null},{startTimeOffset:-1},{startTimeOffset:200000}],
+ Marker:[{type:'intro',startTimeOffset:5000,endTimeOffset:15000},{type:'credits',startTimeOffset:90000,endTimeOffset:110000},{type:'intro',startTimeOffset:10,endTimeOffset:5},{type:'commercial',startTimeOffset:0,endTimeOffset:1000}]});
+ assert.deepEqual(navigation.chapters.map(c=>c.start),[0,50]);
+ assert.deepEqual(navigation.markers,[{type:'intro',start:5,end:15},{type:'credits',start:90,end:100}]);
 });

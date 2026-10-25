@@ -20,6 +20,22 @@ function jellyItem(raw) {
     resume: seconds(raw.UserData && raw.UserData.PlaybackPositionTicks), watched: !!(raw.UserData && raw.UserData.Played),
     folder: !!raw.IsFolder || ['Series', 'Season', 'BoxSet', 'CollectionFolder'].includes(raw.Type), raw};
 }
+// Plex chapter/marker offsets are milliseconds on the full title timeline.
+export function plexNavigation(raw) {
+  const duration = Number(raw.duration) / 1000;
+  const valid = value => value !== null && value !== undefined && value !== ''
+    && Number.isFinite(Number(value)) && Number(value) >= 0;
+  const chapters = (Array.isArray(raw.Chapter) ? raw.Chapter : [])
+    .filter(c => c && valid(c.startTimeOffset))
+    .map((c, i) => ({start: Number(c.startTimeOffset) / 1000, title: c.title || 'Chapter ' + (i + 1)}))
+    .filter(c => !duration || c.start < duration).sort((a, b) => a.start - b.start);
+  const markers = (Array.isArray(raw.Marker) ? raw.Marker : [])
+    .filter(m => m && ['intro', 'credits'].includes(m.type) && valid(m.startTimeOffset) && valid(m.endTimeOffset))
+    .map(m => ({type: m.type, start: Number(m.startTimeOffset) / 1000,
+      end: Math.min(Number(m.endTimeOffset) / 1000, duration || Infinity)}))
+    .filter(m => m.end > m.start).sort((a, b) => a.start - b.start);
+  return {chapters, markers};
+}
 export function plexIdentity(deviceId) {
   return {'X-Plex-Product': 'Plezy webOS', 'X-Plex-Version': VERSION,
     'X-Plex-Client-Identifier': deviceId, 'X-Plex-Platform': 'webOS', 'X-Plex-Device': 'TV', 'X-Plex-Device-Name': 'Plezy webOS TV'};
@@ -121,7 +137,7 @@ export class Plex {
   async detail(itemId) {
     // The bundled Simkl integration needs stable imdb/tmdb/tvdb identifiers,
     // including on show detail fetched for an episode's grandparent.
-    return plexItem((await this.get('/library/metadata/' + enc(itemId), {includeGuids: 1})).MediaContainer.Metadata[0]);
+    return plexItem((await this.get('/library/metadata/' + enc(itemId), {includeGuids: 1, includeMarkers: 1, includeChapters: 1})).MediaContainer.Metadata[0]);
   }
   async children(itemId, start = 0) {
     const data = (await this.get('/library/metadata/' + enc(itemId) + '/children', {
@@ -187,7 +203,7 @@ export class Plex {
         subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1}, {method: 'PUT'});
     }
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, item, start: options.start || 0,
+      sessionId, sourceId: String(part.id), transcode, item, start: options.start || 0, ...plexNavigation(item.raw),
       audio: (part.Stream || []).filter(s => s.streamType === 2).map(s => ({id: s.id, label: s.displayTitle || s.language || s.codec})),
       subtitles: (part.Stream || []).filter(s => s.streamType === 3).map(s => ({id: s.id, label: s.displayTitle || s.language || s.codec})),
       options};
