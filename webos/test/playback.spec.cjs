@@ -91,7 +91,8 @@ test('selected Plex version survives compatible playback restart',async({page})=
    {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'second',key:'/video.webm'}]}
  ]},1);
  expect(calls.some(u=>u.pathname==='/wrong.webm')).toBe(false);
- await page.getByRole('button',{name:'Compatible playback',exact:true}).last().click();
+ await page.getByRole('button',{name:'Playback settings'}).click();
+ await page.locator('.player-sheet').getByRole('button',{name:'Compatible playback',exact:true}).click();
  await expect.poll(()=>calls.some(u=>u.pathname.endsWith('/start.m3u8') && u.searchParams.get('mediaIndex')==='1')).toBe(true);
  await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
  await page.getByRole('button',{name:'Stop',exact:true}).click();
