@@ -1,4 +1,4 @@
-> **LG webOS TV fork:** The new webOS target is in [`webos/`](webos/README.md). See its [installation instructions and alpha limitations](webos/README.md), [test status](webos/TESTING.md), and [0.1.0 IPK](webos/releases/com.tvkanters.plezy_0.1.0_all.ipk). The upstream README below describes the original native apps; its full feature list does not apply to this webOS alpha.
+> **LG webOS TV fork:** The new webOS target is in [`webos/`](webos/README.md). See its [installation instructions and alpha limitations](webos/README.md), [test status](webos/TESTING.md), and [0.2.0 alpha release and IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.0). The upstream README below describes the original native apps; its full feature list does not apply to this webOS alpha.
 
 <h1>
   <img src="assets/plezy.png" alt="Plezy Logo" height="24" style="vertical-align: middle;" />

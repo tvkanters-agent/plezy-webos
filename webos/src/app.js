@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import {baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
+import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
@@ -283,7 +283,7 @@ function settings() {
     simklPanel.append(el('p', 'Optional: automatically sync Plex movie and episode playback to your Simkl account. Link with a code on your phone.', 'muted'));
     simklPanel.append(button('Connect Simkl', () => go({type: 'simkl'}), 'primary'));
   }
-  main.append(simklPanel, el('p', 'Community port · 0.1.1 alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
+  main.append(simklPanel, el('p', 'Community port · ' + VERSION + ' alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
 }
 function field(form, text, type = 'text', value = '') {
   const label = el('label', text), input = el('input'); input.type = type; input.value = value; input.autocomplete = type === 'password' ? 'current-password' : 'off';

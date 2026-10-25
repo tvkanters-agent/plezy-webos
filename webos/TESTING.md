@@ -1,11 +1,11 @@
 # webOS alpha validation
 
-The original 0.1.0 alpha was validated locally on 2026-10-25 with Chromium 134 (targeting the Chromium 79 engine in webOS 6). The 0.1.1 source currently defines 28 unit and 21 Playwright browser tests; check the latest [webOS TV CI workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for results. Neither round validates physical LG hardware, live server authentication or the native video decoder.
+Version **0.2.0 alpha** was validated locally on 2026-10-25 using Node.js 24.22.1 and Chromium 134, with a Chromium 79-targeted bundle for webOS 6+. All **45 unit tests and 28 Playwright browser tests passed**. The release IPK was built with the official webOS CLI. These checks do not validate physical LG hardware, live account authentication or native HLS decoding. CI uses Node.js 22; see the [webOS TV workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for its separate results.
 
 | Check | Result |
 | --- | --- |
-| Protocol/core unit tests | 16 baseline passed; 28 tests defined in current source |
-| Browser integration tests | 12 baseline passed; 21 tests defined in current source |
+| Protocol/core unit tests | 45 passed |
+| Browser integration tests | 28 passed |
 | Chromium 79-targeted JavaScript bundle | Built successfully |
 | Official `ares-package --no-minify` IPK | Built successfully |
 | 1920×1080 welcome screen | Screenshot visually inspected |
@@ -45,7 +45,7 @@ npm run package
 
 For proxy-configured development machines, exclude `127.0.0.1,localhost` from the HTTP proxy when running the local browser suite. No proxy is required by the app itself.
 
-The legacy 0.1.0 IPK checked into `releases/` predates these fixes. Build the 0.1.1 IPK from `src/` and `public/` with these scripts or use the latest successful CI artifact. The checked-in `releases/SHA256SUMS` applies only to the legacy 0.1.0 IPK, **not** a newly built 0.1.1 IPK. Repackaging may change archive timestamps, so checksum equality across independent builds is not promised.
+Use the IPK and `SHA256SUMS` attached to the [0.2.0 alpha release](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.0). The legacy 0.1.0 package in `releases/` uses the old app ID and predates these fixes. Its checked-in checksum applies only to that legacy file. Independent builds can differ because archive timestamps are not normalized.
 
 ## Device startup diagnostics (ChatGPT Chat)
 
@@ -55,7 +55,7 @@ If the TV still fails, inspect the installed app with `ares-inspect --device myT
 
 ## Plex-first release priorities
 
-1. Verify 0.1.1 startup on a physical webOS TV and Plex PIN linking, including selected server access and stored scoped token. If a blank screen appears, capture the error message from the startup guard; do not capture token-bearing URLs.
+1. Verify 0.2.0 startup on a physical webOS TV and Plex PIN linking, including selected server access and stored scoped token. If a blank screen appears, capture the error message from the startup guard; do not capture token-bearing URLs.
 2. Verify real Plex libraries, search, Resume, watched state, multi-season episode navigation, sorting, and the fallback Continue Watching shelves.
 3. Validate Plex MP4 direct play and Plex HLS transcoding separately. Check seek/resume, device audio/subtitle behavior, backgrounding, progress synchronization, and transcoder cleanup on actual hardware.
 4. Improve Plex library discovery and playback based on those TV results before attempting advanced features such as auto-next playback or codec capability detection.
@@ -71,3 +71,11 @@ Jellyfin/Emby support remains best-effort. Tests still guard the existing adapte
 - Reopen the application with the same Simkl session and verify token refresh still tracks playback after an expired access token; disable the network temporarily and confirm Plex playback remains usable and reports a Simkl warning.
 - Confirm disabling Simkl stops new requests. Real-device CORS, certificate, and service behavior remain to be verified.
 
+
+## 0.2.0 regression coverage and TV follow-up
+
+- Back during delayed stop reporting cannot resurrect a decoder restart; failed track changes still finish the existing Simkl viewing.
+- Simkl stops survive reload after failure, retry on a real event or from settings, respect saved quota holds, and cannot leak into a newly linked account. Manual unwatched changes supersede pending stops.
+- Intro skips and chapter jumps seek a real HTML video without extra Simkl starts. Verify server-provided intro/credits markers and native HLS seeking on the TV.
+- Alternate media versions select the correct direct URL, HLS index and part for track changes, including decoder restarts. Verify differently encoded versions on a live Plex server. Multi-part versions are explicitly unsupported.
+- The new tests use mocked APIs and the VP8 fixture described above. No live Plex or Simkl account was used in this validation pass.

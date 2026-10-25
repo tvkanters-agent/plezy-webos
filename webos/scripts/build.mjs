@@ -1,4 +1,5 @@
 import {build} from 'esbuild';
+import {VERSION} from '../src/core.js';
 import {cp, mkdir, rm, readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -11,5 +12,5 @@ await build({entryPoints: [path.join(root, 'src/app.js')], bundle: true, target:
   outfile: path.join(root, 'dist/app.js'), minify: true, sourcemap: true, legalComments: 'eof'});
 const manifest = JSON.parse(await readFile(path.join(root, 'dist/appinfo.json')));
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json')));
-if (manifest.version !== pkg.version) throw new Error('Manifest and package version differ.');
+if (manifest.version !== pkg.version || VERSION !== pkg.version) throw new Error('Manifest, runtime and package versions must match.');
 console.log('Built Plezy webOS ' + manifest.version + ' for Chromium 79+');

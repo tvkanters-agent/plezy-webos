@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.1.1 alpha. Target: webOS TV 6.0 (2021) and newer.**
+**Community port, version 0.2.0 alpha. Target: webOS TV 6.0 (2021) and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. Build the updated 0.1.1 IPK using the steps below or download the `plezy-webos-ipk` artifact from the latest successful [webOS TV workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). The earlier checked-in 0.1.0 IPK uses the **old** application ID and does not contain these fixes.
+4. Download the IPK and checksum from the [0.2.0 alpha release](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.0), build it using the steps below, or download the `plezy-webos-ipk` artifact from the latest successful [webOS TV workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). The earlier checked-in 0.1.0 IPK uses the **old** application ID and does not contain these fixes.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.1.1_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.0_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -46,6 +46,8 @@ This is a direct browser-to-Simkl integration. Successful network requests depen
 - Mark watched/unwatched, resume, periodic server progress reporting and stop reports.
 - Native HTML video playback; conservative H.264/AAC MP4 direct play and HLS server transcoding for other media.
 - Automatic one-time fallback when direct playback fails, plus **Compatible playback** for manual transcoding.
+- Plex chapter seeking, intro/credits skip controls and media-version selection.
+- Optional Simkl playback tracking, with persisted failed-stop retries and quota cooldowns.
 - Server audio-track and subtitle selection. Selected subtitles are burned in by the server; switching tracks restarts the stream at the current position.
 - D-pad spatial navigation, Magic Remote pointer, Back, transport keys and pause on backgrounding.
 - Installable IPK, locked build dependencies, automated protocol and browser tests, and a webOS-specific CI workflow.
@@ -69,7 +71,7 @@ Keyboard preview: Escape acts as Back, Space toggles playback. Text fields keep 
 
 This first target intentionally advertises a conservative profile rather than claiming codecs every LG model can decode. HLS output requests H.264 video and AAC audio at up to 1080p / 12 Mbps; direct MP4 playback can retain the original resolution. A server with transcoding permission and sufficient CPU/GPU capacity is required when the original media cannot direct-play. Seek operates on the native player's media timeline; network and server seek performance varies.
 
-Not yet ported: native Flutter UI parity, music, Live TV/DVR, downloads, playlists, Plex Home user switching, Jellyfin Quick Connect, cross-server search, auto-next episode, intro/credit skipping, advanced filtering, localization, watch parties, tracker/Seerr integrations, HDR/Dolby Vision profiles, configurable HEVC/AV1 direct play, audio passthrough and mpv-specific shaders/subtitle rendering. There is no root/native Flutter embedder requirement.
+Not yet ported: native Flutter UI parity, music, Live TV/DVR, downloads, playlists, Plex Home user switching, Jellyfin Quick Connect, cross-server search, auto-next episode, multi-part playback, advanced filtering, localization, watch parties, additional tracker/Seerr integrations, HDR/Dolby Vision profiles, configurable HEVC/AV1 direct play, audio passthrough and mpv-specific shaders/subtitle rendering. There is no root/native Flutter embedder requirement.
 
 **Validation:** see [TESTING.md](TESTING.md). Desktop browser tests do not validate LG's decoder, native HLS support, firmware behavior, server compatibility or real account authentication. Real TV/server testing remains required before a stable release. webOS versions below 6 are not supported by this build target.
 
