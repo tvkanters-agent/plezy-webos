@@ -23,7 +23,7 @@ function button(text, action, className = '') {
   node.addEventListener('click', () => {
     // Remember the activated control even when Magic Remote/pointer clicks do
     // not leave it as document.activeElement by the time navigation executes.
-    node.focus();
+    focusWithoutJump(node, false);
     Promise.resolve().then(action).catch(error => notify(error.message));
   }); return node;
 }
@@ -44,12 +44,38 @@ function addServer(server) {
   state.servers = state.servers.filter(s => s.id !== server.id).concat(server);
   state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
 }
+// The upstream Flutter D-pad navigator keeps the current scroll offset until
+// an item actually leaves the visible content viewport. Chromium's native
+// focus/scrollIntoView otherwise pins every grid row near the top.
+function focusWithoutJump(target, reveal = true) {
+  if (!target) return;
+  const row = target.closest && target.closest('.cards');
+  const vertical = main.contains(target) ? main : null;
+  const previousTop = vertical ? vertical.scrollTop : 0;
+  const previousLeft = row ? row.scrollLeft : 0;
+  let dy = 0, dx = 0;
+  if (reveal) {
+    const item = target.getBoundingClientRect();
+    if (vertical) {
+      const view = vertical.getBoundingClientRect(), pad = 32;
+      if (item.top < view.top + pad) dy = item.top - view.top - pad;
+      else if (item.bottom > view.bottom - pad) dy = item.bottom - view.bottom + pad;
+    }
+    if (row) {
+      const view = row.getBoundingClientRect(), pad = 12;
+      if (item.left < view.left + pad) dx = item.left - view.left - pad;
+      else if (item.right > view.right - pad) dx = item.right - view.right + pad;
+    }
+  }
+  target.focus();
+  if (vertical) vertical.scrollTop = Math.max(0, previousTop + dy);
+  if (row) row.scrollLeft = Math.max(0, previousLeft + dx);
+}
 function focusFirst(root = main) {
   const expectedRevision = revision;
   requestAnimationFrame(() => {
     if (expectedRevision !== revision || !root.isConnected) return;
-    const first = root.querySelector('button:not(:disabled),input,select');
-    if (first) first.focus(); else root.focus();
+    focusWithoutJump(root.querySelector('button:not(:disabled),input,select') || root);
   });
 }
 function title(text, subtitle) { main.append(el('p', 'PLEZY / WEBOS', 'eyebrow'), el('h1', text)); if (subtitle) main.append(el('p', subtitle, 'intro')); }
@@ -238,8 +264,10 @@ async function render() {
   if (valid()) {
     if (route.focus) {
       const found = Array.from(main.querySelectorAll('[data-focus]')).find(n => n.dataset.focus === route.focus);
-      if (found) found.focus(); else focusFirst();
+      // Restore the previous reading/scroll position BEFORE focusing its card.
+      // Native focus scrolling must not pull a restored library back to row 1.
       main.scrollTop = route.scroll || 0;
+      if (found) focusWithoutJump(found, false); else focusFirst();
     } else focusFirst();
   }
 }
@@ -442,7 +470,7 @@ window.addEventListener('keydown', event => {
   const root = !dialog.hidden ? dialog : player.active ? player.root : document.querySelector('#shell');
   const candidates = Array.from(root.querySelectorAll('button:not(:disabled),input,select')).filter(node => node !== current && node.getClientRects().length);
   const next = nextFocus(current.getBoundingClientRect(), candidates.map(value => ({value, rect: value.getBoundingClientRect()})), direction);
-  if (next) { next.focus(); next.scrollIntoView({block: 'nearest', inline: 'nearest'}); }
+  if (next) focusWithoutJump(next);
 }, true);
 window.addEventListener('pagehide', () => { cancelAuth(); player.release(); });
 setClient(); persist(); render();

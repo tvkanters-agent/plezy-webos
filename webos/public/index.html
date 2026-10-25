@@ -20,17 +20,29 @@
   <section id="player" aria-label="Video player" hidden>
     <video tabindex="-1" playsinline></video>
     <div class="player-status" role="status"></div>
-    <div class="controls">
+    <!-- Translated from upstream VideoControlsHeader, VideoTimelineBar and
+         DesktopVideoControls (icon discs, timeline, compact track controls). -->
+    <div class="player-top">
       <div class="player-heading"><h2 class="player-title"></h2><span class="play-method"></span></div>
-      <progress max="1" value="0" aria-label="Playback progress"></progress>
-      <p class="elapsed">0:00 / 0:00</p>
-      <div class="player-buttons">
-        <button data-action="backward">−10 seconds</button>
-        <button data-action="pause">Pause</button>
-        <button data-action="forward">+30 seconds</button>
-        <button data-action="stop">Stop</button>
-        <button data-action="skip" hidden>Skip intro</button>
-        <button data-action="transcode">Compatible playback</button>
+    </div>
+    <div class="controls">
+      <div class="timeline-row">
+        <span class="elapsed-current" aria-hidden="true">0:00</span>
+        <progress max="1" value="0" aria-label="Playback progress"></progress>
+        <span class="elapsed-remaining" aria-hidden="true">-0:00</span>
+      </div>
+      <p class="elapsed" aria-hidden="true" hidden>0:00 / 0:00</p>
+      <div class="transport-row">
+        <div class="player-buttons">
+          <button data-action="backward" class="transport-icon" aria-label="−10 seconds" title="−10 seconds"><span aria-hidden="true">↶</span></button>
+          <button data-action="pause" class="transport-icon" aria-label="Pause" title="Pause"><span aria-hidden="true">❚❚</span></button>
+          <button data-action="forward" class="transport-icon" aria-label="+30 seconds" title="+30 seconds"><span aria-hidden="true">↷</span></button>
+          <button data-action="stop" class="transport-icon" aria-label="Stop" title="Stop"><span aria-hidden="true">■</span></button>
+        </div>
+        <div class="player-secondary">
+          <button data-action="skip" class="player-pill" hidden>Skip intro</button>
+          <button data-action="transcode" class="player-pill">Compatible playback</button>
+        </div>
       </div>
       <div class="track-controls">
         <label data-chapters hidden>Chapters <select aria-label="Chapter" data-chapter></select></label>

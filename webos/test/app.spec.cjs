@@ -336,3 +336,28 @@ test('webOS 4.x missing browser APIs do not block first launch or Plex login',as
   await expect(page.getByRole('heading',{name:'Link your Plex account'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Cancel'})).toBeVisible();
 });
+
+test('TV D-pad navigation does not pin every library card to top of viewport',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  // Put the main scroll partway down without moving a focused element.
+  await page.evaluate(()=>{
+    const main=document.querySelector('main');
+    const grid=document.querySelector('.grid');
+    for(let n=0;n<45;n++){
+      const btn=grid.firstElementChild.cloneNode(true);
+      btn.dataset.focus='f'+n;
+      grid.append(btn);
+    }
+    main.scrollTop=300;
+  });
+  const previous=await page.locator('main').evaluate(x=>x.scrollTop);
+  const cards=page.locator('.grid .card');
+  await cards.nth(15).focus();
+  await page.keyboard.press('ArrowRight');
+  const after=await page.locator('main').evaluate(x=>x.scrollTop);
+  expect(after).toBeGreaterThan(0);
+  expect(after).toBeLessThan(previous+450);
+});

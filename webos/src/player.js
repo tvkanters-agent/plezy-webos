@@ -107,10 +107,17 @@ export class Player {
     if (!marker && document.activeElement === skip) this.root.querySelector('[data-action="pause"]').focus();
     skip.hidden = !marker; skip.textContent = marker?.type === 'credits' ? 'Skip credits' : 'Skip intro';
     this.marker = marker;
-    this.root.querySelector('.elapsed').textContent = time(this.video.currentTime) + ' / ' + time(this.video.duration || (this.item && this.item.duration));
+    const played = this.video.currentTime || 0;
+    const total = this.video.duration || (this.item && this.item.duration) || 0;
+    this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
+    this.root.querySelector('.elapsed-current').textContent = time(played);
+    this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, total - played));
     const fraction = this.video.duration ? clamp(this.video.currentTime / this.video.duration, 0, 1) : 0;
     this.root.querySelector('progress').value = fraction;
-    this.root.querySelector('[data-action="pause"]').textContent = this.video.paused ? 'Play' : 'Pause';
+    const pause = this.root.querySelector('[data-action="pause"]');
+    pause.setAttribute('aria-label', this.video.paused ? 'Play' : 'Pause');
+    pause.setAttribute('title', this.video.paused ? 'Play' : 'Pause');
+    pause.querySelector('span').textContent = this.video.paused ? '▶' : '❚❚';
   }
   report(state) {
     if (!this.session) return;

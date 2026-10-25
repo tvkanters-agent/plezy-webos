@@ -92,3 +92,16 @@ test('selected Plex version survives compatible playback restart',async({page})=
  await page.getByRole('button',{name:'Stop',exact:true}).click();
  await expect(page.getByLabel('Media version',{exact:true})).toHaveValue('1');
 });
+
+test('player chrome has upstream-style compact transport controls and timeline',async({page})=>{
+  await setup(page);
+  await expect(page.locator('.timeline-row progress')).toBeVisible();
+  await expect(page.locator('.transport-icon')).toHaveCount(4);
+  await expect(page.getByRole('button',{name:'−10 seconds',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();
+  const metrics=await page.locator('[data-action="pause"]').evaluate(x=>({
+    width:x.getBoundingClientRect().width,height:x.getBoundingClientRect().height}));
+  expect(metrics.width).toBeLessThanOrEqual(52);
+  expect(metrics.height).toBeLessThanOrEqual(52);
+});
