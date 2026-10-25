@@ -9,15 +9,15 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. Download the [0.1.0 IPK](releases/com.tvkanters.plezy_0.1.0_all.ipk), or build it below.
+4. Build the updated IPK using the steps below or download the `plezy-webos-ipk` artifact from the latest successful [webOS TV workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). The earlier checked-in 0.1.0 IPK uses the **old** application ID and does not contain these fixes.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkanters.plezy_0.1.0_all.ipk
-ares-launch --device myTV com.tvkanters.plezy
+ares-install --device myTV com.tvkdevelopment.plezy_0.1.0_all.ipk
+ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
-The package ID is `com.tvkanters.plezy`. This is a sideloaded community app, not an LG Content Store release. Developer Mode has a limited session lifetime; keep it enabled using LG's supported tools. See [LG's device setup guide](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app).
+The updated package ID is `com.tvkdevelopment.plezy`. If you installed the old package ID, uninstall `com.tvkanters.plezy` after installing and verifying the replacement. The two IDs have separate TV storage, so existing server sign-ins will not transfer automatically. This is a sideloaded community app, not an LG Content Store release. Developer Mode has a limited session lifetime; keep it enabled using LG's supported tools. See [LG's device setup guide](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app).
 
 ## Connect
 
@@ -84,7 +84,7 @@ The app is built to `webos/dist/`; the IPK is written to `webos/build/`. The bun
 For TV debugging:
 
 ```sh
-ares-inspect --device myTV --app com.tvkanters.plezy --open
+ares-inspect --device myTV --app com.tvkdevelopment.plezy --open
 ```
 
 Do not share inspector network captures without removing tokens and server addresses. No telemetry or external analytics are added by this frontend.
