@@ -44,6 +44,10 @@ When connected, Plex movie and episode playback sends **start**, **pause** and *
 
 This is a direct browser-to-Simkl integration. Successful network requests depend on the TV's TLS stack and Simkl allowing this app origin (CORS); no third-party proxy or TLS bypass is included. Real TV/Simkl account validation is still required.
 
+## Upstream fidelity
+
+[PORTING.md](PORTING.md) documents the required Flutter-to-webOS source map, behavior/visual parity expectations, and narrow webOS-only exceptions. Every change must start with the upstream widget/service and its tests; a similar-looking independent implementation is not sufficient.
+
 ## Implemented
 
 - Plex PIN linking, server discovery and manual token connection.
