@@ -11,6 +11,7 @@ function plexItem(raw) {
     resume: (raw.viewOffset || 0) / 1000, watched: !!raw.viewCount,
     poster: raw.type === 'episode' ? (raw.grandparentThumb || raw.parentThumb || raw.thumb)
       : (raw.thumb || raw.parentThumb || raw.grandparentThumb),
+    background: raw.art || raw.grandparentArt || '',
     folder: ['show', 'season', 'collection', 'playlist'].includes(raw.type), raw};
 }
 function jellyItem(raw) {
@@ -205,6 +206,14 @@ export class Plex {
     // older LG TV receives it; keeps artwork and GUI decode work bounded.
     return this.url('/photo/:/transcode', {width: 240, height: 360,
       minSize: 1, upscale: 0, url: item.poster});
+  }
+  backdrop(item) {
+    return item.background ? this.url('/photo/:/transcode',
+      {width: 800, height: 450, minSize: 1, upscale: 0, url: item.background}) : '';
+  }
+  async onDeck(showId) {
+    const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
+    return (data.Metadata || []).map(plexItem)[0] || null;
   }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
   async playback(item, options = {}) {

@@ -434,3 +434,30 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
   expect(pending).toHaveLength(2);
   for(const request of pending.splice(0))await request.fulfill({status:404});
 });
+
+test('Plex show detail displays metadata and browsable seasons',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'dev',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+  const show={ratingKey:'show',type:'show',title:'Example Series',year:2025,
+    summary:'Story details.',tagline:'A new beginning.',studio:'Studio',
+    contentRating:'TV-14',rating:8.2,Genre:[{tag:'Drama'}],Role:[{tag:'Actor One'}],
+    art:'/library/metadata/show/art',thumb:'/library/metadata/show/thumb'};
+  await page.route('http://plex.test/**',route=>{
+    const p=new URL(route.request().url()).pathname;
+    if(p==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'TV',Metadata:[show]}]}}});
+    if(p==='/library/metadata/show')return route.fulfill({json:{MediaContainer:{Metadata:[show]}}});
+    if(p==='/library/metadata/show/children')return route.fulfill({json:{MediaContainer:{Metadata:[
+      {ratingKey:'season1',type:'season',title:'Season 1',index:1}],totalSize:1}}});
+    if(p==='/library/sections')return route.fulfill({json:{MediaContainer:{Directory:[]}}});
+    return route.fulfill({status:404});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Example Series'}).click();
+  await expect(page.getByRole('heading',{name:'Example Series'})).toBeVisible();
+  await expect(page.getByText('A new beginning.')).toBeVisible();
+  await expect(page.getByText(/Drama/)).toBeVisible();
+  await expect(page.getByText(/Actor One/)).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Seasons'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Season 1'})).toBeVisible();
+});

@@ -361,9 +361,37 @@ async function render() {
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id); if (!valid()) return;
+      const isPlexShow = api instanceof Plex && item.type === 'show';
+      const raw = item.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
-      info.append(el('p', item.subtitle, 'eyebrow'), el('h1', item.title), el('p', item.summary));
-      if (item.duration) info.append(el('p', time(item.duration), 'muted'));
+      if (api instanceof Plex && item.background) {
+        const hero = el('div', undefined, 'detail-backdrop');
+        // Server-transcoded low-resolution artwork, not a source-sized image.
+        hero.style.backgroundImage = 'linear-gradient(to right, #0e0f12 2%, rgba(14,15,18,.86) 48%, rgba(14,15,18,.2)), linear-gradient(to top, #0e0f12, transparent 65%), url("' +
+          api.backdrop(item).replace(/"/g, '%22') + '")';
+        main.append(hero);
+      }
+      if (raw.tagline) info.append(el('p', raw.tagline, 'detail-tagline'));
+      info.append(el('h1', item.title));
+      const facts = [raw.year, raw.contentRating, raw.studio,
+        raw.duration ? time(raw.duration / 1000) : '', raw.rating ? raw.rating.toFixed(1) + '/10' : ''].filter(Boolean);
+      if (facts.length) info.append(el('p', facts.join('  ·  '), 'detail-facts'));
+      if (item.summary) info.append(el('p', item.summary, 'detail-summary'));
+      if (api instanceof Plex) {
+        const tags = values => (Array.isArray(values) ? values : []).map(x => x.tag || x.title).filter(Boolean);
+        const metaRows = [
+          ['Genres', tags(raw.Genre)],
+          ['Directors', tags(raw.Director)],
+          ['Writers', tags(raw.Writer)],
+          ['Cast', tags(raw.Role).slice(0, 12)]
+        ];
+        metaRows.forEach(row => {
+          if (!row[1].length) return;
+          const line = el('p', undefined, 'detail-meta');
+          line.append(el('strong', row[0] + ': '), document.createTextNode(row[1].join(', ')));
+          info.append(line);
+        });
+      }
       const actions = el('div', undefined, 'actions');
       if (!item.folder) {
         const versions = api instanceof Plex ? item.raw.Media || [] : [];
@@ -400,9 +428,34 @@ async function render() {
           }));
         }
       }
-      actions.append(button('Back', back)); info.append(actions); content.append(poster(item), info); main.append(content);
-      if (item.folder) { main.append(el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' : 'Titles')); const currentApi = api;
-        await paginated(start => currentApi.children(item.id, start), currentRevision); }
+      if (isPlexShow) {
+        actions.append(button('Play next episode', async () => {
+          const currentRevision = revision;
+          let episode = null;
+          try { episode = await api.onDeck(item.id); } catch (_) { /* empty On Deck */ }
+          if (!episode) {
+            const seasons = await api.children(item.id);
+            for (const season of seasons.items) {
+              const firstPage = await api.children(season.id);
+              episode = firstPage.items.find(e => e.type === 'episode');
+              if (episode) break;
+            }
+          }
+          if (revision !== currentRevision) return;
+          if (episode) go({type:'detail',id:episode.id});
+          else notify('No playable episodes were found.');
+        }, 'primary'));
+      }
+      actions.append(button('Back', back)); info.append(actions);
+      content.append(poster(item), info); main.append(content);
+      if (item.folder) {
+        const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
+          item.type === 'season' ? 'Episodes' : 'Titles');
+        heading.className = 'detail-children-title';
+        main.append(heading);
+        const currentApi = api;
+        await paginated(start => currentApi.children(item.id, start), currentRevision);
+      }
     }
   } catch (error) {
     if (!valid()) return;

@@ -293,3 +293,10 @@ test('Plex artwork URLs request server-side resized images',()=>{
  assert.equal(url.searchParams.get('height'),'360');
  assert.equal(url.searchParams.get('url'),'/library/metadata/123/thumb/old-image');
 });
+
+test('Plex backdrop requests a downsized server-transcoded photo',()=>{
+ const api=new Plex(server,'device');
+ const url=new URL(api.backdrop({background:'/library/metadata/9/art'}));
+ assert.equal(url.searchParams.get('width'),'800');
+ assert.equal(url.searchParams.get('url'),'/library/metadata/9/art');
+});
