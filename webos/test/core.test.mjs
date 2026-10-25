@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {baseUrl, endpoint, time, seconds, nextFocus, readState, request} from '../src/core.js';
+import {baseUrl, endpoint, time, seconds, nextFocus, readState, request, id} from '../src/core.js';
 import {Plex, Jellyfin, plexPin, plexServers} from '../src/api.js';
 const server = {url: 'https://media.test/prefix', token: 'secret&token', userId: 'user', kind: 'jellyfin'};
 const json = value => new Response(JSON.stringify(value));
@@ -84,4 +84,19 @@ test('Plex TV linking requests a weak pin',async()=>{
 test('Plex discovery uses server-scoped tokens and skips unavailable connections',async()=>{
   const calls=[];const restore=mock(async(url)=>{calls.push(new URL(url));if(url.includes('/resources'))return json([{provides:'server',clientIdentifier:'server',name:'Cinema',accessToken:'scoped',connections:[{uri:'https://offline.test',protocol:'https'},{uri:'http://local.test:32400',protocol:'http',local:true}]}]);if(url.includes('offline'))throw new TypeError('network');return json({MediaContainer:{}});});
   try{const results=await plexServers('device','account');assert.equal(results[0].token,'scoped');assert.equal(results[0].url,'http://local.test:32400');assert.equal(calls[2].searchParams.get('X-Plex-Token'),'scoped');}finally{restore();}
+});
+
+test('startup survives denied storage access', () => {
+  const state = readState({getItem() { throw new Error('SecurityError'); }});
+  assert.deepEqual(state.servers, []);
+  assert.match(state.deviceId, /^[0-9a-f]{32}$/);
+});
+test('startup creates a local device ID without Web Crypto', () => {
+  const previous = globalThis.crypto;
+  try {
+    Object.defineProperty(globalThis, 'crypto', {configurable: true, value: undefined});
+    assert.match(id(), /^[0-9a-f]{32}$/);
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', {configurable: true, value: previous});
+  }
 });
