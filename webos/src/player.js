@@ -34,9 +34,13 @@ export class Player {
   get active() { return !this.root.hidden; }
   async open(api, item, options = {}, preserveTracking = false) {
     const tracking = preserveTracking ? this.playbackTracking : null;
-    await this.release(false, preserveTracking);
-    const generation = ++this.generation;
+    this.closing = false;
+    const cleanup = this.release(false, preserveTracking);
+    const generation = this.generation;
+    await cleanup;
+    if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
+    this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = 'Preparing video…';
     this.root.querySelector('.player-title').textContent = item.title;
@@ -102,7 +106,7 @@ export class Player {
   }
   track(action, ended = false) {
     if (!this.playbackTracking || !this.item) return;
-    const position = this.pendingStart || this.video.currentTime || 0;
+    const position = this.pendingStart || this.video.currentTime || this.lastPosition || 0;
     const duration = Number.isFinite(this.video.duration) && this.video.duration > 0
       ? this.video.duration : this.item.duration;
     this.playbackTracking.event(action, position, duration, ended);
@@ -111,11 +115,11 @@ export class Player {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     const session = this.session, api = this.api;
-    if (session) {
-      this.report('stopped');
-      if (!preserveTracking) this.track('stop', ended);
-    }
-    this.playbackTracking = null;
+    this.lastPosition = this.pendingStart || this.video.currentTime || this.lastPosition || 0;
+    if (session) this.report('stopped');
+    // Tracking belongs to the viewing, not a particular decoder session. A
+    // failed/replaced decoder must still finish the started Simkl viewing.
+    if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
     this.session = null; this.pendingStart = 0;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
@@ -126,7 +130,10 @@ export class Player {
     if (this.closing) return;
     this.closing = true;
     this.root.hidden = true;
-    await this.release(ended);
+    const cleanup = this.release(ended);
+    const generation = this.generation;
+    await cleanup;
+    if (generation !== this.generation) return;
     this.closing = false;
     this.onClose();
   }
