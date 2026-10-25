@@ -96,3 +96,11 @@ Test the exact `POST /oauth2/device` request shape (bare OAuth URL and URL-encod
 
 - Simkl device, poll and refresh OAuth requests must carry `Content-Type: application/json` and JSON bodies; preceding webOS releases incorrectly sent URL-encoded form content despite Simkl returning `invalid_request: Invalid JSON request`.
 - Inspect the on-device focus border (2.5px inside card), row scrolling (no browser shelves), D-pad scrolling (no row pinned to top), image load performance and compact player timeline/icons against upstream Plezy native Flutter UI. CI tests UI semantics and browser scrolling; GPU/video performance requires testing on webOS 4.4.3-22.
+
+## webOS 4.4.3-22: 0.2.4 acceptance checks
+
+- Confirm Plex sidebar lists all video libraries, can collapse, and preserves individual hide/show choices.
+- Confirm Collections and Playlists have usable detail pages and children; verify show seasons, spotlight metadata and On Deck selection.
+- Confirm progress does not freeze the TV when opening a 100+ poster library, and the final card is not clipped in horizontal shelves.
+- Confirm player audio, subtitle, chapter and quality controls open small custom sheets; Back dismisses a sheet before leaving playback.
+- Confirm Simkl title matching now works for Plex media with externally matched IDs, and 404 id_err only suppresses the unmatched title rather than disabling all Simkl tracking.

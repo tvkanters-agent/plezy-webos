@@ -1,5 +1,17 @@
 # webOS changelog
 
+## 0.2.4 alpha — Plex library rail, show details and player fidelity
+
+- Fetch Plex libraries directly into the original-style navigation rail; support compact rail and per-library hidden preferences.
+- Translate Plex Recommended/Browse/Collections/Playlists pages with working collection/playlist routes.
+- Add richer TV show detail spotlight, metadata and season navigation.
+- Replace browser player options with compact right-hand control discs and custom choice sheets.
+- Reduce Chromium 53 artwork freezes using server-resized posters, two concurrent image loads and batched DOM work; correct home-carousel end padding.
+- Enrich Simkl movie GUIDs and report unmatchable 404 id_err items without repeated requests.
+- Continue to prioritize Plex. Real-device UI performance and Simkl behavior still need validation.
+
+
+
 ## 0.2.3 alpha — Simkl JSON requests and Plezy TV UI alignment
 
 - Correct Simkl OAuth V2 device code, polling, and refresh to JSON request bodies; retain original Plezy grant fields, write scope, and sanitized error UI.

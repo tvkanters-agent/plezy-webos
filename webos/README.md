@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.3 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, version 0.2.4 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Build the 0.2.3 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.3 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
+4. **Build the 0.2.4 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.4 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.3_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.4_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -154,3 +154,11 @@ The previous webOS port sent form-encoded Simkl OAuth data, which Simkl rejects 
 ### Native-UI fidelity pass (0.2.3)
 
 The webOS TV frontend is still a platform-specific HTML/JavaScript implementation, not the actual upstream Flutter tree (the Flutter/MPV runtime is not available inside a webOS 4.4 Chromium 53 web application). This pass translates upstream `FocusTheme`, `PlayerFocusDisc`, `VideoTimelineBar` and TV shelf behaviors: small inset focus borders instead of thick outline boxes, 48px transport discs, horizontal timeline with remaining time, chrome that hides during playback, no browser shelf scrollbars, TV D-pad scrolling that keeps the focused grid row in view without snapping it to the top, and near-viewport poster loading for older TV GPU/CPU performance. **This is a partial visual port, not feature or layout parity**; the original Flutter UI remains the reference for future work.
+
+### 0.2.4 Plex-first UI improvements
+
+The webOS frontend now loads the Plex library list into the navigation rail, allows collapsing the rail and hiding individual libraries from **Servers & settings → Library visibility**, and provides the upstream-inspired **Recommended**, **Browse**, **Collections**, and **Playlists** library tabs. Plex collections and playlists use their own API detail/item routes.
+
+Show details include the Plex spotlight backdrop, tagline, year, studio, certificate, rating, summary, genres, credits, cast and season navigation. The player’s right-side controls now open compact audio/subtitle/chapter/settings choice sheets rather than exposing native HTML dropdowns. Horizontal shelf padding was adjusted to keep the final card visible.
+
+To reduce artwork stalls on webOS 4.4 / Chromium 53, Plezy asks Plex for pre-sized thumbnails, loads at most two images concurrently, and yields between small batches of card insertion. Simkl now looks up full Plex Guids when hubs omit them and distinguishes unmatchable Simkl titles (404 `id_err`) from API failure. Full fidelity and hardware playback/scrobble validation remain outstanding; don't treat these changes as a complete Flutter UI port.
