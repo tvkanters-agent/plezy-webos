@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.1 alpha. Target: webOS TV 6.0 (2021) and newer.**
+**Community port, version 0.2.1 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -22,7 +22,7 @@ The updated package ID is `com.tvkdevelopment.plezy`. If you installed the old p
 
 ### TV startup syntax compatibility
 
-The 0.2.1 build emits **Chromium 53-compatible syntax**, even though the minimum claimed webOS TV platform remains **6.x (Chromium 79)**. Earlier 0.2.0 builds targeted Chromium 79 syntax and could fail in older embedded TV engines before application initialization. This is a syntax-only precaution; it does not fix unavailable browser APIs or media codecs.
+The 0.2.1 build targets **webOS 4.x / Chromium 53**, matching the reported TV version **4.4.3-22**. The earlier 0.2.0 build targeted Chromium 79 syntax. In addition to lower JavaScript syntax, the app now includes compatibility shims for older browser APIs (including AbortController/cancellable fetch, Promise.allSettled/finally, String.padStart and Element.append). These do not change codec, DRM or server support; real-TV validation is still required.
 
 If the screen displays **Plezy could not start**, the next build now includes the script filename, line/column and detected Chromium major version when available. Send that non-sensitive error text and your webOS version for diagnosis. Do **not** share Plex/Simkl tokens or unredacted network requests. Run `npm run build && npm run test:bundle` before packaging to check the bundled classic-script output.
 
@@ -96,7 +96,7 @@ npm run test:e2e
 npm run package
 ```
 
-The app is built to `webos/dist/`; the IPK is written to `webos/build/`. The bundle targets Chromium 79 and contains no CDN runtime dependencies. `npm run dev` serves the built app using LG's CLI; desktop Chrome is useful for navigation and MP4 playback, but native HLS availability differs from an LG TV.
+The app is built to `webos/dist/`; the IPK is written to `webos/build/`. The bundle targets Chromium 53 and contains no CDN runtime dependencies. `npm run dev` serves the built app using LG's CLI; desktop Chrome is useful for navigation and MP4 playback, but native HLS availability differs from an LG TV.
 
 For TV debugging:
 
@@ -144,3 +144,5 @@ Titles with server-provided chapters offer a chapter selector during playback. I
 ### Plex media versions
 
 When a title has multiple media versions, choose one on its detail screen before Play, Resume, or Compatible playback. Audio/subtitle changes and decoder fallback retain the selected version. Multi-part files currently show an explicit unsupported message instead of silently playing only the first part; choose a single-part version.
+
+The required browser-engine compatibility target is Chromium 53 for webOS 4.x. Newer browser APIs must be guarded or implemented in `src/compat.js`, not assumed available because modern Playwright passes. The specific webOS 4.4.3-22 TV remains the acceptance device.

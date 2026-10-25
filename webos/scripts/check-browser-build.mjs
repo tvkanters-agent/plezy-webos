@@ -21,11 +21,16 @@ try {
   // Parse the packaged bundle and EVERY inline bootstrap script in the exact
   // HTML we ship; a malformed diagnostic script is still a boot failure.
   new Script(script, {filename: 'dist/app.js'});
-  const inlineScripts = [...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi)];
-  if (!inlineScripts.length) throw new Error('No inline startup diagnostic script found.');
-  for (const [index, match] of inlineScripts.entries()) {
-    new Script(match[1], {filename: 'dist/index.html:inline:' + (index + 1)});
+  // The shipped boot diagnostics live in an untyped inline classic script.
+  // Inspect the exact HTML bytes, too: a syntax failure there is fatal.
+  var open = '<script>', close = '</script>', pos = 0, count = 0;
+  while ((pos = html.indexOf(open, pos)) !== -1) {
+    var from = pos + open.length, to = html.indexOf(close, from);
+    if (to === -1) throw new Error('Unterminated inline script');
+    new Script(html.substring(from, to), {filename: 'dist/index.html:inline:' + (++count)});
+    pos = to + close.length;
   }
+  if (!count) throw new Error('No inline startup diagnostic script found.');
 } catch (error) {
   throw new Error('Packaged JavaScript could not be parsed: ' + error.message);
 }

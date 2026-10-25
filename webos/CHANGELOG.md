@@ -2,10 +2,10 @@
 
 ## 0.2.1 alpha — webOS startup syntax compatibility
 
-- Lower the compiled TV app syntax target to Chromium 53 (the supported deployment baseline remains webOS 6+), addressing a reported `Unexpected token {` parser error at startup on a physical LG TV.
+- Lower the compiled TV app syntax target to Chromium 53 (now targeting the confirmed webOS 4.4.3 / Chromium 53 device), addressing a reported `Unexpected token {` parser error at startup on a physical LG TV.
 - Improve the boot error screen with script filename, line/column and Chromium engine version when available.
 - Check the built classic-script bundle in CI; add a simulated script parse-error browser regression test.
-- Preserve all Plex, Simkl, chapters and media-version functionality from 0.2.0. Physical device validation remains outstanding.
+- Add runtime compatibility for missing older browser APIs, including AbortController, Promise.allSettled/finally, String.padStart and Element.append. Preserve Plex, Simkl, chapters and media-version functionality from 0.2.0. Physical device validation remains outstanding.
 
 
 ## 0.2.0 alpha — 2026-10-25
