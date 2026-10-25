@@ -57,7 +57,15 @@
         main.appendChild(details);
       }
       window.addEventListener('error', function (event) {
-        bootError(event.message || 'Application script failed to load.');
+        var message = event.message || 'Application script failed to load.';
+        var filename = event.filename ? event.filename.split('/').pop().split('?')[0] : '';
+        if (filename) message += '\\nScript: ' + filename +
+          (event.lineno ? ' line ' + event.lineno : '') +
+          (event.colno ? ', column ' + event.colno : '');
+        var agent = navigator.userAgent || '';
+        var chrome = /(?:Chrome|Chromium)\\/(\\d+)/.exec(agent);
+        if (chrome) message += '\\nTV browser engine: Chromium ' + chrome[1];
+        bootError(message);
       });
       window.addEventListener('unhandledrejection', function (event) {
         bootError((event.reason && event.reason.message) || 'An unexpected startup error occurred.');

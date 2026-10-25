@@ -1,6 +1,6 @@
 {
   "id": "com.tvkdevelopment.plezy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "vendor": "Plezy webOS contributors",
   "type": "web",
   "main": "index.html",

@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.0 alpha. Target: webOS TV 6.0 (2021) and newer.**
+**Community port, version 0.2.1 alpha. Target: webOS TV 6.0 (2021) and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,15 +9,22 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. Download the IPK and checksum from the [0.2.0 alpha release](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.0), build it using the steps below, or download the `plezy-webos-ipk` artifact from the latest successful [webOS TV workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). The earlier checked-in 0.1.0 IPK uses the **old** application ID and does not contain these fixes.
+4. **Build the 0.2.1 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.1 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.0_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.1_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
 The updated package ID is `com.tvkdevelopment.plezy`. If you installed the old package ID, uninstall `com.tvkanters.plezy` after installing and verifying the replacement. The two IDs have separate TV storage, so existing server sign-ins will not transfer automatically. This is a sideloaded community app, not an LG Content Store release. Developer Mode has a limited session lifetime; keep it enabled using LG's supported tools. See [LG's device setup guide](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app).
+
+
+### TV startup syntax compatibility
+
+The 0.2.1 build emits **Chromium 53-compatible syntax**, even though the minimum claimed webOS TV platform remains **6.x (Chromium 79)**. Earlier 0.2.0 builds targeted Chromium 79 syntax and could fail in older embedded TV engines before application initialization. This is a syntax-only precaution; it does not fix unavailable browser APIs or media codecs.
+
+If the screen displays **Plezy could not start**, the next build now includes the script filename, line/column and detected Chromium major version when available. Send that non-sensitive error text and your webOS version for diagnosis. Do **not** share Plex/Simkl tokens or unredacted network requests. Run `npm run build && npm run test:bundle` before packaging to check the bundled classic-script output.
 
 ## Connect
 

@@ -137,6 +137,15 @@ test('startup remains navigable when Web Crypto is missing',async({page})=>{
   await page.goto('/');
   await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
 });
+test('syntax errors show the bundle name and browser version on the TV',async({page})=>{
+  await page.route('**/app.js',route=>route.fulfill({contentType:'text/javascript',
+    body:'function broken() { const = {; }'}));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Plezy could not start'})).toBeVisible();
+  await expect(page.locator('#main')).toContainText('SyntaxError');
+  await expect(page.locator('#main')).toContainText('Script: app.js');
+  await expect(page.locator('#main')).toContainText('TV browser engine: Chromium');
+});
 test('a bundle that loads but never starts produces an actionable boot error',async({page})=>{
   await page.route('**/app.js',route=>route.fulfill({contentType:'text/javascript',body:'// intentionally no app bootstrap'}));
   await page.goto('/');

@@ -1,6 +1,6 @@
 {
   "name": "plezy-webos",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
@@ -8,6 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.mjs",
     "test:e2e": "playwright test",
+    "test:bundle": "node scripts/check-browser-build.mjs",
     "package": "npm run build && ares-package --no-minify dist -o build",
     "dev": "npm run build && ares-server dist"
   },

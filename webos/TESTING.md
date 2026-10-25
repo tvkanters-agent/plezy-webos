@@ -79,3 +79,7 @@ Jellyfin/Emby support remains best-effort. Tests still guard the existing adapte
 - Intro skips and chapter jumps seek a real HTML video without extra Simkl starts. Verify server-provided intro/credits markers and native HLS seeking on the TV.
 - Alternate media versions select the correct direct URL, HLS index and part for track changes, including decoder restarts. Verify differently encoded versions on a live Plex server. Multi-part versions are explicitly unsupported.
 - The new tests use mocked APIs and the VP8 fixture described above. No live Plex or Simkl account was used in this validation pass.
+
+## 0.2.1 boot compatibility investigation
+
+On a physical LG TV the previous build displayed `Plezy could not start / Uncaught SyntaxError: Unexpected token {`. The affected commit is **not established** because the earlier builds were not tested on that TV. The prior bundle targeted Chromium 79; this change downlevels its syntax to Chromium 53 while retaining the claimed webOS 6+ support baseline. CI now performs an additional classic-script bundle parse check and tests the on-screen syntax diagnostic. The actual LG webOS/browser version and specific rejected token are not yet confirmed. Retest using a freshly packaged **0.2.1** IPK rather than the unchanged 0.2.0 release.
