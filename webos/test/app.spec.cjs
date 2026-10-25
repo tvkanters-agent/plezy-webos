@@ -376,8 +376,14 @@ test('offscreen library posters are deferred until reaching the viewport',async(
     const entry=grid.querySelector('.card');
     for(let n=0;n<30;n++){
       const clone=entry.cloneNode(true);
-      clone.querySelector('img')?.removeAttribute('src');
-      clone.querySelector('img')?.setAttribute('data-poster-src','http://media.test/Items/offscreen-'+n+'/Images/Primary');
+      // Mock image failures replace the poster contents with a placeholder.
+      // Install a fresh deferred image rather than assuming an img survived.
+      const poster=clone.querySelector('.poster');
+      poster.textContent='';
+      const img=document.createElement('img');
+      img.alt='';
+      img.setAttribute('data-poster-src','http://media.test/Items/offscreen-'+n+'/Images/Primary');
+      poster.appendChild(img);
       grid.append(clone);
     }
   });
