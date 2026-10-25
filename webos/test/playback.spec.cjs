@@ -121,3 +121,12 @@ test('player header and controls hide together during playback inactivity',async
   await expect(header).toBeVisible();
   await expect(controls).toBeVisible();
 });
+
+test('transport icons use vector graphics and expose accessible button labels',async({page})=>{
+  await setup(page);
+  const buttons=page.locator('.player-buttons .transport-icon');
+  await expect(buttons).toHaveCount(4);
+  expect(await buttons.locator('svg').count()).toBe(5);
+  await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeVisible();
+  await expect(page.locator('.player-buttons button[data-action="pause"] .pause-glyph')).toBeVisible();
+});

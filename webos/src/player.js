@@ -117,7 +117,7 @@ export class Player {
     const pause = this.root.querySelector('[data-action="pause"]');
     pause.setAttribute('aria-label', this.video.paused ? 'Play' : 'Pause');
     pause.setAttribute('title', this.video.paused ? 'Play' : 'Pause');
-    pause.querySelector('span').textContent = this.video.paused ? '▶' : '❚❚';
+    pause.classList.toggle('is-paused', this.video.paused);
   }
   report(state) {
     if (!this.session) return;
