@@ -174,7 +174,7 @@ function back() {
   dialog.append(actions); dialog.hidden = false; focusFirst(dialog);
 }
 function card(item) {
-  const node = button('', () => go({type: 'detail', id: item.id})); node.className = 'card'; node.dataset.focus = item.id;
+  const node = button('', () => go({type: 'detail', id: item.id, kind: item.type})); node.className = 'card'; node.dataset.focus = item.id;
   node.setAttribute('aria-label', item.title + (item.subtitle ? ', ' + item.subtitle : ''));
   node.append(poster(item), el('strong', item.title), el('small', item.subtitle));
   if (item.watched) node.append(el('span', '✓', 'badge'));
@@ -310,10 +310,12 @@ async function render() {
       main.append(tabs);
       if (currentApi instanceof Plex && view === 'collections') {
         await paginated(start => currentApi.collections(route.library.id, start), currentRevision);
+        if (valid()) focusFirst();
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
         await paginated(start => currentApi.playlists(start), currentRevision);
+        if (valid()) focusFirst();
         return;
       }
       if (currentApi instanceof Plex && view === 'recommended') {
@@ -322,7 +324,7 @@ async function render() {
         if (!shelves.length) main.append(el('p','No recommendations for this library.', 'muted'));
         shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
           section.append(el('h2', shelf.title), cards(shelf.items)); main.append(section); });
-        schedulePosters(); return;
+        schedulePosters(); if (valid()) focusFirst(); return;
       }
       if (view !== 'browse') {
         main.append(el('p','This library view is currently available for Plex libraries.', 'muted'));
@@ -360,7 +362,7 @@ async function render() {
       await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
-      const item = await api.detail(route.id); if (!valid()) return;
+      const item = await api.detail(route.id, route.kind); if (!valid()) return;
       const isPlexShow = api instanceof Plex && item.type === 'show';
       const raw = item.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
@@ -454,7 +456,7 @@ async function render() {
         heading.className = 'detail-children-title';
         main.append(heading);
         const currentApi = api;
-        await paginated(start => currentApi.children(item.id, start), currentRevision);
+        await paginated(start => currentApi.children(item.id, start, item.type), currentRevision);
       }
     }
   } catch (error) {

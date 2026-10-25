@@ -300,3 +300,25 @@ test('Plex backdrop requests a downsized server-transcoded photo',()=>{
  assert.equal(url.searchParams.get('width'),'800');
  assert.equal(url.searchParams.get('url'),'/library/metadata/9/art');
 });
+
+test('Plex collection and playlist details use their distinct item APIs',async()=>{
+ const calls=[];
+ const restore=mock(async url=>{
+   const u=new URL(url);
+   calls.push(u.pathname);
+   return json({MediaContainer:{Metadata:[{ratingKey:'99',title:'A list',type:'collection'}],totalSize:1}});
+ });
+ try{
+   const plex=new Plex(server,'device');
+   await plex.detail('99','collection');
+   await plex.children('99',0,'collection');
+   await plex.detail('11','playlist');
+   await plex.children('11',0,'playlist');
+   assert.deepEqual(calls,[
+     '/prefix/library/collections/99',
+     '/prefix/library/collections/99/children',
+     '/prefix/playlists/11',
+     '/prefix/playlists/11/items'
+   ]);
+ }finally{restore();}
+});

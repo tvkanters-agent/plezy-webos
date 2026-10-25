@@ -151,13 +151,17 @@ export class Plex {
     return (data.MediaContainer.Hub || []).reduce((all, h) => all.concat(h.Metadata || []), [])
       .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem);
   }
-  async detail(itemId) {
-    // The bundled Simkl integration needs stable imdb/tmdb/tvdb identifiers,
-    // including on show detail fetched for an episode's grandparent.
-    return plexItem((await this.get('/library/metadata/' + enc(itemId), {includeGuids: 1, includeMarkers: 1, includeChapters: 1})).MediaContainer.Metadata[0]);
+  async detail(itemId, kind = '') {
+    const path = kind === 'collection' ? '/library/collections/' + enc(itemId) :
+      kind === 'playlist' ? '/playlists/' + enc(itemId) : '/library/metadata/' + enc(itemId);
+    const data = await this.get(path, {includeGuids: 1, includeMarkers: 1, includeChapters: 1});
+    return plexItem(data.MediaContainer.Metadata[0]);
   }
-  async children(itemId, start = 0) {
-    const data = (await this.get('/library/metadata/' + enc(itemId) + '/children', {
+  async children(itemId, start = 0, kind = '') {
+    const path = kind === 'collection' ? '/library/collections/' + enc(itemId) + '/children' :
+      kind === 'playlist' ? '/playlists/' + enc(itemId) + '/items' :
+      '/library/metadata/' + enc(itemId) + '/children';
+    const data = (await this.get(path, {
       'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE})).MediaContainer;
     return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
   }
