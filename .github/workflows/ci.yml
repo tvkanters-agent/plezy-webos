@@ -4,10 +4,21 @@ on:
   push:
     branches:
       - main
+    # webOS has its own focused test/build workflow. Changes only to the TV
+    # port must not trigger the unrelated upstream Flutter/native test matrix.
+    paths-ignore:
+      - 'webos/**'
+      - '.github/workflows/webos.yml'
+      - 'AGENTS.md'
   # Keep untrusted code on the read-only pull_request event. Never use pull_request_target here.
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'webos/**'
+      - '.github/workflows/webos.yml'
+      - 'AGENTS.md'
+  # All upstream checks remain available for manual verification.
   workflow_dispatch:
     inputs:
       build_linux_packages:
