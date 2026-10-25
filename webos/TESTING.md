@@ -61,3 +61,13 @@ If the TV still fails, inspect the installed app with `ares-inspect --device myT
 4. Improve Plex library discovery and playback based on those TV results before attempting advanced features such as auto-next playback or codec capability detection.
 
 Jellyfin/Emby support remains best-effort. Tests still guard the existing adapters, but Plex functionality takes priority over adding new features to them.
+
+## Simkl acceptance (Plex only)
+
+- Connect a real Simkl account through **Servers & settings → Connect Simkl** and confirm Simkl write scope is granted.
+- Start a Plex movie and verify it appears as currently watching in Simkl. Pause and verify a resumable position; stop under 80% and verify it remains resumable, then stop a different session above 80% and verify watched history.
+- Play a Plex TV episode with external show IDs and verify Simkl credits the correct season and episode rather than the episode's own TMDB/IMDb identifier.
+- Mark Plex movie/episode watched and unwatched manually, and verify Simkl history updates appropriately.
+- Reopen the application with the same Simkl session and verify token refresh still tracks playback after an expired access token; disable the network temporarily and confirm Plex playback remains usable and reports a Simkl warning.
+- Confirm disabling Simkl stops new requests. Real-device CORS, certificate, and service behavior remain to be verified.
+

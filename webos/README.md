@@ -29,6 +29,14 @@ The updated package ID is `com.tvkdevelopment.plezy`. If you installed the old p
 
 The TV must be able to reach the selected server. Browser preview and reverse proxies may require appropriate CORS headers, including support for `Content-Type`, `X-Emby-Authorization`, `X-Emby-Token` and the methods used by the API. A network/CORS/certificate failure is shown as a connection error. The app cannot distinguish these causes from a browser's fetch error alone.
 
+## Simkl playback tracking (optional)
+
+Open **Servers & settings → Connect Simkl**, then use the code shown on the TV at the Simkl verification URL on your phone. The port uses upstream Plezy's public AUTH V2 device-flow application identifier and requests `media:read media:write`. Simkl's access and refresh tokens are saved in this TV's local app storage, like the Plex token; the app does not proxy credentials. **Disconnect Simkl** clears this TV's saved Simkl session.
+
+When connected, Plex movie and episode playback sends **start**, **pause** and **stop** events with elapsed-time percentages. A stop below Simkl's default 80% watched threshold saves resumable progress; reaching that threshold marks it watched. Plex's own progress reporting continues separately. Simkl receives **no periodic heartbeats**, since its API expects events only. Explicit Plex Mark watched/unwatched actions also update Simkl history. Plex metadata must provide recognizable IMDb, TMDB or TVDB identifiers (or a matchable title and year); unknown or unmatchable items cannot be guaranteed to sync.
+
+This is a direct browser-to-Simkl integration. Successful network requests depend on the TV's TLS stack and Simkl allowing this app origin (CORS); no third-party proxy or TLS bypass is included. Real TV/Simkl account validation is still required.
+
 ## Implemented
 
 - Plex PIN linking, server discovery and manual token connection.

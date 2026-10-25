@@ -195,7 +195,12 @@ async function render() {
         if (item.resume > 0) actions.append(button('Resume · ' + time(item.resume), () => play(item, item.resume), 'primary'));
         actions.append(button(item.resume > 0 ? 'Play from beginning' : 'Play', () => play(item, 0), item.resume > 0 ? '' : 'primary'));
         actions.append(button('Compatible playback', () => play(item, item.resume, true)));
-        actions.append(button(item.watched ? 'Mark unwatched' : 'Mark watched', async () => { await api.watched(item, !item.watched); render(); }));
+        actions.append(button(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
+          const currentApi = api, watched = !item.watched;
+          await currentApi.watched(item, watched);
+          if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
+          render();
+        }));
         if (api instanceof Plex && item.type === 'episode' && item.raw.parentRatingKey) {
           actions.append(button('Next episode', async () => {
             const expectedRevision = revision, currentApi = api;
@@ -251,7 +256,7 @@ function settings() {
   const simklPanel = el('section', undefined, 'panel');
   simklPanel.append(el('h2', 'Simkl tracking'));
   if (validSession(state.simkl)) {
-    simklPanel.append(el('p', 'Connected. Plex playback is automatically tracked on Simkl when you play, pause, or stop a movie or episode. Plex resume syncing remains independent.', 'muted'));
+    simklPanel.append(el('p', 'Connected. Plex movies and episodes are tracked on Simkl automatically when playback starts, pauses, or stops. Manual watched changes also sync. Plex resume tracking remains independent.', 'muted'));
     simklPanel.append(button('Disconnect Simkl', () => {
       state.simkl = null; persist(); render();
     }));

@@ -115,3 +115,21 @@ test('Simkl duplicate stop is accepted and a never-started item is ignored',asyn
     assert.deepEqual(calls,['/scrobble/start','/scrobble/stop']);
   }finally{restore();}
 });
+
+test('Simkl manual watched and unwatched changes use movie/episode history endpoints',async()=>{
+  const calls=[];const session=saved();
+  const restore=mock(async(url,opts)=>{calls.push({path:new URL(url).pathname,body:JSON.parse(opts.body)});return respond({});});
+  try{
+    const tracker=new SimklTracker(()=>session,()=>{});
+    const api={server:{kind:'plex'},detail:async()=>({raw:{title:'Show',Guid:[{id:'tvdb://135'}]}})};
+    await tracker.markWatched(api,movie,true);
+    await tracker.markWatched(api,{type:'episode',raw:{
+      parentIndex:1,index:2,grandparentRatingKey:'show',grandparentTitle:'Show'}},false);
+    assert.equal(calls[0].path,'/sync/history');
+    assert.equal(calls[0].body.movies[0].ids.imdb,'tt1234567');
+    assert.equal(calls[1].path,'/sync/history/remove');
+    assert.equal(calls[1].body.shows[0].ids.tvdb,135);
+    assert.equal(calls[1].body.shows[0].seasons[0].number,1);
+    assert.equal(calls[1].body.shows[0].seasons[0].episodes[0].number,2);
+  }finally{restore();}
+});

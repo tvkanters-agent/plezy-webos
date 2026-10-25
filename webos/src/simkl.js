@@ -113,8 +113,9 @@ export function scrobblePayload(item, show) {
     if (raw.year) media.year = Number(raw.year);
     return media.title || Object.keys(media.ids).length ? {movie: media} : null;
   }
-  if (item.type !== 'episode' || !Number.isInteger(Number(raw.parentIndex)) ||
-      !Number.isInteger(Number(raw.index)) || Number(raw.index) < 1) return null;
+  if (item.type !== 'episode' || raw.parentIndex == null || raw.index == null ||
+      !Number.isInteger(Number(raw.parentIndex)) || !Number.isInteger(Number(raw.index)) ||
+      Number(raw.parentIndex) < 0 || Number(raw.index) < 1) return null;
   const series = show?.raw || show || {};
   const media = {title: series.title || raw.grandparentTitle, ids: simklMovieIds(series)};
   if (series.year) media.year = Number(series.year);
@@ -139,15 +140,16 @@ export class SimklTracker {
     this.lastWrite = 0;
     this.holdUntil = 0;
   }
+  async itemPayload(api, item) {
+    let show = null;
+    if (item.type === 'episode' && item.raw?.grandparentRatingKey) {
+      show = await api.detail(item.raw.grandparentRatingKey);
+    }
+    return scrobblePayload(item, show);
+  }
   createPlayback(api, item) {
     if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return null;
-    const context = (async () => {
-      let show = null;
-      if (item.type === 'episode' && item.raw?.grandparentRatingKey) {
-        show = await api.detail(item.raw.grandparentRatingKey);
-      }
-      return scrobblePayload(item, show);
-    })();
+    const context = this.itemPayload(api, item);
     // A failure to look up Plex show identifiers must not interrupt playback.
     context.catch(() => {});
     let lastAction = null, stopped = false;
@@ -171,6 +173,24 @@ export class SimklTracker {
       }
     };
   }
+  // Explicit Plex mark watched/unwatched also syncs to Simkl, even if the
+  // movie/episode was never opened in the player.
+  markWatched(api, item, watched) {
+    if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return Promise.resolve();
+    const context = this.itemPayload(api, item);
+    context.catch(() => {});
+    this.queue = this.queue.catch(() => {}).then(async () => {
+      if (!validSession(this.getSession())) return;
+      const payload = await context;
+      if (!payload) return;
+      const body = payload.movie ? {movies: [payload.movie]} : {
+        shows: [{...payload.show, seasons: [{number: payload.episode.season,
+          episodes: [{number: payload.episode.number}]}]}]
+      };
+      return this.post('/sync/history' + (watched ? '' : '/remove'), body);
+    }).catch(error => this.onError(error.message));
+    return this.queue;
+  }
   async refresh() {
     if (!this.refreshTask) {
       this.refreshTask = (async () => {
@@ -190,13 +210,16 @@ export class SimklTracker {
     return this.refreshTask;
   }
   async scrobble(action, body) {
+    return this.post('/scrobble/' + action, body, action === 'stop');
+  }
+  async post(path, body, allowConflict = false) {
     if (!validSession(this.getSession())) return;
     const waiting = Math.max(this.lastWrite + WRITE_GAP_MS, this.holdUntil) - Date.now();
     if (waiting > 0) await new Promise(resolve => setTimeout(resolve, waiting));
     let current = this.getSession();
     if (!validSession(current)) return;
     if (current.expiresAt < Date.now() + 60000) current = await this.refresh();
-    const post = token => send('/scrobble/' + action, {body, token});
+    const post = token => send(path, {body, token});
     this.lastWrite = Date.now();
     let result = await post(current.accessToken);
     if (result.status === 401) {
@@ -206,7 +229,7 @@ export class SimklTracker {
       this.lastWrite = Date.now();
       result = await post(current.accessToken);
     }
-    if (result.status === 409 && action === 'stop') return;
+    if (result.status === 409 && allowConflict) return;
     if (result.status === 429 || result.status === 412 ||
         (result.status === 400 && result.data?.error === 'RATE_LIMIT')) {
       this.holdUntil = Date.now() + (result.status === 412 ? 300000 : result.status === 400 ? 5000 : 2000);
