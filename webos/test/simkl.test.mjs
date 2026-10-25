@@ -33,7 +33,9 @@ test('Simkl V2 device link requests write access and polls using JSON',async()=>
     assert.equal(JSON.parse(calls[1].opts.body).client_id,SIMKL_CLIENT_ID);
     assert.equal(calls[0].opts.headers['Content-Type'],'application/json');
     assert.equal(calls[1].opts.headers['Content-Type'],'application/json');
-    assert.equal(calls[0].opts.headers['simkl-api-key'],SIMKL_CLIENT_ID);
+    // Match upstream SimklConstants.oauthHeaders: OAuth grants have no API key header.
+    assert.equal(calls[0].opts.headers['simkl-api-key'],undefined);
+    assert.equal(calls[1].opts.headers['simkl-api-key'],undefined);
   }finally{restore();}
 });
 test('Simkl device flow treats pending and slow down as nonterminal but rejects read-only tokens',async()=>{
