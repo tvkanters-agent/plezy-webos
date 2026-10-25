@@ -123,3 +123,7 @@ Upstream native platforms are unchanged. Future upstream merges can use normal f
 ## License
 
 GPL-3.0, as in the repository's [LICENSE](../LICENSE). Plezy and its original assets are the work of upstream contributors. This is an independent community port, not an official LG, Plex, Jellyfin or Emby product. The test WebM is a generated black frame video, not copyrighted movie content.
+
+### Failed Simkl updates
+
+Final stop events are saved with the linked Simkl session before delivery (up to 50). Failed stops survive app restarts and retry on the next real playback action, or through **Retry saved Simkl stops** in settings. Simkl cooldowns are saved too; retrying during a quota hold sends no traffic. Disconnecting Simkl clears its queue. An explicit watched/unwatched change overrides a queued stop for the same title. No periodic scrobble heartbeat or retry loop is used. Force-closing the app before it can record a stop, or unavailable TV storage, can still lose progress.

@@ -54,3 +54,14 @@ test('failed audio restart still stops the existing Simkl viewing',async({page})
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
   expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
 });
+test('failed Simkl stop is saved and can be retried from settings',async({page})=>{
+  await setup(page);let succeed=false,attempts=0;
+  await page.route('https://api.simkl.com/scrobble/stop**',route=>{attempts++;return route.fulfill({status:succeed?200:503,json:{}});});
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect.poll(()=>attempts).toBe(1);
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(1);
+  await page.getByRole('button',{name:'Servers & settings',exact:true}).click();succeed=true;
+  await page.getByRole('button',{name:'Retry saved Simkl stops (1)',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(0);
+  expect(attempts).toBe(2);
+});

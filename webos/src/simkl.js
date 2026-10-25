@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Simkl device authorization and event-only scrobbling, adapted from Plezy's
 // SimklAuthService / SimklClient / SimklTracker.
-import {VERSION} from './core.js';
+import {VERSION, id} from './core.js';
 
 export const SIMKL_CLIENT_ID = 'ec68bc6a9d04b3c50af8cc495f9c9bf478c2371b979aed7e3385bdb771b9b18d';
 const BASE = 'https://api.simkl.com';
@@ -39,7 +39,7 @@ async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
     const text = await response.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) { /* Status still determines failure. */ }
-    return {status: response.status, data};
+    return {status: response.status, data, retryAfter: response.headers.get('Retry-After')};
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('Simkl request cancelled or timed out.');
     throw new Error('Simkl is unreachable from this TV. Check the network, TLS certificate and CORS support.');
@@ -60,7 +60,7 @@ export function parseSession(response, previous) {
   const expires = Number(response.expires_in);
   if (!Number.isFinite(expires) || expires <= 0) throw new Error('Simkl returned an invalid token lifetime.');
   return {accessToken: response.access_token, refreshToken, expiresAt: Date.now() + expires * 1000,
-    scope: response.scope || previous?.scope};
+    scope: response.scope || previous?.scope, pendingStops: previous?.pendingStops || [], retryNotBefore: previous?.retryNotBefore || 0};
 }
 export function validSession(session) {
   return !!(session && typeof session.accessToken === 'string' &&
@@ -139,13 +139,14 @@ export class SimklTracker {
     this.queue = Promise.resolve();
     this.refreshTask = null;
     this.lastWrite = 0;
-    this.holdUntil = 0;
+    this.holdUntil = Number(this.getSession()?.retryNotBefore) || 0;
     this.epoch = 0;
   }
   reset() {
     // Pending writes from a disconnected account must never be sent using
     // credentials for a different account linked on the same TV.
     ++this.epoch;
+    this.holdUntil = 0; this.lastWrite = 0;
   }
   async itemPayload(api, item) {
     let show = null;
@@ -160,21 +161,28 @@ export class SimklTracker {
     // A failure to look up Plex show identifiers must not interrupt playback.
     context.catch(() => {});
     let lastAction = null, stopped = false;
+    const stopId = id();
     return {
       event: (action, position, duration, ended = false) => {
         if (stopped || !['start', 'pause', 'stop'].includes(action)) return Promise.resolve();
         if (action === 'pause' && lastAction !== 'start') return Promise.resolve();
         if (action === 'start' && lastAction === 'start') return Promise.resolve();
         if (action === 'stop' && lastAction === null) { stopped = true; return Promise.resolve(); }
-        if (action === 'stop') stopped = true;
-        lastAction = action;
         const percent = progressPercent(position, duration, ended);
         if (percent === null) return Promise.resolve();
+        if (action === 'stop') stopped = true;
+        lastAction = action;
         this.queue = this.queue.catch(() => {}).then(async () => {
           if (this.epoch !== epoch || !validSession(this.getSession())) return;
           const payload = await context;
           if (!payload || this.epoch !== epoch) return;
-          await this.scrobble(action, {...payload, progress: percent}, epoch);
+          const body = {...payload, progress: percent};
+          // Persist a final stop before attempting delivery. Retry only on a
+          // subsequent user action (or explicit Retry), never a heartbeat.
+          if (action === 'stop') this.saveStop(stopId, body, epoch);
+          else await this.retryPendingStops(epoch, 1);
+          await this.scrobble(action, body, epoch);
+          if (action === 'stop') this.removeStop(stopId, epoch);
         }).catch(error => this.onError(error.message));
         return this.queue;
       }
@@ -190,12 +198,48 @@ export class SimklTracker {
       if (this.epoch !== epoch || !validSession(this.getSession())) return;
       const payload = await context;
       if (!payload || this.epoch !== epoch) return;
+      // A manual watch-state decision supersedes a queued playback stop for
+      // this same title (especially Mark unwatched after a failed watched stop).
+      this.setSession({...this.getSession(), pendingStops: this.pendingStops().filter(entry => {
+        const {progress, ...media} = entry.body;
+        return JSON.stringify(media) !== JSON.stringify(payload);
+      })});
       const body = payload.movie ? {movies: [payload.movie]} : {
         shows: [{...payload.show, seasons: [{number: payload.episode.season,
           episodes: [{number: payload.episode.number}]}]}]
       };
       return this.post('/sync/history' + (watched ? '' : '/remove'), body, false, epoch);
     }).catch(error => this.onError(error.message));
+    return this.queue;
+  }
+  pendingStops() {
+    const pending = this.getSession()?.pendingStops;
+    return Array.isArray(pending) ? pending.filter(entry => entry && typeof entry.id === 'string'
+      && entry.body && Number.isFinite(entry.body.progress)
+      && (entry.body.movie || (entry.body.show && entry.body.episode))).slice(-50) : [];
+  }
+  saveStop(stopId, body, epoch) {
+    if (epoch !== this.epoch || !validSession(this.getSession())) return;
+    const pending = this.pendingStops().filter(entry => entry.id !== stopId);
+    if (pending.length >= 50) throw new Error('Simkl has 50 unsent stops. Use Retry saved updates in settings.');
+    this.setSession({...this.getSession(), pendingStops: pending.concat({id: stopId, body})});
+  }
+  removeStop(stopId, epoch) {
+    if (epoch === this.epoch && validSession(this.getSession())) {
+      this.setSession({...this.getSession(), pendingStops: this.pendingStops().filter(entry => entry.id !== stopId)});
+    }
+  }
+  async retryPendingStops(epoch = this.epoch, limit = 50) {
+    for (const entry of this.pendingStops().slice(0, limit)) {
+      if (epoch !== this.epoch || !validSession(this.getSession())) return;
+      await this.scrobble('stop', entry.body, epoch);
+      this.removeStop(entry.id, epoch);
+    }
+  }
+  retryPending() {
+    const epoch = this.epoch;
+    this.queue = this.queue.catch(() => {}).then(() => this.retryPendingStops(epoch))
+      .catch(error => this.onError(error.message));
     return this.queue;
   }
   async refresh() {
@@ -211,6 +255,8 @@ export class SimklTracker {
           throw new Error('Simkl token refresh failed (HTTP ' + res.status + ').');
         }
         const session = parseSession(res.data, existing);
+        session.pendingStops = this.pendingStops();
+        session.retryNotBefore = this.holdUntil;
         this.setSession(session);
         return session;
       })().finally(() => { this.refreshTask = null; });
@@ -222,7 +268,9 @@ export class SimklTracker {
   }
   async post(path, body, allowConflict = false, epoch = this.epoch) {
     if (epoch !== this.epoch || !validSession(this.getSession())) return;
-    const waiting = Math.max(this.lastWrite + WRITE_GAP_MS, this.holdUntil) - Date.now();
+    // Do not leave every later playback event waiting behind a daily quota.
+    if (this.holdUntil > Date.now()) throw new Error('Simkl updates are on hold. Saved stops can be retried later.');
+    const waiting = this.lastWrite + WRITE_GAP_MS - Date.now();
     if (waiting > 0) await new Promise(resolve => setTimeout(resolve, waiting));
     if (epoch !== this.epoch) return;
     let current = this.getSession();
@@ -232,18 +280,33 @@ export class SimklTracker {
     const post = token => send(path, {body, token});
     this.lastWrite = Date.now();
     let result = await post(current.accessToken);
+    if (epoch !== this.epoch) return;
     if (result.status === 401) {
       // Refresh once and replay only with a valid new token.
       current = this.getSession()?.accessToken !== current.accessToken ? this.getSession() : await this.refresh();
       if (epoch !== this.epoch || !validSession(current)) return;
+      const delay = this.lastWrite + WRITE_GAP_MS - Date.now();
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+      if (epoch !== this.epoch) return;
       this.lastWrite = Date.now();
       result = await post(current.accessToken);
+      if (epoch !== this.epoch) return;
     }
     if (result.status === 409 && allowConflict) return;
     if (result.status === 429 || result.status === 412 ||
         (result.status === 400 && result.data?.error === 'RATE_LIMIT')) {
-      this.holdUntil = Date.now() + (result.status === 412 ? 300000 : result.status === 400 ? 5000 : 2000);
-      throw new Error('Simkl is rate limiting playback updates; later events will retry.');
+      const code = result.data?.error;
+      const quota = ['user_limit_exceeded', 'app_limit_exceeded'].includes(code);
+      let hold = result.status === 412 ? 300000 : result.status === 400 ? 5000
+        : code === 'rate_limit' ? 2000 : quota ? 3600000 : 60000;
+      if (result.status === 429 && code !== 'rate_limit' && result.retryAfter) {
+        const delay = /^\d+$/.test(result.retryAfter) ? Number(result.retryAfter) * 1000
+          : Date.parse(result.retryAfter) - Date.now();
+        if (Number.isFinite(delay) && delay > 0) hold = Math.max(hold, delay);
+      }
+      this.holdUntil = Date.now() + hold;
+      this.setSession({...this.getSession(), retryNotBefore: this.holdUntil});
+      throw new Error('Simkl rate limited this update. Final stops are saved for the next action or Retry in settings.');
     }
     if (result.status < 200 || result.status >= 300) throw new Error('Simkl playback tracking failed (HTTP ' + result.status + ').');
   }

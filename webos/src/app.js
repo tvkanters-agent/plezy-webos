@@ -257,6 +257,11 @@ function settings() {
   simklPanel.append(el('h2', 'Simkl tracking'));
   if (validSession(state.simkl)) {
     simklPanel.append(el('p', 'Connected. Plex movies and episodes are tracked on Simkl automatically when playback starts, pauses, or stops. Manual watched changes also sync. Plex resume tracking remains independent.', 'muted'));
+    const pendingStops = simklTracker.pendingStops().length;
+    if (pendingStops) simklPanel.append(button('Retry saved Simkl stops (' + pendingStops + ')', async () => {
+      await simklTracker.retryPending();
+      if (route.type === 'settings') render();
+    }));
     simklPanel.append(button('Disconnect Simkl', () => {
       simklTracker.reset();
       state.simkl = null; persist(); render();

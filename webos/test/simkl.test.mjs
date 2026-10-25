@@ -170,3 +170,54 @@ test('Simkl refresh cannot restore a disconnected or relinked account',async()=>
     assert.notEqual(session.accessToken,original.accessToken);
   }finally{restore();}
 });
+
+test('Simkl preserves failed final stops across reload and retries on the next user event',async()=>{
+  let session=saved(),failStop=true;const calls=[];
+  const restore=mock(async(url,opts)=>{
+    const path=new URL(url).pathname;calls.push(path);
+    return respond({},path==='/scrobble/stop'&&failStop?503:200);
+  });
+  try{
+    let tracker=new SimklTracker(()=>session,value=>{session=value;});
+    const playing=tracker.createPlayback({server:{kind:'plex'}},movie);
+    await playing.event('start',0,100);tracker.lastWrite=0;
+    await playing.event('stop',90,100);
+    assert.equal(session.pendingStops.length,1);assert.equal(session.pendingStops[0].body.progress,90);
+    failStop=false;
+    tracker=new SimklTracker(()=>session,value=>{session=value;});
+    await tracker.createPlayback({server:{kind:'plex'}},movie).event('start',0,100);
+    assert.deepEqual(calls,['/scrobble/start','/scrobble/stop','/scrobble/stop','/scrobble/start']);
+    assert.deepEqual(session.pendingStops,[]);
+  }finally{restore();}
+});
+test('Simkl unknown duration does not suppress a later valid start',async()=>{
+  let session=saved();const calls=[];
+  const restore=mock(async(url)=>{calls.push(new URL(url).pathname);return respond({});});
+  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});const play=tracker.createPlayback({server:{kind:'plex'}},movie);
+    await play.event('start',0,0);await play.event('start',1,100);assert.deepEqual(calls,['/scrobble/start']);
+  }finally{restore();}
+});
+test('Simkl daily quota keeps final stops without hammering the API',async()=>{
+  let session=saved();let calls=0;
+  const restore=mock(async()=>{calls++;return new Response(JSON.stringify({error:'user_limit_exceeded'}),{status:429,headers:{'Retry-After':'7200'}});});
+  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});const play=tracker.createPlayback({server:{kind:'plex'}},movie);
+    await play.event('start',0,100);await play.event('stop',90,100);await tracker.retryPending();
+    assert.equal(calls,1);assert.equal(session.pendingStops.length,1);assert.ok(tracker.holdUntil>Date.now()+7190000);
+    const reloaded=new SimklTracker(()=>session,value=>{session=value;});await reloaded.retryPending();assert.equal(calls,1);
+  }finally{restore();}
+});
+test('Simkl ignores a rate-limit response from a disconnected account',async()=>{
+  let session=saved(),complete;
+  const restore=mock(async()=>new Promise(resolve=>{complete=resolve;}));
+  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});const pending=tracker.scrobble('start',{});
+    await new Promise(resolve=>setTimeout(resolve,0));tracker.reset();session=saved({accessToken:'simkl_at_other'});
+    complete(respond({error:'user_limit_exceeded'},429));await pending;assert.equal(tracker.holdUntil,0);
+  }finally{restore();}
+});
+test('Simkl manual unwatched action supersedes a saved stop for that title',async()=>{
+  let session=saved({pendingStops:[{id:'old',body:{...scrobblePayload(movie),progress:90}}]});
+  const calls=[];const restore=mock(async(url)=>{calls.push(new URL(url).pathname);return respond({});});
+  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});await tracker.markWatched({server:{kind:'plex'}},movie,false);
+    assert.deepEqual(session.pendingStops,[]);assert.deepEqual(calls,['/sync/history/remove']);
+  }finally{restore();}
+});
