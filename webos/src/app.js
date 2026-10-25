@@ -193,7 +193,11 @@ async function render() {
         actions.append(button(item.watched ? 'Mark unwatched' : 'Mark watched', async () => { await api.watched(item, !item.watched); render(); }));
         if (api instanceof Plex && item.type === 'episode' && item.raw.parentRatingKey) {
           actions.append(button('Next episode', async () => {
-            const next = await api.nextEpisode(item);
+            const expectedRevision = revision, currentApi = api;
+            const next = await currentApi.nextEpisode(item);
+            // A network request must not take us away from a screen that the
+            // viewer has already left with Back or a different menu action.
+            if (expectedRevision !== revision || currentApi !== api) return;
             if (next) go({type: 'detail', id: next.id});
             else notify('No further episodes are available for this show.');
           }));
