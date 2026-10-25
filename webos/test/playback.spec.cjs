@@ -37,7 +37,7 @@ test('Back during delayed stream cleanup cannot resurrect playback',async({page}
     await route.fulfill({json:{}});
   });
   await page.getByRole('button',{name:'Playback settings'}).click();
-  await page.getByRole('button',{name:'Compatible playback',exact:true}).click();
+  await page.locator('.player-sheet').getByRole('button',{name:'Compatible playback',exact:true}).click();
   await expect.poll(()=>!!release).toBe(true);
   await page.keyboard.press('Escape'); release();
   await expect(page.locator('#player')).toBeHidden();
@@ -101,7 +101,7 @@ test('selected Plex version survives compatible playback restart',async({page})=
 test('player chrome has upstream-style compact transport controls and timeline',async({page})=>{
   await setup(page);
   await expect(page.locator('.timeline-row progress')).toBeVisible();
-  await expect(page.locator('.transport-icon')).toHaveCount(4);
+  await expect(page.locator('.player-buttons .transport-icon')).toHaveCount(4);
   await expect(page.getByRole('button',{name:'−10 seconds',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();
@@ -141,7 +141,7 @@ test('video settings use a Plezy-style side sheet rather than browser dropdown t
   await expect(page.locator('.player-sheet')).toBeHidden();
   await page.getByRole('button',{name:'Playback settings'}).click();
   await expect(page.locator('.player-sheet')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Compatible playback'})).toBeVisible();
+  await expect(page.locator('.player-sheet').getByRole('button',{name:'Compatible playback'})).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.player-sheet')).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
