@@ -221,7 +221,7 @@ function settings() {
     state.quality = state.quality === 'auto' ? 'transcode' : 'auto'; persist(); render();
   }));
   panel.append(el('p', 'Automatic plays compatible MP4 files directly. Other formats use server transcoding. Compatible playback requires permission to transcode on your server.', 'muted'));
-  main.append(panel, el('p', 'Community port · 0.1.0 alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
+  main.append(panel, el('p', 'Community port · 0.1.1 alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
 }
 function field(form, text, type = 'text', value = '') {
   const label = el('label', text), input = el('input'); input.type = type; input.value = value; input.autocomplete = type === 'password' ? 'current-password' : 'off';

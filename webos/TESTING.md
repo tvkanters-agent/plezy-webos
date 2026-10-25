@@ -1,11 +1,11 @@
 # webOS alpha validation
 
-Validated locally on 2026-10-25. Source targets Chromium 79 (webOS 6); browser automation ran with Playwright Chromium 134 on Linux. No LG television, simulator, real Plex account or live media server was available.
+The original 0.1.0 alpha was validated locally on 2026-10-25 with Chromium 134 (targeting the Chromium 79 engine in webOS 6). The 0.1.1 source expands test coverage to 23 unit and 18 Playwright browser tests; check the latest [webOS TV CI workflow](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for results. Neither round validates physical LG hardware, live server authentication or the native video decoder.
 
 | Check | Result |
 | --- | --- |
-| Protocol/core unit tests | 16 passed |
-| Browser integration tests | 12 passed |
+| Protocol/core unit tests | 16 baseline passed; 23 tests defined in current source |
+| Browser integration tests | 12 baseline passed; 18 tests defined in current source |
 | Chromium 79-targeted JavaScript bundle | Built successfully |
 | Official `ares-package --no-minify` IPK | Built successfully |
 | 1920×1080 welcome screen | Screenshot visually inspected |
@@ -45,7 +45,7 @@ npm run package
 
 For proxy-configured development machines, exclude `127.0.0.1,localhost` from the HTTP proxy when running the local browser suite. No proxy is required by the app itself.
 
-The checked-in IPK is generated from `src/` and `public/` with these scripts. Verify its SHA-256 against `releases/SHA256SUMS`. Repackaging may change archive timestamps, so checksum equality across independent builds is not promised.
+The legacy 0.1.0 IPK checked into `releases/` predates these fixes. Build the 0.1.1 IPK from `src/` and `public/` with these scripts or use the latest successful CI artifact. Verify its SHA-256 against `releases/SHA256SUMS`. Repackaging may change archive timestamps, so checksum equality across independent builds is not promised.
 
 ## Device startup diagnostics (ChatGPT Chat)
 
