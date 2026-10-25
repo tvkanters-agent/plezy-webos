@@ -14,7 +14,7 @@
       <nav id="nav"></nav>
       <div class="sidebar-footer">Your media.<br>Your screen.</div>
     </aside>
-    <main id="main" tabindex="-1"></main>
+    <main id="main" tabindex="-1"><h1>Starting Plezy…</h1><p class="muted">Initializing the TV app.</p></main>
   </div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <section id="player" aria-label="Video player" hidden>
@@ -38,6 +38,33 @@
     </div>
   </section>
   <section id="dialog" role="dialog" aria-modal="true" aria-label="Confirm exit" hidden></section>
-  <script src="app.js" defer></script>
+  <script>
+    // Keep startup failures visible when the bundled application cannot run.
+    window.addEventListener('error', function (event) {
+      var main = document.getElementById('main');
+      if (!main || document.querySelector('#nav button')) return;
+      main.textContent = '';
+      var heading = document.createElement('h1');
+      heading.textContent = 'Plezy could not start';
+      var message = document.createElement('p');
+      message.className = 'error';
+      message.textContent = event.message || 'Application script failed to load.';
+      main.appendChild(heading);
+      main.appendChild(message);
+    });
+    window.addEventListener('unhandledrejection', function (event) {
+      var main = document.getElementById('main');
+      if (!main || document.querySelector('#nav button')) return;
+      main.textContent = '';
+      var heading = document.createElement('h1');
+      heading.textContent = 'Plezy could not start';
+      var message = document.createElement('p');
+      message.className = 'error';
+      message.textContent = (event.reason && event.reason.message) || 'An unexpected startup error occurred.';
+      main.appendChild(heading);
+      main.appendChild(message);
+    });
+  </script>
+  <script src="app.js" defer onerror="document.getElementById('main').textContent = 'Plezy could not load its application script. Reinstall the package.'"></script>
 </body>
 </html>
