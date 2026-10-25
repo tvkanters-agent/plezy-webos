@@ -309,7 +309,19 @@ async function plexSignIn() {
         const servers = await plexServers(state.deviceId, result.authToken, controller.signal); if (controller.signal.aborted) return;
         if (!servers.length) throw new Error('Signed in, but no server is reachable from this TV. Check server remote access, or use Manual Plex server.');
         servers.forEach(server => { state.servers = state.servers.filter(s => s.id !== server.id).concat(server); });
-        state.active = servers[0].id; persist(); setClient(); history = []; go({type: 'home'}, false); return;
+        persist();
+        if (servers.length === 1) {
+          state.active = servers[0].id; persist(); setClient(); history = []; go({type: 'home'}, false); return;
+        }
+        // An account can have multiple owned/shared Plex servers. Let viewers
+        // choose instead of silently opening whichever resource was listed first.
+        code.remove();
+        status.textContent = 'Choose a Plex server to browse:';
+        const choices = el('div', undefined, 'actions');
+        servers.forEach(server => choices.append(button(server.name, () => {
+          state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
+        })));
+        main.append(choices); focusFirst(choices); return;
       }
     }
     if (!controller.signal.aborted) throw new Error('The code expired. Please request a new one.');

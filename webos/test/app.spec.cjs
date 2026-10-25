@@ -212,3 +212,33 @@ test('Plex returning to the home shelf restores the activated poster focus',asyn
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button',{name:'Plex Film',exact:true})).toBeFocused();
 });
+
+test('Plex PIN login offers a choice when multiple servers are reachable',async({page})=>{
+  await page.route('https://plex.tv/**',route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    if(pathname==='/api/v2/pins')return route.fulfill({json:{id:42,code:'ABCD',expiresIn:300}});
+    if(pathname==='/api/v2/pins/42')return route.fulfill({json:{authToken:'account-secret'}});
+    if(pathname==='/api/v2/resources')return route.fulfill({json:[
+      {provides:'server',clientIdentifier:'first',name:'Living Room Plex',accessToken:'token-one',
+        connections:[{uri:'http://plex-first.test',protocol:'http',local:true}]},
+      {provides:'server',clientIdentifier:'second',name:'Media Plex',accessToken:'token-two',
+        connections:[{uri:'http://plex-second.test',protocol:'http',local:true}]}
+    ]});
+    return route.fulfill({status:404});
+  });
+  for(const host of ['plex-first.test','plex-second.test']){
+    await page.route('http://'+host+'/**',route=>{
+      const pathname=new URL(route.request().url()).pathname;
+      return route.fulfill({json:pathname==='/' ? {MediaContainer:{machineIdentifier:host}} : {MediaContainer:{Hub:[]}}});
+    });
+  }
+  await page.goto('/');
+  await page.getByRole('button',{name:'Sign in with Plex'}).click();
+  await expect(page.getByRole('button',{name:'Media Plex'})).toBeVisible({timeout:12000});
+  await page.getByRole('button',{name:'Media Plex'}).click();
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  const saved=JSON.parse(await page.evaluate(()=>localStorage.getItem('plezy.webos')));
+  expect(saved.servers).toHaveLength(2);
+  expect(saved.active).toBe('second');
+  expect(saved.servers.find(s=>s.id==='second').token).toBe('token-two');
+});

@@ -21,7 +21,7 @@ The updated package ID is `com.tvkdevelopment.plezy`. If you installed the old p
 
 ## Connect
 
-- **Plex:** choose **Sign in with Plex**, visit `https://plex.tv/link` on another device, and enter the TV's code. The app discovers accessible servers and tries their advertised connections. Alternatively, enter a server URL and a Plex token under **Manual Plex server**.
+- **Plex:** choose **Sign in with Plex**, visit `https://plex.tv/link` on another device, and enter the TV's code. The app discovers accessible servers and tries their advertised connections. If several servers are reachable, choose which one to open. Alternatively, enter a server URL and a Plex token under **Manual Plex server**.
 - **Jellyfin / Emby:** enter the full server URL, username and password. Reverse-proxy path prefixes such as `https://example.net/jellyfin` are supported. Emby URLs should include the API base path if your deployment requires it.
 - Use **Servers & settings** to switch between saved servers or remove one. Browsing/search applies to the currently selected server.
 - Tokens are stored in the app's local storage. Passwords are never saved. Removing a server clears its local token; it does not revoke the session on the server. For revocation, use the server's device/session management.
