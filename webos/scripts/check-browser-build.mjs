@@ -17,12 +17,16 @@ if (!html.includes('<script src="app.js" defer')) {
 if (!script.includes('(() => {') && !script.includes('(()=>{') && !script.includes('(function()')) {
   throw new Error('Expected an IIFE bundle; refusing to package possibly unbundled modules.');
 }
-if (/^(?:\\s*)(?:import\\s*[{*]|export\\s+(?:\\{|\\*|default|class|function|const))/m.test(script)) {
-  throw new Error('ES module syntax found in classic TV bundle.');
-}
 try {
+  // Parse the packaged bundle and EVERY inline bootstrap script in the exact
+  // HTML we ship; a malformed diagnostic script is still a boot failure.
   new Script(script, {filename: 'dist/app.js'});
+  const inlineScripts = [...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi)];
+  if (!inlineScripts.length) throw new Error('No inline startup diagnostic script found.');
+  for (const [index, match] of inlineScripts.entries()) {
+    new Script(match[1], {filename: 'dist/index.html:inline:' + (index + 1)});
+  }
 } catch (error) {
-  throw new Error('Bundled classic script could not be parsed: ' + error.message);
+  throw new Error('Packaged JavaScript could not be parsed: ' + error.message);
 }
 console.log('Verified ' + appinfo.id + ' ' + appinfo.version + ': classic IIFE bundle (' + script.length + ' bytes).');

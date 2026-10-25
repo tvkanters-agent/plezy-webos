@@ -59,12 +59,15 @@
       window.addEventListener('error', function (event) {
         var message = event.message || 'Application script failed to load.';
         var filename = event.filename ? event.filename.split('/').pop().split('?')[0] : '';
-        if (filename) message += '\\nScript: ' + filename +
+        if (filename) message += String.fromCharCode(10) + 'Script: ' + filename +
           (event.lineno ? ' line ' + event.lineno : '') +
           (event.colno ? ', column ' + event.colno : '');
         var agent = navigator.userAgent || '';
-        var chrome = /(?:Chrome|Chromium)\\/(\\d+)/.exec(agent);
-        if (chrome) message += '\\nTV browser engine: Chromium ' + chrome[1];
+        var enginePosition = agent.indexOf('Chrome/');
+        if (enginePosition !== -1) {
+          var major = parseInt(agent.substring(enginePosition + 7), 10);
+          if (major > 0) message += String.fromCharCode(10) + 'TV browser engine: Chromium ' + major;
+        }
         bootError(message);
       });
       window.addEventListener('unhandledrejection', function (event) {
