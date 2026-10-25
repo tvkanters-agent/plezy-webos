@@ -104,3 +104,7 @@ Test the exact `POST /oauth2/device` request shape (bare OAuth URL and URL-encod
 - Confirm progress does not freeze the TV when opening a 100+ poster library, and the final card is not clipped in horizontal shelves.
 - Confirm player audio, subtitle, chapter and quality controls open small custom sheets; Back dismisses a sheet before leaving playback.
 - Confirm Simkl title matching now works for Plex media with externally matched IDs, and 404 id_err only suppresses the unmatched title rather than disabling all Simkl tracking.
+
+## Upstream-first Simkl parity
+
+The webOS Simkl adapter now uses the body produced by `lib/services/trackers/simkl/simkl_tracker.dart`: movies `{progress,movie:{ids}}`, episodes `{progress,show:{ids},episode:{season,number}}`; absent external IDs are skipped. It does not query Simkl's catalog or invent matches from titles. Tests assert whole payload equality, ID resolution from Plex show metadata, no write for absent IDs, and no extra request following HTTP 404. Browser OAuth transport remains JSON as a webOS-specific accommodation based on the TV's observed rejection of URL-encoded requests, although native Plezy's Dart HTTP adapter uses form fields. This is an explicitly documented platform difference, not a change to the OAuth field names or grant flow.

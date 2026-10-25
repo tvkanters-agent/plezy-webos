@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Simkl device authorization and event-only scrobbling, adapted from Plezy's
-// SimklAuthService / SimklClient / SimklTracker.
+// Browser translation of upstream lib/services/trackers/simkl/{simkl_auth_service,
+// simkl_client,simkl_tracker}.dart. Preserve the upstream ID-only request
+// bodies, endpoint behavior and event model. Do not implement catalog guessing.
 import {VERSION, id} from './core.js';
 
 export const SIMKL_CLIENT_ID = 'ec68bc6a9d04b3c50af8cc495f9c9bf478c2371b979aed7e3385bdb771b9b18d';
 const BASE = 'https://api.simkl.com';
 const SCOPE = 'media:read media:write';
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
-const WRITE_GAP_MS = 1100;
+const WRITE_GAP_MS = 1000;
 
 function endpoint(path) {
   const url = new URL(path, BASE);
@@ -126,21 +127,21 @@ export function simklMovieIds(raw) {
   return ids;
 }
 export function scrobblePayload(item, show) {
+  // Same _scrobbleBody shape as SimklTracker._scrobbleBody in upstream Plezy.
+  // Never send a title/year to Simkl as substitute identifiers.
   const raw = item?.raw;
   if (!raw) return null;
   if (item.type === 'movie') {
-    const media = {title: item.title || raw.title, ids: simklMovieIds(raw)};
-    if (raw.year) media.year = Number(raw.year);
-    return media.title || Object.keys(media.ids).length ? {movie: media} : null;
+    const ids = simklMovieIds(raw);
+    return Object.keys(ids).length ? {movie: {ids}} : null;
   }
   if (item.type !== 'episode' || raw.parentIndex == null || raw.index == null ||
       !Number.isInteger(Number(raw.parentIndex)) || !Number.isInteger(Number(raw.index)) ||
       Number(raw.parentIndex) < 0 || Number(raw.index) < 1) return null;
   const series = show?.raw || show || {};
-  const media = {title: series.title || raw.grandparentTitle, ids: simklMovieIds(series)};
-  if (series.year || raw.grandparentYear) media.year = Number(series.year || raw.grandparentYear);
-  if (!media.title && !Object.keys(media.ids).length) return null;
-  return {show: media, episode: {season: Number(raw.parentIndex), number: Number(raw.index)}};
+  const ids = simklMovieIds(series);
+  return Object.keys(ids).length
+    ? {show: {ids}, episode: {season: Number(raw.parentIndex), number: Number(raw.index)}} : null;
 }
 export function progressPercent(position, duration, ended = false) {
   if (ended) return 100;
@@ -160,23 +161,22 @@ export class SimklTracker {
     this.lastWrite = 0;
     this.holdUntil = Number(this.getSession()?.retryNotBefore) || 0;
     this.epoch = 0;
-    this.unmatched = {};
-    this.matches = {};
-  }
+   }
   reset() {
     // Pending writes from a disconnected account must never be sent using
     // credentials for a different account linked on the same TV.
     ++this.epoch;
-    this.holdUntil = 0; this.lastWrite = 0; this.unmatched = {}; this.matches = {};
+    this.holdUntil = 0; this.lastWrite = 0;
   }
   async itemPayload(api, item) {
     let show = null, media = item;
     if (item.type === 'episode' && item.raw?.grandparentRatingKey) {
+      // Upstream TrackerIdResolver resolves episodes using SHOW-level GUIDs.
       show = await api.detail(item.raw.grandparentRatingKey);
     } else if (item.type === 'movie' && item.id) {
-      // Plex home hubs often contain stale or incomplete GUIDs and release
-      // years. Fetch full details with includeGuids before first scrobble.
-      try { media = await api.detail(item.id); } catch (_) { /* title/year fallback */ }
+      // The hub projection does not always include GUIDs. Resolve full movie
+      // metadata exactly as TrackerIdResolver.resolveForMovie does.
+      media = await api.detail(item.id);
     }
     return scrobblePayload(media, show);
   }
@@ -202,24 +202,12 @@ export class SimklTracker {
           const payload = await context;
           if (!payload || this.epoch !== epoch) return;
           const body = {...payload, progress: percent};
-          const key = JSON.stringify(payload);
-          if (this.unmatched[key]) return;
-          // Persist a final stop before attempting delivery. Retry only on a
+           // Persist a final stop before attempting delivery. Retry only on a
           // subsequent user action (or explicit Retry), never a heartbeat.
           if (action === 'stop') this.saveStop(stopId, body, epoch);
           else await this.retryPendingStops(epoch, 1);
-          try {
-            await this.scrobble(action, body, epoch);
-            if (action === 'stop') this.removeStop(stopId, epoch);
-          } catch (error) {
-            if (error.simklUnmatched) {
-              this.unmatched[key] = true;
-              // An unidentifiable title will never become identifiable by
-              // replaying exactly the same IDs; do not retain dead stops.
-              if (action === 'stop') this.removeStop(stopId, epoch);
-            }
-            throw error;
-          }
+          await this.scrobble(action, body, epoch);
+          if (action === 'stop') this.removeStop(stopId, epoch);
         }).catch(error => this.onError(error.message));
         return this.queue;
       }
@@ -300,49 +288,10 @@ export class SimklTracker {
     }
     return this.refreshTask;
   }
-  async resolveUnmatched(body) {
-    const media = body.movie || body.show;
-    const title = typeof media?.title === 'string' ? media.title.trim() : '';
-    if (!title) return null;
-    const kind = body.movie ? 'movie' : 'tv';
-    const key = kind + ':' + title.toLowerCase() + ':' + (media.year || '');
-    if (this.matches[key]) return this.matches[key];
-    // Simkl already tried our IMDb/TMDB/TVDB IDs. Only after id_err, try
-    // a text lookup. Do not silently choose a fuzzy match with a wrong year.
-    const path = '/search/' + kind + '?q=' + encodeURIComponent(title) + '&limit=10';
-    const result = await send(path);
-    if (result.status !== 200 || !Array.isArray(result.data)) return null;
-    const exact = result.data.filter(entry =>
-      entry && typeof entry.title === 'string' &&
-      entry.title.trim().toLowerCase() === title.toLowerCase() &&
-      (!media.year || Number(entry.year) === Number(media.year)) &&
-      Number.isInteger(Number(entry.ids?.simkl_id)) &&
-      Number(entry.ids.simkl_id) > 0);
-    if (exact.length !== 1) return null;
-    const id = Number(exact[0].ids.simkl_id);
-    this.matches[key] = id;
-    return id;
-  }
+  // Upstream SimklTracker.scrobble sends the ID-only object without any
+  // catalog search, fuzzy matching, or second request after a 404.
   async scrobble(action, body, epoch = this.epoch) {
-    const media = body.movie || body.show;
-    const kind = body.movie ? 'movie' : 'tv';
-    const key = kind + ':' + (media?.title || '').trim().toLowerCase() + ':' + (media?.year || '');
-    if (this.matches[key] && media) {
-      const updated = {...media, ids: {...media.ids, simkl: this.matches[key]}};
-      body = {...body, [body.movie ? 'movie' : 'show']: updated};
-    }
-    try {
-      return await this.post('/scrobble/' + action, body, action === 'stop', epoch);
-    } catch (error) {
-      if (!error.simklUnmatched || epoch !== this.epoch) throw error;
-      // One exact-title / matching-year lookup, no endless retries or
-      // ambiguous automatic matching. Never retry for HTTP transport errors.
-      const simklId = await this.resolveUnmatched(body);
-      if (!simklId || epoch !== this.epoch) throw error;
-      const resolved = {...media, ids: {...media.ids, simkl: simklId}};
-      return this.post('/scrobble/' + action,
-        {...body, [body.movie ? 'movie' : 'show']: resolved}, action === 'stop', epoch);
-    }
+    return this.post('/scrobble/' + action, body, action === 'stop', epoch);
   }
   async post(path, body, allowConflict = false, epoch = this.epoch) {
     if (epoch !== this.epoch || !validSession(this.getSession())) return;
@@ -388,9 +337,7 @@ export class SimklTracker {
     }
     if (result.status === 404 && path.indexOf('/scrobble/') === 0 &&
         ['id_err', 'not_found', 'item_not_found'].includes(result.data?.error)) {
-      const error = new Error('Simkl could not match this Plex title (HTTP 404). Check the IMDb/TMDb/TVDb identifiers; tracking will skip this title for now.');
-      error.simklUnmatched = true;
-      throw error;
+      throw new Error('Simkl scrobble rejected the supplied Plex IDs (HTTP 404: ' + result.data.error + ').');
     }
     if (result.status < 200 || result.status >= 300) {
       const code = typeof result.data?.error === 'string' && /^[a-z_]{2,40}$/.test(result.data.error)
