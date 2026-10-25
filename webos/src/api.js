@@ -62,9 +62,48 @@ export class Plex {
     return (data.MediaContainer.Directory || []).filter(x => ['movie', 'show'].includes(x.type)).map(x => ({id: x.key, title: x.title}));
   }
   async home() {
-    const data = await this.get('/hubs', {count: 20});
-    return (data.MediaContainer.Hub || []).map(h => ({title: h.title, items: (h.Metadata || [])
-      .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem)})).filter(x => x.items.length);
+    // Different Plex Media Server versions and accounts expose different
+    // recommended hubs. Fall back to documented library endpoints when the
+    // global hub list is empty or unavailable; preserve authentication errors.
+    let hubsError;
+    try {
+      const data = await this.get('/hubs', {count: 20});
+      const rows = ((data.MediaContainer || {}).Hub || []).map(h => ({
+        title: h.title || 'Recommended',
+        items: (h.Metadata || []).filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem)
+      })).filter(row => row.items.length);
+      if (rows.length) return rows;
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) throw error;
+      hubsError = error;
+    }
+    const [continueResult, sectionsResult] = await Promise.allSettled([
+      this.get('/hubs/continueWatching', {count: 20}), this.libraries()
+    ]);
+    const rows = [];
+    if (continueResult.status === 'fulfilled') {
+      const container = continueResult.value.MediaContainer || {};
+      const entries = container.Metadata || (container.Hub || []).reduce((acc, h) => acc.concat(h.Metadata || []), []);
+      const items = entries.filter(x => ['movie', 'episode'].includes(x.type)).map(plexItem);
+      if (items.length) rows.push({title: 'Continue watching', items});
+    }
+    if (sectionsResult.status === 'fulfilled') {
+      // Cap parallel fan-out for users with dozens of libraries.
+      const sections = sectionsResult.value.slice(0, 6);
+      const recent = await Promise.allSettled(sections.map(section => this.get(
+        '/library/sections/' + enc(section.id) + '/recentlyAdded', {'X-Plex-Container-Size': 16}
+      )));
+      recent.forEach((result, i) => {
+        if (result.status !== 'fulfilled') return;
+        const items = ((result.value.MediaContainer || {}).Metadata || [])
+          .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem);
+        if (items.length) rows.push({title: 'Recently added · ' + sections[i].title, items});
+      });
+    }
+    if (!rows.length && hubsError && continueResult.status === 'rejected' && sectionsResult.status === 'rejected') {
+      throw hubsError;
+    }
+    return rows;
   }
   async list(library, start = 0, sort = 'title', filter = 'all') {
     const order = {title: 'titleSort', recent: 'addedAt:desc', release: 'originallyAvailableAt:desc'}[sort] || 'titleSort';

@@ -164,3 +164,49 @@ test('unwatched library filtering is server-side for Plex and Jellyfin',async()=
     assert.equal(calls[2].searchParams.has('IsPlayed'),false);
   }finally{restore();}
 });
+
+test('Plex home falls back to continue watching and recently added when global hubs are empty',async()=>{
+  const calls=[];
+  const restore=mock(async url=>{
+    const path=new URL(url).pathname;calls.push(path);
+    if(path==='/prefix/hubs')return json({MediaContainer:{Hub:[]}});
+    if(path==='/prefix/hubs/continueWatching')return json({MediaContainer:{Metadata:[
+      {ratingKey:10,title:'Keep watching',type:'episode',viewOffset:1000}]}});
+    if(path==='/prefix/library/sections')return json({MediaContainer:{Directory:[
+      {key:'5',title:'Movies',type:'movie'},{key:'6',title:'Music',type:'artist'}]}});
+    if(path==='/prefix/library/sections/5/recentlyAdded')return json({MediaContainer:{Metadata:[
+      {ratingKey:12,title:'New film',type:'movie'}]}});
+    return new Response('',{status:404});
+  });
+  try {
+    const rows=await new Plex(server,'device').home();
+    assert.deepEqual(rows.map(row=>row.title),['Continue watching','Recently added · Movies']);
+    assert.equal(rows[0].items[0].resume,1);
+    assert.equal(rows[1].items[0].title,'New film');
+    assert.ok(calls.includes('/prefix/library/sections/5/recentlyAdded'));
+    assert.ok(!calls.includes('/prefix/library/sections/6/recentlyAdded'));
+  }finally{restore();}
+});
+test('Plex home preserves sign-in errors without probing unrelated endpoints',async()=>{
+  const calls=[];
+  const restore=mock(async url=>{calls.push(new URL(url).pathname);return new Response('',{status:401});});
+  try {
+    await assert.rejects(new Plex(server,'device').home(),/Sign-in was rejected/);
+    assert.deepEqual(calls,['/prefix/hubs']);
+  }finally{restore();}
+});
+test('Plex home retains useful shelves when one fallback endpoint fails',async()=>{
+  const restore=mock(async url=>{
+    const path=new URL(url).pathname;
+    if(path==='/prefix/hubs'||path==='/prefix/hubs/continueWatching')return new Response('',{status:404});
+    if(path==='/prefix/library/sections')return json({MediaContainer:{Directory:[{key:'5',title:'TV',type:'show'}]}});
+    if(path==='/prefix/library/sections/5/recentlyAdded')return json({MediaContainer:{Metadata:[
+      {ratingKey:44,title:'Show',type:'show'}]}});
+    throw new Error('unexpected request');
+  });
+  try {
+    const rows=await new Plex(server,'device').home();
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].title,'Recently added · TV');
+  }finally{restore();}
+});
