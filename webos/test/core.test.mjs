@@ -330,3 +330,31 @@ test('sidebar collapse and individually hidden libraries persist safely',()=>{
  assert.equal(state.sidebarCollapsed,true);
  assert.deepEqual(state.hiddenLibraryIds,['plex:12','plex:13']);
 });
+
+test('Plex sends timeline via POST and accepts empty or XML 200 responses',async()=>{
+  const calls=[];
+  const restore=mock(async(url,options={})=>{
+    calls.push({url:new URL(url),options});
+    return new Response('<MediaContainer/>',{status:200,headers:{'Content-Type':'application/xml'}});
+  });
+  try {
+    const plex=new Plex(server,'device');
+    await plex.report({item:{id:'42',duration:120},sessionId:'session-123'},'start',12,120);
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].options.method,'POST');
+    assert.equal(calls[0].url.pathname,'/prefix/:/timeline');
+    assert.equal(calls[0].url.searchParams.get('state'),'playing');
+    assert.equal(calls[0].url.searchParams.get('ratingKey'),'42');
+    assert.equal(calls[0].url.searchParams.get('key'),'/library/metadata/42');
+    assert.equal(calls[0].url.searchParams.get('time'),'12000');
+    assert.equal(calls[0].url.searchParams.get('duration'),'120000');
+    assert.equal(calls[0].url.searchParams.get('identifier'),'com.plexapp.plugins.library');
+  } finally {restore();}
+});
+test('Plex progress sync surfaces a genuine HTTP failure',async()=>{
+ const restore=mock(async()=>new Response('',{status:403}));
+ try{
+   await assert.rejects(new Plex(server,'device').report({item:{id:'42',duration:90},
+     sessionId:'session'},'playing',7,90),/timeline returned HTTP 403/);
+ }finally{restore();}
+});

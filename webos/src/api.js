@@ -248,9 +248,22 @@ export class Plex {
       options};
   }
   async report(session, state, position, duration) {
-    await this.get('/:/timeline', {ratingKey: session.item.id, key: '/library/metadata/' + session.item.id,
-      state: state === 'start' ? 'playing' : state, time: Math.round(position * 1000),
-      duration: Math.round((duration || session.item.duration) * 1000), hasMDE: 1, session: session.sessionId});
+    // Plex's timeline API is POST. It often returns XML or an empty 200,
+    // neither of which is a request failure. Do not feed it to request()
+    // (which parses JSON and would falsely show "progress not synced").
+    const itemId = session.item.id;
+    const params = {ratingKey: itemId, key: '/library/metadata/' + itemId,
+      identifier: 'com.plexapp.plugins.library',
+      state: state === 'start' ? 'playing' : state,
+      time: Math.round(Math.max(0, position || 0) * 1000),
+      duration: Math.round(Math.max(0, duration || session.item.duration || 0) * 1000),
+      'X-Plex-Session-Identifier': session.sessionId};
+    const url = this.url('/:/timeline', params);
+    const response = await fetch(url, {method: 'POST', headers: {Accept: '*/*'}});
+    if (!response.ok) {
+      const error = new Error('Plex playback timeline returned HTTP ' + response.status + '.');
+      error.status = response.status; throw error;
+    }
   }
   async stop(session) {
     if (session.transcode) await this.get('/video/:/transcode/universal/stop', {session: session.sessionId});
