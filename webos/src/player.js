@@ -54,7 +54,10 @@ export class Player {
       const quality = this.root.querySelector('[data-action="transcode"]');
       const button = document.createElement('button');
       button.textContent = quality.textContent;
-      button.onclick = () => quality.click();
+      button.onclick = () => {
+        this.closeSheet();
+        quality.click();
+      };
       list.appendChild(button);
     } else {
       const select = this.root.querySelector(kind === 'chapter'
@@ -65,9 +68,9 @@ export class Player {
         button.textContent = option.textContent;
         button.setAttribute('aria-pressed', String(select.value === option.value));
         button.onclick = () => {
+          this.closeSheet();
           select.value = option.value;
           select.dispatchEvent(new Event('change'));
-          if (kind === 'chapter') this.closeSheet();
         };
         list.appendChild(button);
       });
