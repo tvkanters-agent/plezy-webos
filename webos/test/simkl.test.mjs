@@ -151,3 +151,22 @@ test('Simkl never sends an old account playback after disconnect and relink',asy
     assert.deepEqual(calls,[]);
   }finally{restore();}
 });
+
+test('Simkl refresh cannot restore a disconnected or relinked account',async()=>{
+  let session=saved({expiresAt:0});
+  let finish;
+  const original=session;
+  const restore=mock(async()=>new Promise(resolve=>{finish=resolve;}));
+  try{
+    const tracker=new SimklTracker(()=>session,next=>{session=next;});
+    const refreshing=tracker.refresh().catch(e=>e.message);
+    await new Promise(resolve=>setTimeout(resolve,0));
+    tracker.reset();
+    session=saved({accessToken:'simkl_at_new_account'});
+    finish(respond(token('simkl_at_old_account')));
+    const result=await refreshing;
+    assert.match(result,/account changed/);
+    assert.equal(session.accessToken,'simkl_at_new_account');
+    assert.notEqual(session.accessToken,original.accessToken);
+  }finally{restore();}
+});

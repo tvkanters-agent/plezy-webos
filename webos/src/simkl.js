@@ -174,7 +174,7 @@ export class SimklTracker {
           if (this.epoch !== epoch || !validSession(this.getSession())) return;
           const payload = await context;
           if (!payload || this.epoch !== epoch) return;
-          await this.scrobble(action, {...payload, progress: percent});
+          await this.scrobble(action, {...payload, progress: percent}, epoch);
         }).catch(error => this.onError(error.message));
         return this.queue;
       }
@@ -194,17 +194,18 @@ export class SimklTracker {
         shows: [{...payload.show, seasons: [{number: payload.episode.season,
           episodes: [{number: payload.episode.number}]}]}]
       };
-      return this.post('/sync/history' + (watched ? '' : '/remove'), body);
+      return this.post('/sync/history' + (watched ? '' : '/remove'), body, false, epoch);
     }).catch(error => this.onError(error.message));
     return this.queue;
   }
   async refresh() {
     if (!this.refreshTask) {
       this.refreshTask = (async () => {
-        const existing = this.getSession();
+        const existing = this.getSession(), epoch = this.epoch;
         if (!validSession(existing)) throw new Error('Connect Simkl to continue tracking.');
         const res = await send('/oauth2/token', {form: {grant_type: 'refresh_token',
           client_id: SIMKL_CLIENT_ID, refresh_token: existing.refreshToken}});
+        if (this.epoch !== epoch) throw new Error('Simkl account changed during token refresh.');
         if (res.status !== 200) {
           if ([400, 401, 403].includes(res.status)) this.setSession(null);
           throw new Error('Simkl token refresh failed (HTTP ' + res.status + ').');
@@ -216,23 +217,25 @@ export class SimklTracker {
     }
     return this.refreshTask;
   }
-  async scrobble(action, body) {
-    return this.post('/scrobble/' + action, body, action === 'stop');
+  async scrobble(action, body, epoch = this.epoch) {
+    return this.post('/scrobble/' + action, body, action === 'stop', epoch);
   }
-  async post(path, body, allowConflict = false) {
-    if (!validSession(this.getSession())) return;
+  async post(path, body, allowConflict = false, epoch = this.epoch) {
+    if (epoch !== this.epoch || !validSession(this.getSession())) return;
     const waiting = Math.max(this.lastWrite + WRITE_GAP_MS, this.holdUntil) - Date.now();
     if (waiting > 0) await new Promise(resolve => setTimeout(resolve, waiting));
+    if (epoch !== this.epoch) return;
     let current = this.getSession();
     if (!validSession(current)) return;
     if (current.expiresAt < Date.now() + 60000) current = await this.refresh();
+    if (epoch !== this.epoch) return;
     const post = token => send(path, {body, token});
     this.lastWrite = Date.now();
     let result = await post(current.accessToken);
     if (result.status === 401) {
       // Refresh once and replay only with a valid new token.
       current = this.getSession()?.accessToken !== current.accessToken ? this.getSession() : await this.refresh();
-      if (!validSession(current)) return;
+      if (epoch !== this.epoch || !validSession(current)) return;
       this.lastWrite = Date.now();
       result = await post(current.accessToken);
     }
