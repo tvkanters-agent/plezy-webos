@@ -15,7 +15,12 @@ function el(tag, text, className) {
 }
 function button(text, action, className = '') {
   const node = el('button', text, className); node.type = 'button';
-  node.addEventListener('click', () => Promise.resolve().then(action).catch(error => notify(error.message))); return node;
+  node.addEventListener('click', () => {
+    // Remember the activated control even when Magic Remote/pointer clicks do
+    // not leave it as document.activeElement by the time navigation executes.
+    node.focus();
+    Promise.resolve().then(action).catch(error => notify(error.message));
+  }); return node;
 }
 function notify(message) {
   const toast = document.querySelector('#toast'); toast.textContent = message; toast.hidden = false;
@@ -35,7 +40,12 @@ function addServer(server) {
   state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
 }
 function focusFirst(root = main) {
-  requestAnimationFrame(() => { const first = root.querySelector('button:not(:disabled),input,select'); if (first) first.focus(); else root.focus(); });
+  const expectedRevision = revision;
+  requestAnimationFrame(() => {
+    if (expectedRevision !== revision || !root.isConnected) return;
+    const first = root.querySelector('button:not(:disabled),input,select');
+    if (first) first.focus(); else root.focus();
+  });
 }
 function title(text, subtitle) { main.append(el('p', 'PLEZY / WEBOS', 'eyebrow'), el('h1', text)); if (subtitle) main.append(el('p', subtitle, 'intro')); }
 function navigation() {

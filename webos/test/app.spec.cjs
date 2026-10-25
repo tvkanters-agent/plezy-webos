@@ -195,3 +195,20 @@ test('Plex Next episode navigates to the next episode across seasons',async({pag
   await page.getByRole('button',{name:'Next episode',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Finale'})).toBeVisible();
 });
+
+test('Plex returning to the home shelf restores the activated poster focus',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',servers:[{id:'plex',kind:'plex',name:'Plex test',url:'http://plex.test',token:'token'}]
+  })));
+  const item={ratingKey:'movie1',title:'Plex Film',type:'movie',duration:200000};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    return route.fulfill({json:path==='/hubs' ? {MediaContainer:{Hub:[{title:'Continue',Metadata:[item]}]}}
+      : {MediaContainer:{Metadata:[item]}}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Plex Film',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Plex Film'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button',{name:'Plex Film',exact:true})).toBeFocused();
+});
