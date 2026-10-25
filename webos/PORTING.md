@@ -9,7 +9,7 @@ The `webos/` app is a **port of Plezy**, not a new TV client design. Original Fl
 3. Keep features aligned: use Plex data from the same API paths and reproduce its loading, errors, and success states.
 4. Isolate and document any unavoidable webOS 4.4/Chromium 53 adaptation (native Flutter/MPV APIs, video pipeline, browser fetch/CORS limits). The adaptation must be as narrow as possible, not a new feature design.
 5. Write tests based on upstream acceptance cases, comparing exact request bodies, screen semantics, and focus transitions. Do not change tests merely to make a different implementation pass.
-6. Commit related changes together with `[ChatGPT Chat]` in the subject. Test and identify failed/untested parity honestly.
+6. Commit related changes together with descriptive messages. Apply any agent-specific commit labels only when instructed for that agent's work. Test and identify failed/untested parity honestly.
 
 **Never introduce speculative matching, fallback endpoints, UI controls, labels or new layouts in place of an existing upstream implementation.** New solutions require a demonstrated incompatibility, written justification, and tests.
 
