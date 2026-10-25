@@ -245,3 +245,34 @@ test('Simkl HTTP 400 displays the structured OAuth reason without leaking secret
     });
   } finally {restoreSecret();}
 });
+
+test('Simkl fetches full Plex movie GUIDs when home hub omits external identifiers',async()=>{
+  const restore=mock(async()=>respond({action:'start'}));
+  try{
+    const tracker=new SimklTracker(()=>saved(),()=>{});
+    let detailCalls=0;
+    const payload=await tracker.itemPayload({detail:async()=>{detailCalls++;
+      return {type:'movie',title:'Film',raw:{title:'Film',year:2025,Guid:[{id:'imdb://tt7654321'}]}};}},
+      {type:'movie',id:'movie1',title:'Film',raw:{title:'Film',guid:'plex://movie/xyz'}});
+    assert.equal(detailCalls,1);
+    assert.equal(payload.movie.ids.imdb,'tt7654321');
+  }finally{restore();}
+});
+test('Simkl 404 id_err skips repeated unmatchable item without retaining a dead stop',async()=>{
+  const calls=[];const session=saved();let current=session;
+  const restore=mock(async url=>{calls.push(new URL(url).pathname);return respond({error:'id_err'},404);});
+  const errors=[];
+  try{
+    const tracker=new SimklTracker(()=>current,s=>{current=s;},x=>errors.push(x));
+    const api={server:{kind:'plex'}};
+    const play=tracker.createPlayback(api,movie);
+    await play.event('start',2,100);
+    await play.event('stop',45,100);
+    const another=tracker.createPlayback(api,movie);
+    await another.event('start',2,100);
+    assert.equal(calls.length,1);
+    assert.equal(tracker.pendingStops().length,0);
+    assert.equal(errors.length,1);
+    assert.match(errors[0],/could not match this Plex title/);
+  } finally {restore();}
+});

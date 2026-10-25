@@ -160,19 +160,24 @@ export class SimklTracker {
     this.lastWrite = 0;
     this.holdUntil = Number(this.getSession()?.retryNotBefore) || 0;
     this.epoch = 0;
+    this.unmatched = {};
   }
   reset() {
     // Pending writes from a disconnected account must never be sent using
     // credentials for a different account linked on the same TV.
     ++this.epoch;
-    this.holdUntil = 0; this.lastWrite = 0;
+    this.holdUntil = 0; this.lastWrite = 0; this.unmatched = {};
   }
   async itemPayload(api, item) {
-    let show = null;
+    let show = null, media = item;
     if (item.type === 'episode' && item.raw?.grandparentRatingKey) {
       show = await api.detail(item.raw.grandparentRatingKey);
+    } else if (item.type === 'movie' && item.id && !Object.keys(simklMovieIds(item.raw)).length) {
+      // Plex hubs often omit Guids; the metadata endpoint with includeGuids=1
+      // has IDs Simkl can actually resolve. Do this outside the video thread.
+      try { media = await api.detail(item.id); } catch (_) { /* title/year fallback */ }
     }
-    return scrobblePayload(item, show);
+    return scrobblePayload(media, show);
   }
   createPlayback(api, item) {
     if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return null;
@@ -196,12 +201,24 @@ export class SimklTracker {
           const payload = await context;
           if (!payload || this.epoch !== epoch) return;
           const body = {...payload, progress: percent};
+          const key = JSON.stringify(payload);
+          if (this.unmatched[key]) return;
           // Persist a final stop before attempting delivery. Retry only on a
           // subsequent user action (or explicit Retry), never a heartbeat.
           if (action === 'stop') this.saveStop(stopId, body, epoch);
           else await this.retryPendingStops(epoch, 1);
-          await this.scrobble(action, body, epoch);
-          if (action === 'stop') this.removeStop(stopId, epoch);
+          try {
+            await this.scrobble(action, body, epoch);
+            if (action === 'stop') this.removeStop(stopId, epoch);
+          } catch (error) {
+            if (error.simklUnmatched) {
+              this.unmatched[key] = true;
+              // An unidentifiable title will never become identifiable by
+              // replaying exactly the same IDs; do not retain dead stops.
+              if (action === 'stop') this.removeStop(stopId, epoch);
+            }
+            throw error;
+          }
         }).catch(error => this.onError(error.message));
         return this.queue;
       }
@@ -327,6 +344,16 @@ export class SimklTracker {
       this.setSession({...this.getSession(), retryNotBefore: this.holdUntil});
       throw new Error('Simkl rate limited this update. Final stops are saved for the next action or Retry in settings.');
     }
-    if (result.status < 200 || result.status >= 300) throw new Error('Simkl playback tracking failed (HTTP ' + result.status + ').');
+    if (result.status === 404 && /^\\/scrobble\\//.test(path) &&
+        ['id_err', 'not_found', 'item_not_found'].includes(result.data?.error)) {
+      const error = new Error('Simkl could not match this Plex title (HTTP 404). Check the IMDb/TMDb/TVDb identifiers; tracking will skip this title for now.');
+      error.simklUnmatched = true;
+      throw error;
+    }
+    if (result.status < 200 || result.status >= 300) {
+      const code = typeof result.data?.error === 'string' && /^[a-z_]{2,40}$/.test(result.data.error)
+        ? ' · ' + result.data.error : '';
+      throw new Error('Simkl tracking rejected ' + path + ' (HTTP ' + result.status + code + ').');
+    }
   }
 }
