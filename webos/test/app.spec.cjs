@@ -480,3 +480,17 @@ test('Settings has gear icon and Libraries heading is not focusable',async({page
   await settings.click();
   await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
 });
+
+test('remote arrows remain in their navigation zone, scroll page at boundaries',async({page})=>{
+  await mockServer(page);await page.goto('/');
+  const library=page.locator('.rail-library-items').getByRole('button',{name:'Movies'});
+  await library.focus();await page.keyboard.press('ArrowLeft');
+  await expect(library).toBeFocused();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  const control=page.locator('main button').first();
+  await control.focus();await page.keyboard.press('ArrowUp');
+  await expect(page.locator('aside button:focus')).toHaveCount(0);
+  // The heading is noninteractive; Up must not unexpectedly transfer focus
+  // from main content into the sidebar.
+  await expect(page.locator('main button:focus')).toHaveCount(1);
+});

@@ -684,8 +684,46 @@ window.addEventListener('keydown', event => {
   if (current.tagName === 'INPUT' && ['left', 'right'].includes(direction)) return;
   event.preventDefault();
   const root = !dialog.hidden ? dialog : player.active ? player.root : document.querySelector('#shell');
-  const candidates = Array.from(root.querySelectorAll('button:not(:disabled),input,select')).filter(node => node !== current && node.getClientRects().length);
-  const next = nextFocus(current.getBoundingClientRect(), candidates.map(value => ({value, rect: value.getBoundingClientRect()})), direction);
+  const inRail = nav.contains(current);
+  const inMain = main.contains(current);
+  // D-pad navigation follows the original Flutter navigation zones:
+  // Up/Down stay in the current rail or page. A left press in the sidebar
+  // never jumps diagonally to a different item in the sidebar.
+  if (dialog.hidden && !player.active && inRail && direction === 'left') return;
+  const validControls = scope => Array.from(scope.querySelectorAll(
+    'button:not(:disabled),input,select')).filter(node =>
+      node !== current && node.getClientRects().length && !node.hidden);
+  const choose = (candidates, axis) => nextFocus(current.getBoundingClientRect(),
+    candidates.map(value => ({value, rect: value.getBoundingClientRect()})), axis);
+  if (dialog.hidden && !player.active && (inRail || inMain)) {
+    const source = inRail ? nav : main;
+    const local = choose(validControls(source), direction);
+    if (local) { focusWithoutJump(local); return; }
+    if (inMain && (direction === 'up' || direction === 'down')) {
+      const delta = direction === 'up' ? -Math.max(120, main.clientHeight * .65)
+        : Math.max(120, main.clientHeight * .65);
+      main.scrollTop = Math.max(0, main.scrollTop + delta);
+      schedulePosters();
+      return;
+    }
+    if (inRail && direction === 'right') {
+      const first = main.querySelector('button:not(:disabled),input,select');
+      if (first) focusWithoutJump(first);
+      else { main.focus(); main.scrollTop = 0; }
+      return;
+    }
+    if (inMain && direction === 'left') {
+      const railControls = validControls(nav);
+      // Move to the currently selected library if possible, otherwise to the
+      // vertically closest rail control. Never do this for Up/Down.
+      const active = nav.querySelector('button.active');
+      const target = active || railControls[0];
+      if (target) focusWithoutJump(target);
+      return;
+    }
+    return;
+  }
+  const next = choose(validControls(root), direction);
   if (next) focusWithoutJump(next);
 }, true);
 window.addEventListener('pagehide', () => { cancelAuth(); player.release(); });
