@@ -76,8 +76,18 @@ export function clamp(value, min, max) { return Math.max(min, Math.min(value, ma
 export function readState(storage) {
   try {
     const state = JSON.parse(storage ? storage.getItem('plezy.webos') || '{}' : '{}');
-    return {deviceId: state.deviceId || id(), servers: Array.isArray(state.servers) ? state.servers : [],
-      active: state.active || '', quality: state.quality === 'transcode' ? 'transcode' : 'auto'};
+    // Valid JSON can still contain stale, partial or corrupted account entries.
+    // Ignore malformed servers instead of crashing during first navigation.
+    const servers = Array.isArray(state.servers) ? state.servers.filter(server =>
+      server && typeof server === 'object' &&
+      ['plex', 'jellyfin', 'emby'].includes(server.kind) &&
+      typeof server.id === 'string' && !!server.id &&
+      typeof server.url === 'string' && /^https?:\/\//i.test(server.url) &&
+      typeof server.token === 'string' && !!server.token &&
+      (server.kind === 'plex' || (typeof server.userId === 'string' && !!server.userId))) : [];
+    return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
+      servers, active: typeof state.active === 'string' ? state.active : '',
+      quality: state.quality === 'transcode' ? 'transcode' : 'auto'};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto'}; }
 }
 export function saveState(storage, state) {

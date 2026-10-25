@@ -123,3 +123,32 @@ test('library sort controls request server-side ordering and preserve selection'
   await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
   await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
 });
+
+test('startup remains navigable when localStorage access throws',async({page})=>{
+  await page.addInitScript(()=>{
+    Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new Error('SecurityError');}});
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Add Jellyfin',exact:true})).toBeVisible();
+});
+test('startup remains navigable when Web Crypto is missing',async({page})=>{
+  await page.addInitScript(()=>Object.defineProperty(window,'crypto',{configurable:true,value:undefined}));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
+});
+test('a bundle that loads but never starts produces an actionable boot error',async({page})=>{
+  await page.route('**/app.js',route=>route.fulfill({contentType:'text/javascript',body:'// intentionally no app bootstrap'}));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Plezy could not start'})).toBeVisible({timeout:7000});
+  await expect(page.getByText(/script did not initialize/)).toBeVisible();
+});
+test('a broken library query has a visible retry action',async({page})=>{
+  await mockServer(page);
+  await page.route(/\/Users\/user\/Items\?/,route=>route.fulfill({status:503,json:{}}));
+  await page.goto('/');
+  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.getByText(/Could not load library titles/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Retry loading'})).toBeVisible();
+});

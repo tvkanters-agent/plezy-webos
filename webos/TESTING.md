@@ -46,3 +46,9 @@ npm run package
 For proxy-configured development machines, exclude `127.0.0.1,localhost` from the HTTP proxy when running the local browser suite. No proxy is required by the app itself.
 
 The checked-in IPK is generated from `src/` and `public/` with these scripts. Verify its SHA-256 against `releases/SHA256SUMS`. Repackaging may change archive timestamps, so checksum equality across independent builds is not promised.
+
+## Device startup diagnostics (ChatGPT Chat)
+
+A fresh app launch should show the **Welcome to Plezy** screen (or saved-server home) with navigation buttons. If the bundle fails before navigation is built, a visible **Plezy could not start** error appears instead of an empty page after four seconds. The earlier checked-in IPK is out of date; use a fresh build or successful GitHub Actions artifact for the `com.tvkdevelopment.plezy` application ID.
+
+If the TV still fails, inspect the installed app with `ares-inspect --device myTV --app com.tvkdevelopment.plezy --open`. Report the on-screen error and the first non-token-containing JavaScript exception from the console. Do not share account tokens, authorization headers, localStorage contents, or unredacted network requests.

@@ -136,3 +136,15 @@ test('Jellyfin home reports failure when all shelves are unavailable', async () 
   const restore = mock(async () => new Response('',{status:503}));
   try { await assert.rejects(new Jellyfin(server,'device').home(), /HTTP 503/); } finally {restore();}
 });
+
+test('partially corrupted saved servers do not crash startup or hide valid accounts', () => {
+  const saved={deviceId:'device',active:'good',servers:[
+    null,{}, {kind:'plex',id:'bad',url:'file:///bad',token:'x'},
+    {kind:'plex',id:'good',url:'https://plex.test',token:'valid'},
+    {kind:'jellyfin',id:'missing-user',url:'https://media.test',token:'x'}
+  ]};
+  const state=readState({getItem:()=>JSON.stringify(saved)});
+  assert.deepEqual(state.servers.map(server=>server.id),['good']);
+  assert.equal(state.deviceId,'device');
+  assert.equal(state.active,'good');
+});

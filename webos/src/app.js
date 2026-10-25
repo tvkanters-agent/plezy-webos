@@ -82,18 +82,35 @@ function cards(items, grid = false) {
 }
 async function paginated(loader, currentRevision) {
   let start = 0;
-  const grid = cards([], true), more = button('Load more', load);
-  main.append(grid, more);
+  const grid = cards([], true), more = button('Load more', load), errorMessage = el('p', '', 'error');
+  errorMessage.setAttribute('role', 'alert');
+  main.append(grid, more, errorMessage);
   async function load() {
+    const hadFocus = document.activeElement === more;
+    const previousCount = grid.children.length;
     more.disabled = true;
+    errorMessage.textContent = '';
     try {
       const page = await loader(start);
       if (currentRevision !== revision) return;
       page.items.forEach(item => grid.append(card(item))); start += page.items.length;
       more.hidden = !page.items.length || start >= page.total;
-      if (!start) grid.append(el('p', 'No titles found.', 'muted'));
-    } catch (error) { if (currentRevision === revision) notify(error.message); }
-    finally { more.disabled = false; }
+      more.textContent = 'Load more';
+      if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
+      // The Load more button disappears on the final page. Move remote focus
+      // to newly loaded content instead of leaving it on a hidden control.
+      if (hadFocus && document.activeElement === more) {
+        const target = grid.children[previousCount] || grid.lastElementChild;
+        if (target && typeof target.focus === 'function') target.focus();
+        else main.focus();
+      }
+    } catch (error) {
+      if (currentRevision === revision) {
+        errorMessage.textContent = 'Could not load library titles: ' + error.message;
+        more.textContent = 'Retry loading';
+        more.hidden = false;
+      }
+    } finally { more.disabled = false; }
   }
   await load();
 }

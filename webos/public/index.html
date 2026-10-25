@@ -39,31 +39,35 @@
   </section>
   <section id="dialog" role="dialog" aria-modal="true" aria-label="Confirm exit" hidden></section>
   <script>
-    // Keep startup failures visible when the bundled application cannot run.
-    window.addEventListener('error', function (event) {
-      var main = document.getElementById('main');
-      if (!main || document.querySelector('#nav button')) return;
-      main.textContent = '';
-      var heading = document.createElement('h1');
-      heading.textContent = 'Plezy could not start';
-      var message = document.createElement('p');
-      message.className = 'error';
-      message.textContent = event.message || 'Application script failed to load.';
-      main.appendChild(heading);
-      main.appendChild(message);
-    });
-    window.addEventListener('unhandledrejection', function (event) {
-      var main = document.getElementById('main');
-      if (!main || document.querySelector('#nav button')) return;
-      main.textContent = '';
-      var heading = document.createElement('h1');
-      heading.textContent = 'Plezy could not start';
-      var message = document.createElement('p');
-      message.className = 'error';
-      message.textContent = (event.reason && event.reason.message) || 'An unexpected startup error occurred.';
-      main.appendChild(heading);
-      main.appendChild(message);
-    });
+    // The shell is static HTML; a missing or broken bundle must never leave
+    // only the logo and an empty main view on a physical television.
+    (function () {
+      function bootError(message) {
+        var main = document.getElementById('main');
+        if (!main || document.querySelector('#nav button')) return;
+        main.textContent = '';
+        var heading = document.createElement('h1');
+        heading.textContent = 'Plezy could not start';
+        var details = document.createElement('p');
+        details.className = 'error';
+        details.textContent = message;
+        main.appendChild(heading);
+        main.appendChild(details);
+      }
+      window.addEventListener('error', function (event) {
+        bootError(event.message || 'Application script failed to load.');
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        bootError((event.reason && event.reason.message) || 'An unexpected startup error occurred.');
+      });
+      window.setTimeout(function () {
+        var main = document.getElementById('main');
+        if (main && main.textContent.indexOf('Starting Plezy') !== -1 &&
+            !document.querySelector('#nav button')) {
+          bootError('The application script did not initialize. Please install a newly built IPK and inspect the webOS console.');
+        }
+      }, 4000);
+    })();
   </script>
   <script src="app.js" defer onerror="document.getElementById('main').textContent = 'Plezy could not load its application script. Reinstall the package.'"></script>
 </body>
