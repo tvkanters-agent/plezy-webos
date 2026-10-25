@@ -118,7 +118,11 @@ export class Plex {
     return (data.MediaContainer.Hub || []).reduce((all, h) => all.concat(h.Metadata || []), [])
       .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem);
   }
-  async detail(itemId) { return plexItem((await this.get('/library/metadata/' + enc(itemId))).MediaContainer.Metadata[0]); }
+  async detail(itemId) {
+    // The bundled Simkl integration needs stable imdb/tmdb/tvdb identifiers,
+    // including on show detail fetched for an episode's grandparent.
+    return plexItem((await this.get('/library/metadata/' + enc(itemId), {includeGuids: 1})).MediaContainer.Metadata[0]);
+  }
   async children(itemId, start = 0) {
     const data = (await this.get('/library/metadata/' + enc(itemId) + '/children', {
       'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE})).MediaContainer;

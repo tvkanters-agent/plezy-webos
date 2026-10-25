@@ -156,6 +156,7 @@ export class SimklTracker {
         if (stopped || !['start', 'pause', 'stop'].includes(action)) return Promise.resolve();
         if (action === 'pause' && lastAction !== 'start') return Promise.resolve();
         if (action === 'start' && lastAction === 'start') return Promise.resolve();
+        if (action === 'stop' && lastAction === null) { stopped = true; return Promise.resolve(); }
         if (action === 'stop') stopped = true;
         lastAction = action;
         const percent = progressPercent(position, duration, ended);

@@ -2,13 +2,17 @@
 import {baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
+import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
-const player = new Player(document.querySelector('#player'), notify, () => render());
+const simklTracker = new SimklTracker(() => state.simkl, session => {
+  state.simkl = session; persist();
+}, message => notify(message));
+const player = new Player(document.querySelector('#player'), notify, () => render(), simklTracker);
 function el(tag, text, className) {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text;
   if (className) node.className = className; return node;
@@ -129,10 +133,11 @@ async function render() {
   cancelAuth(); main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
-    if (!api && !['settings', 'add', 'plex'].includes(route.type)) route = {type: 'settings'};
+    if (!api && !['settings', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
     if (route.type === 'settings') settings();
     else if (route.type === 'add') addForm(route.kind);
     else if (route.type === 'plex') { await plexSignIn(); return; }
+    else if (route.type === 'simkl') { await simklSignIn(); return; }
     else if (route.type === 'home') {
       title('Your next watch', activeServer().name);
       const loading = el('p', 'Loading your library…', 'muted'); main.append(loading);
@@ -242,7 +247,19 @@ function settings() {
     state.quality = state.quality === 'auto' ? 'transcode' : 'auto'; persist(); render();
   }));
   panel.append(el('p', 'Automatic plays compatible MP4 files directly. Other formats use server transcoding. Compatible playback requires permission to transcode on your server.', 'muted'));
-  main.append(panel, el('p', 'Community port · 0.1.1 alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
+  main.append(panel);
+  const simklPanel = el('section', undefined, 'panel');
+  simklPanel.append(el('h2', 'Simkl tracking'));
+  if (validSession(state.simkl)) {
+    simklPanel.append(el('p', 'Connected. Plex playback is automatically tracked on Simkl when you play, pause, or stop a movie or episode. Plex resume syncing remains independent.', 'muted'));
+    simklPanel.append(button('Disconnect Simkl', () => {
+      state.simkl = null; persist(); render();
+    }));
+  } else {
+    simklPanel.append(el('p', 'Optional: automatically sync Plex movie and episode playback to your Simkl account. Link with a code on your phone.', 'muted'));
+    simklPanel.append(button('Connect Simkl', () => go({type: 'simkl'}), 'primary'));
+  }
+  main.append(simklPanel, el('p', 'Community port · 0.1.1 alpha · webOS 6+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
 }
 function field(form, text, type = 'text', value = '') {
   const label = el('label', text), input = el('input'); input.type = type; input.value = value; input.autocomplete = type === 'password' ? 'current-password' : 'off';
@@ -331,6 +348,57 @@ async function plexSignIn() {
     if (!controller.signal.aborted) throw new Error('The code expired. Please request a new one.');
   } catch (error) {
     if (!controller.signal.aborted) { status.textContent = error.message; status.className = 'error'; main.append(button('Get a new code', render)); }
+  }
+}
+async function simklSignIn() {
+  title('Link your Simkl account', 'Authorize Plezy to track watched movies and episodes. This connection is optional.');
+  const code = el('div', '…', 'pin');
+  const url = el('p', 'Requesting a Simkl device code…', 'muted');
+  const status = el('p', '', 'muted');
+  main.append(code, url, status, button('Cancel', back));
+  focusFirst();
+  const controller = new AbortController();
+  authAbort = controller;
+  try {
+    const grant = await beginSimklLink(controller.signal);
+    if (controller.signal.aborted) return;
+    code.textContent = grant.user_code;
+    const verify = new URL(grant.verification_uri);
+    if (verify.protocol !== 'https:' || (verify.hostname !== 'simkl.com' && !verify.hostname.endsWith('.simkl.com'))) {
+      throw new Error('Simkl returned an untrusted verification address.');
+    }
+    url.textContent = 'On your phone, visit ' + verify.href + ' and enter this code.';
+    status.textContent = 'Waiting for approval…';
+    const expires = Date.now() + Math.min(Math.max(60, Number(grant.expires_in) || 900), 900) * 1000;
+    let interval = Math.max(5, Number(grant.interval) || 5) * 1000;
+    while (!controller.signal.aborted && Date.now() < expires) {
+      await sleep(interval, controller.signal);
+      if (controller.signal.aborted) return;
+      let result;
+      try { result = await pollSimklLink(grant, controller.signal); }
+      catch (error) {
+        if (/unreachable|timed out/i.test(error.message)) {
+          status.textContent = 'Simkl connection interrupted. Retrying…';
+          continue;
+        }
+        throw error;
+      }
+      if (controller.signal.aborted) return;
+      if (result.session) {
+        state.simkl = result.session; persist(); history = [];
+        go({type: 'settings'}, false);
+        notify('Simkl connected. Plex playback will now be tracked automatically.');
+        return;
+      }
+      if (result.slowDown) interval += 5000;
+      status.textContent = 'Waiting for Simkl approval…';
+    }
+    if (!controller.signal.aborted) throw new Error('Simkl authorization code expired.');
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      status.className = 'error'; status.textContent = error.message;
+      main.append(button('Try Simkl again', render));
+    }
   }
 }
 window.addEventListener('keydown', event => {

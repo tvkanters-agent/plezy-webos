@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {clamp, time} from './core.js';
 export class Player {
-  constructor(root, notify, onClose) {
-    this.root = root; this.notify = notify; this.onClose = onClose;
+  constructor(root, notify, onClose, tracker = null) {
+    this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
     this.video = root.querySelector('video');
     this.controls = root.querySelector('.controls');
     this.status = root.querySelector('.player-status');
@@ -10,10 +10,15 @@ export class Player {
     this.video.addEventListener('loadedmetadata', () => this.resume());
     this.video.addEventListener('canplay', () => { this.status.textContent = ''; this.resume(); });
     this.video.addEventListener('timeupdate', () => this.update());
-    this.video.addEventListener('playing', () => { this.status.textContent = ''; this.report('playing'); this.reveal(); });
-    this.video.addEventListener('pause', () => { if (this.session) { this.report('paused'); this.reveal(); } });
+    this.video.addEventListener('playing', () => {
+      this.status.textContent = ''; this.report('playing');
+      this.track('start'); this.reveal();
+    });
+    this.video.addEventListener('pause', () => {
+      if (this.session && !this.closing) { this.report('paused'); this.track('pause'); this.reveal(); }
+    });
     this.video.addEventListener('waiting', () => { if (this.session) this.status.textContent = 'Buffering…'; });
-    this.video.addEventListener('ended', () => this.close());
+    this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
@@ -27,10 +32,12 @@ export class Player {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
   }
   get active() { return !this.root.hidden; }
-  async open(api, item, options = {}) {
-    await this.release();
+  async open(api, item, options = {}, preserveTracking = false) {
+    const tracking = preserveTracking ? this.playbackTracking : null;
+    await this.release(false, preserveTracking);
     const generation = ++this.generation;
     this.api = api; this.item = item; this.options = options;
+    this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = 'Preparing video…';
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
@@ -93,22 +100,33 @@ export class Player {
       if (!this.reportWarning) { this.reportWarning = true; this.notify('Progress could not be synced to the server.'); }
     });
   }
-  async release() {
+  track(action, ended = false) {
+    if (!this.playbackTracking || !this.item) return;
+    const position = this.pendingStart || this.video.currentTime || 0;
+    const duration = Number.isFinite(this.video.duration) && this.video.duration > 0
+      ? this.video.duration : this.item.duration;
+    this.playbackTracking.event(action, position, duration, ended);
+  }
+  async release(ended = false, preserveTracking = false) {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     const session = this.session, api = this.api;
-    if (session) this.report('stopped');
+    if (session) {
+      this.report('stopped');
+      if (!preserveTracking) this.track('stop', ended);
+    }
+    this.playbackTracking = null;
     this.session = null; this.pendingStart = 0;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
     if (session) await api.stop(session).catch(() => {});
     this.reportWarning = false;
   }
-  async close() {
+  async close(ended = false) {
     if (this.closing) return;
     this.closing = true;
     this.root.hidden = true;
-    await this.release();
+    await this.release(ended);
     this.closing = false;
     this.onClose();
   }
@@ -117,7 +135,7 @@ export class Player {
     const options = {...this.options, ...changes, start: this.pendingStart || this.video.currentTime || 0};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
-    return this.open(this.api, this.item, options);
+    return this.open(this.api, this.item, options, true);
   }
   async failed() {
     if (!this.session || this.recovering) return;

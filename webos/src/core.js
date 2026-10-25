@@ -87,8 +87,9 @@ export function readState(storage) {
       (server.kind === 'plex' || (typeof server.userId === 'string' && !!server.userId))) : [];
     return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
       servers, active: typeof state.active === 'string' ? state.active : '',
-      quality: state.quality === 'transcode' ? 'transcode' : 'auto'};
-  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto'}; }
+      quality: state.quality === 'transcode' ? 'transcode' : 'auto',
+      simkl: state.simkl && typeof state.simkl === 'object' ? state.simkl : null};
+  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', simkl: null}; }
 }
 export function saveState(storage, state) {
   storage.setItem('plezy.webos', JSON.stringify(state));
