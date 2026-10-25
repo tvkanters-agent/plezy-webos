@@ -138,7 +138,7 @@ export function scrobblePayload(item, show) {
       Number(raw.parentIndex) < 0 || Number(raw.index) < 1) return null;
   const series = show?.raw || show || {};
   const media = {title: series.title || raw.grandparentTitle, ids: simklMovieIds(series)};
-  if (series.year) media.year = Number(series.year);
+  if (series.year || raw.grandparentYear) media.year = Number(series.year || raw.grandparentYear);
   if (!media.title && !Object.keys(media.ids).length) return null;
   return {show: media, episode: {season: Number(raw.parentIndex), number: Number(raw.index)}};
 }
@@ -161,20 +161,21 @@ export class SimklTracker {
     this.holdUntil = Number(this.getSession()?.retryNotBefore) || 0;
     this.epoch = 0;
     this.unmatched = {};
+    this.matches = {};
   }
   reset() {
     // Pending writes from a disconnected account must never be sent using
     // credentials for a different account linked on the same TV.
     ++this.epoch;
-    this.holdUntil = 0; this.lastWrite = 0; this.unmatched = {};
+    this.holdUntil = 0; this.lastWrite = 0; this.unmatched = {}; this.matches = {};
   }
   async itemPayload(api, item) {
     let show = null, media = item;
     if (item.type === 'episode' && item.raw?.grandparentRatingKey) {
       show = await api.detail(item.raw.grandparentRatingKey);
-    } else if (item.type === 'movie' && item.id && !Object.keys(simklMovieIds(item.raw)).length) {
-      // Plex hubs often omit Guids; the metadata endpoint with includeGuids=1
-      // has IDs Simkl can actually resolve. Do this outside the video thread.
+    } else if (item.type === 'movie' && item.id) {
+      // Plex home hubs often contain stale or incomplete GUIDs and release
+      // years. Fetch full details with includeGuids before first scrobble.
       try { media = await api.detail(item.id); } catch (_) { /* title/year fallback */ }
     }
     return scrobblePayload(media, show);
@@ -299,8 +300,49 @@ export class SimklTracker {
     }
     return this.refreshTask;
   }
+  async resolveUnmatched(body) {
+    const media = body.movie || body.show;
+    const title = typeof media?.title === 'string' ? media.title.trim() : '';
+    if (!title) return null;
+    const kind = body.movie ? 'movie' : 'tv';
+    const key = kind + ':' + title.toLowerCase() + ':' + (media.year || '');
+    if (this.matches[key]) return this.matches[key];
+    // Simkl already tried our IMDb/TMDB/TVDB IDs. Only after id_err, try
+    // a text lookup. Do not silently choose a fuzzy match with a wrong year.
+    const path = '/search/' + kind + '?q=' + encodeURIComponent(title) + '&limit=10';
+    const result = await send(path);
+    if (result.status !== 200 || !Array.isArray(result.data)) return null;
+    const exact = result.data.filter(entry =>
+      entry && typeof entry.title === 'string' &&
+      entry.title.trim().toLowerCase() === title.toLowerCase() &&
+      (!media.year || Number(entry.year) === Number(media.year)) &&
+      Number.isInteger(Number(entry.ids?.simkl_id)) &&
+      Number(entry.ids.simkl_id) > 0);
+    if (exact.length !== 1) return null;
+    const id = Number(exact[0].ids.simkl_id);
+    this.matches[key] = id;
+    return id;
+  }
   async scrobble(action, body, epoch = this.epoch) {
-    return this.post('/scrobble/' + action, body, action === 'stop', epoch);
+    const media = body.movie || body.show;
+    const kind = body.movie ? 'movie' : 'tv';
+    const key = kind + ':' + (media?.title || '').trim().toLowerCase() + ':' + (media?.year || '');
+    if (this.matches[key] && media) {
+      const updated = {...media, ids: {...media.ids, simkl: this.matches[key]}};
+      body = {...body, [body.movie ? 'movie' : 'show']: updated};
+    }
+    try {
+      return await this.post('/scrobble/' + action, body, action === 'stop', epoch);
+    } catch (error) {
+      if (!error.simklUnmatched || epoch !== this.epoch) throw error;
+      // One exact-title / matching-year lookup, no endless retries or
+      // ambiguous automatic matching. Never retry for HTTP transport errors.
+      const simklId = await this.resolveUnmatched(body);
+      if (!simklId || epoch !== this.epoch) throw error;
+      const resolved = {...media, ids: {...media.ids, simkl: simklId}};
+      return this.post('/scrobble/' + action,
+        {...body, [body.movie ? 'movie' : 'show']: resolved}, action === 'stop', epoch);
+    }
   }
   async post(path, body, allowConflict = false, epoch = this.epoch) {
     if (epoch !== this.epoch || !validSession(this.getSession())) return;

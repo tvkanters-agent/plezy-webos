@@ -276,3 +276,39 @@ test('Simkl 404 id_err skips repeated unmatchable item without retaining a dead 
     assert.match(errors[0],/could not match this Plex title/);
   } finally {restore();}
 });
+
+test('Simkl attempts exact-title lookup only after scrobble 404 id_err',async()=>{
+  const calls=[];const session=saved();
+  const restore=mock(async(url,options)=>{
+    const path=new URL(url).pathname;calls.push({path,options});
+    if(path==='/search/movie')return respond([{title:'The Film',year:2024,
+      ids:{simkl_id:1283}},{title:'Unrelated',year:2024,ids:{simkl_id:999}}]);
+    if(path==='/scrobble/start' && !JSON.parse(options.body).movie.ids.simkl)
+      return respond({error:'id_err'},404);
+    return respond({action:'start'});
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,()=>{});
+    await tracker.scrobble('start',{movie:{title:'The Film',year:2024,ids:{imdb:'tt1111111'}},progress:15});
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/search/movie','/scrobble/start']);
+    assert.equal(JSON.parse(calls[2].options.body).movie.ids.simkl,1283);
+  }finally{restore();}
+});
+test('Simkl does not auto-match ambiguous or nonmatching catalog results',async()=>{
+  const calls=[];const session=saved();
+  const restore=mock(async(url)=>{
+    calls.push(new URL(url).pathname);
+    if(url.includes('/search/movie'))return respond([
+      {title:'Example',year:2000,ids:{simkl_id:1}},
+      {title:'Example',year:2000,ids:{simkl_id:2}}
+    ]);
+    return respond({error:'id_err'},404);
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,()=>{});
+    await assert.rejects(tracker.scrobble('start',{
+      movie:{title:'Example',year:2000,ids:{}},progress:10
+    }),/could not match/);
+    assert.deepEqual(calls,['/scrobble/start','/search/movie']);
+  }finally{restore();}
+});
