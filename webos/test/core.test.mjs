@@ -284,3 +284,12 @@ test('rail library visibility persists across restarts',()=>{
  assert.equal(saved.librariesHidden,true);
  assert.equal(readState({getItem:()=>null}).librariesHidden,false);
 });
+
+test('Plex artwork URLs request server-side resized images',()=>{
+ const instance = new Plex(server,'device');
+ const url=new URL(instance.image({poster:'/library/metadata/123/thumb/old-image'}));
+ assert.equal(url.pathname,'/prefix/photo/:/transcode');
+ assert.equal(url.searchParams.get('width'),'240');
+ assert.equal(url.searchParams.get('height'),'360');
+ assert.equal(url.searchParams.get('url'),'/library/metadata/123/thumb/old-image');
+});

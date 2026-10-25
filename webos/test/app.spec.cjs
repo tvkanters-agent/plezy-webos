@@ -412,3 +412,25 @@ test('libraries are navigable in the rail and can be hidden and restored',async(
   await expect(page.getByRole('button',{name:'Browse',exact:true})).toHaveAttribute('aria-pressed','true');
   await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
 });
+
+test('poster loading caps initial concurrent artwork requests',async({page})=>{
+  const pending=[];
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+  await page.route('http://plex.test/**',route=>{
+    const u=new URL(route.request().url());
+    if(u.pathname==='/photo/:/transcode'){pending.push(route);return;}
+    if(u.pathname==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{
+      title:'Recently added',Metadata:Array.from({length:20},(_,i)=>({
+        ratingKey:String(i),type:'movie',title:'Film '+i,thumb:'/library/metadata/'+i+'/thumb'
+      }))
+    }]}}});
+    return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+  });
+  await page.goto('/');
+  await expect.poll(()=>pending.length).toBe(2);
+  await page.waitForTimeout(75);
+  expect(pending).toHaveLength(2);
+  for(const request of pending.splice(0))await request.fulfill({status:404});
+});

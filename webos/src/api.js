@@ -198,7 +198,14 @@ export class Plex {
     }
     return null;
   }
-  image(item) { return item.poster ? this.url(item.poster) : ''; }
+  image(item) {
+    if (!item.poster) return '';
+    // Plex's original /library/metadata/.../thumb response can be a large
+    // full-resolution JPEG. Ask Plex to decode/resize SERVER-SIDE before an
+    // older LG TV receives it; keeps artwork and GUI decode work bounded.
+    return this.url('/photo/:/transcode', {width: 240, height: 360,
+      minSize: 1, upscale: 0, url: item.poster});
+  }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
   async playback(item, options = {}) {
     const mediaIndex = options.mediaIndex ?? 0;

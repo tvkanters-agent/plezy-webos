@@ -184,17 +184,29 @@ function card(item) {
 // Flutter's sliver-based library lists inflate artwork near the viewport.
  // Chromium 53 ignores <img loading="lazy">, so queue only visible posters
  // (with one screen of prefetch) instead of decoding all 60 per library page.
-let posterFrame = 0;
+const MAX_ARTWORK_IN_FLIGHT = 2;
+let posterFrame = 0, artworkInFlight = 0;
 function loadVisiblePosters() {
   posterFrame = 0;
+  if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) return;
   const view = main.getBoundingClientRect();
   const images = main.querySelectorAll('img[data-poster-src]');
-  for (let i = 0; i < images.length; i++) {
+  for (let i = 0; i < images.length && artworkInFlight < MAX_ARTWORK_IN_FLIGHT; i++) {
     const img = images[i], rect = img.getBoundingClientRect();
-    if (rect.bottom < view.top - view.height || rect.top > view.bottom + view.height ||
-        rect.right < view.left - 250 || rect.left > view.right + 250) continue;
+    // One row of prefetch, not a full extra TV screen of full-size posters.
+    if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
+        rect.right < view.left - 180 || rect.left > view.right + 180) continue;
     const url = img.getAttribute('data-poster-src');
     img.removeAttribute('data-poster-src');
+    ++artworkInFlight;
+    const finish = () => {
+      img.removeEventListener('load', finish);
+      img.removeEventListener('error', finish);
+      artworkInFlight = Math.max(0, artworkInFlight - 1);
+      schedulePosters();
+    };
+    img.addEventListener('load', finish);
+    img.addEventListener('error', finish);
     img.src = url;
   }
 }
@@ -207,7 +219,7 @@ function poster(item) {
   if (image) {
     const img = el('img'); img.alt = ''; img.setAttribute('data-poster-src', image);
     img.onerror = () => { node.textContent = '▷'; };
-    node.append(img); schedulePosters();
+    node.append(img);
   } else node.textContent = '▷';
   return node;
 }
@@ -227,7 +239,17 @@ async function paginated(loader, currentRevision) {
     try {
       const page = await loader(start);
       if (currentRevision !== revision) return;
-      page.items.forEach(item => grid.append(card(item))); start += page.items.length;
+      // Populate in short batches: rendering 60 DOM cards in one task blocks
+      // Chromium 53's input thread just as badly as decoding their images.
+      for (let i = 0; i < page.items.length; i += 12) {
+        if (currentRevision !== revision) return;
+        const fragment = document.createDocumentFragment();
+        page.items.slice(i, i + 12).forEach(item => fragment.appendChild(card(item)));
+        grid.appendChild(fragment);
+        schedulePosters();
+        if (i + 12 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      start += page.items.length;
       schedulePosters();
       more.hidden = !page.items.length || start >= page.total;
       more.textContent = 'Load more';
@@ -387,6 +409,7 @@ async function render() {
     main.append(el('p', error.message, 'error'), button('Retry', render), button('Servers & settings', () => go({type: 'settings'})));
   }
   if (valid()) {
+    schedulePosters();
     if (route.focus) {
       const found = Array.from(main.querySelectorAll('[data-focus]')).find(n => n.dataset.focus === route.focus);
       // Restore the previous reading/scroll position BEFORE focusing its card.
