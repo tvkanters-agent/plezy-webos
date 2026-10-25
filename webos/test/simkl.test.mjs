@@ -301,3 +301,23 @@ test('Simkl does not invent a title-search fallback after an upstream API 404',a
     assert.deepEqual(paths,['/scrobble/start']);
   }finally{restore();}
 });
+
+test('Simkl inherits upstream ExternalIds legacy Plex agent GUID matching',()=>{
+ const examples=[
+   ['com.plexapp.agents.imdb://tt29768334?lang=en',{imdb:'tt29768334'}],
+   ['com.plexapp.agents.themoviedb://1241983',{tmdb:1241983}],
+   ['com.plexapp.agents.thetvdb://315500?lang=en',{tvdb:315500}],
+   ['com.plexapp.agents.hama://tvdb2-315500',{tvdb:315500}],
+   ['com.plexapp.agents.hama://imdb-6455986',{imdb:'tt6455986'}],
+   ['com.plexapp.agents.hama://tsdb-69346?lang=en',{tmdb:69346}]
+ ];
+ for(const [guid,expected] of examples)
+   assert.deepEqual(simklMovieIds({guid}),expected,guid);
+ for(const guid of ['plex://movie/abc','com.plexapp.agents.hama://anidb2-11905',
+     'com.plexapp.agents.hama://tvdb10-315500',
+     'com.plexapp.agents.themoviedb://1241983/extra'])
+   assert.deepEqual(simklMovieIds({guid}),{},guid);
+ assert.deepEqual(simklMovieIds({Guid:[{id:'tvdb://1'}],
+   guid:'com.plexapp.agents.thetvdb://2'}),{tvdb:1},
+   'modern Plex Guid takes precedence over legacy scalar');
+});
