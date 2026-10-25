@@ -257,10 +257,18 @@ test('Simkl PIN linking stores writable session and enables automatic tracking',
   await page.route('https://api.simkl.com/**',async route=>{
     const request=route.request(),pathname=new URL(request.url()).pathname;
     calls.push({pathname,body:request.postData()});
-    if(pathname==='/oauth2/device')return route.fulfill({json:{device_code:'device-key',
+    if(pathname==='/oauth2/device'){
+      if(request.headers()['content-type']!=='application/json' || !request.postDataJSON().scope)
+        return route.fulfill({status:400,json:{error:'invalid_request',error_description:'Invalid JSON request, please validate'}});
+      return route.fulfill({json:{device_code:'device-key',
       user_code:'ABCD-EFGH',verification_uri:'https://simkl.com/device',expires_in:900,interval:5}});
-    if(pathname==='/oauth2/token')return route.fulfill({json:{access_token:'simkl_at_tv_test',
+    }
+    if(pathname==='/oauth2/token'){
+      if(request.headers()['content-type']!=='application/json')
+        return route.fulfill({status:400,json:{error:'invalid_request',error_description:'Invalid JSON request, please validate'}});
+      return route.fulfill({json:{access_token:'simkl_at_tv_test',
       refresh_token:'simkl_rt_tv_test',expires_in:604800,scope:'media:read media:write'}});
+    }
     return route.fulfill({status:404});
   });
   await page.goto('/');

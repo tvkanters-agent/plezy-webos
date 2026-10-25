@@ -47,11 +47,12 @@ async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
       method: form || body ? 'POST' : 'GET',
       headers: {
         Accept: 'application/json',
-        ...(form ? {'Content-Type': 'application/x-www-form-urlencoded'} : {}),
-        ...(body ? {'Content-Type': 'application/json', 'simkl-api-key': SIMKL_CLIENT_ID} : {}),
+        ...((form || body) ? {'Content-Type': 'application/json', 'simkl-api-key': SIMKL_CLIENT_ID} : {}),
         ...(token ? {Authorization: 'Bearer ' + token} : {})
       },
-      body: form ? new URLSearchParams(form).toString() : body ? JSON.stringify(body) : undefined,
+      // Simkl OAuth V2 expects JSON just like authenticated API writes.
+      // Upstream Dart's form-looking bodyFields hide the protocol difference.
+      body: form || body ? JSON.stringify(form || body) : undefined,
       signal: controller.signal
     });
     const text = await response.text();

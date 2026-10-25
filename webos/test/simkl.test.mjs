@@ -11,7 +11,7 @@ function mock(fn) {const original=globalThis.fetch;globalThis.fetch=fn;return()=
 function saved(overrides={}) {return {...parseSession(token()),...overrides};}
 const movie={type:'movie',title:'Test film',raw:{title:'Test film',year:2024,
   Guid:[{id:'imdb://tt1234567'},{id:'tmdb://9988'},{id:'tvdb://bad'},{id:'bad://123'}]}};
-test('Simkl V2 device link requests write access and polls using form encoding',async()=>{
+test('Simkl V2 device link requests write access and polls using JSON',async()=>{
   const calls=[];const restore=mock(async(url,opts)=>{
     calls.push({url:new URL(url),opts});
     return respond(calls.length===1?{device_code:'device',user_code:'ABCD-EFGH',
@@ -23,15 +23,17 @@ test('Simkl V2 device link requests write access and polls using form encoding',
     assert.equal(code.user_code,'ABCD-EFGH');
     assert.equal(result.session.accessToken,'simkl_at_example');
     assert.equal(calls[0].url.pathname,'/oauth2/device');
-    assert.equal(new URLSearchParams(calls[0].opts.body).get('scope'),'media:read media:write');
+    assert.equal(JSON.parse(calls[0].opts.body).scope,'media:read media:write');
     assert.equal(calls[1].url.pathname,'/oauth2/token');
-    assert.equal(new URLSearchParams(calls[1].opts.body).get('grant_type'),'urn:ietf:params:oauth:grant-type:device_code');
-    assert.equal(new URLSearchParams(calls[1].opts.body).get('device_code'),'device');
+    assert.equal(JSON.parse(calls[1].opts.body).grant_type,'urn:ietf:params:oauth:grant-type:device_code');
+    assert.equal(JSON.parse(calls[1].opts.body).device_code,'device');
     assert.equal(calls[0].url.search,'', 'OAuth requests must not carry API identity URL parameters');
     assert.equal(calls[1].url.search,'', 'OAuth token polls also use the bare OAuth URL');
-    assert.equal(new URLSearchParams(calls[0].opts.body).get('client_id'),SIMKL_CLIENT_ID);
-    assert.equal(new URLSearchParams(calls[1].opts.body).get('client_id'),SIMKL_CLIENT_ID);
-    assert.equal(calls[0].opts.headers['Content-Type'],'application/x-www-form-urlencoded');
+    assert.equal(JSON.parse(calls[0].opts.body).client_id,SIMKL_CLIENT_ID);
+    assert.equal(JSON.parse(calls[1].opts.body).client_id,SIMKL_CLIENT_ID);
+    assert.equal(calls[0].opts.headers['Content-Type'],'application/json');
+    assert.equal(calls[1].opts.headers['Content-Type'],'application/json');
+    assert.equal(calls[0].opts.headers['simkl-api-key'],SIMKL_CLIENT_ID);
   }finally{restore();}
 });
 test('Simkl device flow treats pending and slow down as nonterminal but rejects read-only tokens',async()=>{
@@ -90,7 +92,7 @@ test('Simkl expires and refreshes tokens before sending scrobbles',async()=>{
     const tracker=new SimklTracker(()=>session,newSession=>{session=newSession;});
     await tracker.createPlayback({server:{kind:'plex'}},movie).event('start',0,100);
     assert.deepEqual(calls.map(c=>c.path),['/oauth2/token','/scrobble/start']);
-    assert.equal(new URLSearchParams(calls[0].opts.body).get('grant_type'),'refresh_token');
+    assert.equal(JSON.parse(calls[0].opts.body).grant_type,'refresh_token');
     assert.equal(calls[1].opts.headers.Authorization,'Bearer simkl_at_new');
     assert.equal(session.refreshToken,'simkl_rt_new');
   }finally{restore();}
