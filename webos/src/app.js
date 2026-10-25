@@ -238,13 +238,13 @@ async function paginated(loader, currentRevision) {
       if (currentRevision !== revision) return;
       // Populate in short batches: rendering 60 DOM cards in one task blocks
       // Chromium 53's input thread just as badly as decoding their images.
-      for (let i = 0; i < page.items.length; i += 12) {
+      for (let i = 0; i < page.items.length; i += 8) {
         if (currentRevision !== revision) return;
         const fragment = document.createDocumentFragment();
-        page.items.slice(i, i + 12).forEach(item => fragment.appendChild(card(item)));
+        page.items.slice(i, i + 8).forEach(item => fragment.appendChild(card(item)));
         grid.appendChild(fragment);
         schedulePosters();
-        if (i + 12 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
+        if (i + 8 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
       }
       start += page.items.length;
       schedulePosters();

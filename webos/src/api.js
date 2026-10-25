@@ -208,12 +208,12 @@ export class Plex {
     // Plex's original /library/metadata/.../thumb response can be a large
     // full-resolution JPEG. Ask Plex to decode/resize SERVER-SIDE before an
     // older LG TV receives it; keeps artwork and GUI decode work bounded.
-    return this.url('/photo/:/transcode', {width: 240, height: 360,
+    return this.url('/photo/:/transcode', {width: 320, height: 480,
       minSize: 1, upscale: 0, url: item.poster});
   }
   backdrop(item) {
     return item.background ? this.url('/photo/:/transcode',
-      {width: 800, height: 450, minSize: 1, upscale: 0, url: item.background}) : '';
+      {width: 960, height: 540, minSize: 1, upscale: 0, url: item.background}) : '';
   }
   async onDeck(showId) {
     const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
