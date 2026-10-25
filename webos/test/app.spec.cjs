@@ -242,3 +242,65 @@ test('Plex PIN login offers a choice when multiple servers are reachable',async(
   expect(saved.active).toBe('second');
   expect(saved.servers.find(s=>s.id==='second').token).toBe('token-two');
 });
+
+test('Simkl PIN linking stores writable session and enables automatic tracking',async({page})=>{
+  const calls=[];
+  await page.route('https://api.simkl.com/**',async route=>{
+    const request=route.request(),pathname=new URL(request.url()).pathname;
+    calls.push({pathname,body:request.postData()});
+    if(pathname==='/oauth2/device')return route.fulfill({json:{device_code:'device-key',
+      user_code:'ABCD-EFGH',verification_uri:'https://simkl.com/device',expires_in:900,interval:5}});
+    if(pathname==='/oauth2/token')return route.fulfill({json:{access_token:'simkl_at_tv_test',
+      refresh_token:'simkl_rt_tv_test',expires_in:604800,scope:'media:read media:write'}});
+    return route.fulfill({status:404});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Connect Simkl'}).click();
+  await expect(page.getByText('ABCD-EFGH')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Disconnect Simkl'})).toBeVisible({timeout:12000});
+  const session=JSON.parse(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).simkl;
+  expect(session.accessToken).toBe('simkl_at_tv_test');
+  expect(session.scope).toContain('media:write');
+  expect(calls.map(x=>x.pathname)).toContain('/oauth2/token');
+  await page.getByRole('button',{name:'Disconnect Simkl'}).click();
+  expect(JSON.parse(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).simkl).toBeNull();
+});
+test('Plex movie playback automatically scrobbles to Simkl with play, pause and stop',async({page})=>{
+  const {readFile}=await import('node:fs/promises');
+  const movie=await readFile(require('node:path').join(__dirname,'fixtures/test.webm'));
+  const events=[];
+  await page.addInitScript(()=>{
+    localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
+      servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'test-token'}],
+      quality:'auto',simkl:{accessToken:'simkl_at_scrobble',refreshToken:'simkl_rt_scrobble',
+        expiresAt:Date.now()+600000,scope:'media:read media:write'}}));
+  });
+  await page.route('https://api.simkl.com/**',route=>{
+    events.push({path:new URL(route.request().url()).pathname,
+      body:JSON.parse(route.request().postData()),auth:route.request().headers()['authorization']});
+    return route.fulfill({json:{action:'start'}});
+  });
+  const item={ratingKey:'m1',title:'Simkl Test Film',type:'movie',duration:1200000,
+    Guid:[{id:'imdb://tt7654321'}],Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+      Part:[{id:'part',key:'/library/parts/part/test.webm',Stream:[]}]}]};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/library/parts/part/test.webm')return serveVideo(route,movie);
+    const data=path==='/hubs'?{MediaContainer:{Hub:[{title:'Recently Added',Metadata:[item]}]}}
+      :{MediaContainer:{Metadata:[item]}};
+    return route.fulfill({json:data});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Simkl Test Film',exact:true}).click();
+  await page.getByRole('button',{name:'Play',exact:true}).first().click();
+  await expect.poll(()=>events.some(e=>e.path==='/scrobble/start')).toBe(true);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  await expect.poll(()=>events.some(e=>e.path==='/scrobble/pause')).toBe(true,{timeout:8000});
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true,{timeout:8000});
+  const first=events.find(e=>e.path==='/scrobble/start');
+  expect(first.body.movie.ids.imdb).toBe('tt7654321');
+  expect(first.body.progress).toBeGreaterThanOrEqual(0);
+  expect(first.auth).toBe('Bearer simkl_at_scrobble');
+  expect(events.filter(e=>e.path.startsWith('/scrobble/'))).toHaveLength(3);
+});
