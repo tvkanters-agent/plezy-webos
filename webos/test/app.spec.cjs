@@ -313,3 +313,18 @@ test('Plex movie playback automatically scrobbles to Simkl with play, pause and 
   expect(first.auth).toBe('Bearer simkl_at_scrobble');
   expect(events.filter(e=>e.path.startsWith('/scrobble/'))).toHaveLength(3);
 });
+
+test('webOS 4.x missing browser APIs do not block first launch or Plex login',async({page})=>{
+  await page.addInitScript(()=>{
+    window.AbortController=undefined;
+    Promise.allSettled=undefined;
+    Promise.prototype.finally=undefined;
+    String.prototype.padStart=undefined;
+    Element.prototype.append=undefined;
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
+  await page.getByRole('button',{name:'Sign in with Plex',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Link your Plex account'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Cancel'})).toBeVisible();
+});
