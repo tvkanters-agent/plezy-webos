@@ -48,11 +48,14 @@ async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
       method: form || body ? 'POST' : 'GET',
       headers: {
         Accept: 'application/json',
-        ...((form || body) ? {'Content-Type': 'application/json', 'simkl-api-key': SIMKL_CLIENT_ID} : {}),
+        ...((form || body) ? {'Content-Type': 'application/json'} : {}),
+        ...(body ? {'simkl-api-key': SIMKL_CLIENT_ID} : {}),
         ...(token ? {Authorization: 'Bearer ' + token} : {})
       },
-      // Simkl OAuth V2 expects JSON just like authenticated API writes.
-      // Upstream Dart's form-looking bodyFields hide the protocol difference.
+      // webOS-specific OAuth adaptation: native Plezy uses form bodyFields,
+      // but the tested LG browser received HTTP 400 "Invalid JSON request"
+      // until OAuth device/token requests were serialized as JSON.
+      // Keep upstream grant fields, scope and headers; do not infer behavior.
       body: form || body ? JSON.stringify(form || body) : undefined,
       signal: controller.signal
     });
