@@ -344,7 +344,7 @@ export class SimklTracker {
       this.setSession({...this.getSession(), retryNotBefore: this.holdUntil});
       throw new Error('Simkl rate limited this update. Final stops are saved for the next action or Retry in settings.');
     }
-    if (result.status === 404 && /^\\/scrobble\\//.test(path) &&
+    if (result.status === 404 && path.indexOf('/scrobble/') === 0 &&
         ['id_err', 'not_found', 'item_not_found'].includes(result.data?.error)) {
       const error = new Error('Simkl could not match this Plex title (HTTP 404). Check the IMDb/TMDb/TVDb identifiers; tracking will skip this title for now.');
       error.simklUnmatched = true;

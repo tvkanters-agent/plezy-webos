@@ -272,8 +272,8 @@ async function render() {
       title('Libraries', activeServer().name);
       const libraries = libraryCacheFor === api ? libraryCache : await api.libraries(); if (!valid()) return;
       if (libraryCacheFor !== api) { libraryCacheFor = api; libraryCache = libraries; navigation(); }
-      const list = el('div', undefined, 'actions'); libraries.forEach(library => list.append(button(library.title, () => go({type: 'library', library}))));
-      main.append(list); if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
+      if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
+      else main.append(el('p', 'Select a library from the navigation rail to browse its recommended titles, collections and playlists.', 'muted'));
     } else if (route.type === 'library') {
       title(route.library.title); const currentApi = api;
       const view = route.view || 'browse';
