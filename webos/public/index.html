@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Plezy for webOS</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="shell">
+    <aside aria-label="Main navigation">
+      <div class="brand"><img src="icon.png" alt=""><span>Plezy<small>webOS</small></span></div>
+      <nav id="nav"></nav>
+      <div class="sidebar-footer">Your media.<br>Your screen.</div>
+    </aside>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <section id="player" aria-label="Video player" hidden>
+    <video tabindex="-1" playsinline></video>
+    <div class="player-status" role="status"></div>
+    <div class="controls">
+      <div class="player-heading"><h2 class="player-title"></h2><span class="play-method"></span></div>
+      <progress max="1" value="0" aria-label="Playback progress"></progress>
+      <p class="elapsed">0:00 / 0:00</p>
+      <div class="player-buttons">
+        <button data-action="backward">−10 seconds</button>
+        <button data-action="pause">Pause</button>
+        <button data-action="forward">+30 seconds</button>
+        <button data-action="stop">Stop</button>
+        <button data-action="transcode">Compatible playback</button>
+      </div>
+      <div class="track-controls">
+        <label>Audio <select data-track="audio" aria-label="Audio track"></select></label>
+        <label>Subtitles <select data-track="subtitle" aria-label="Subtitle track"></select></label>
+      </div>
+    </div>
+  </section>
+  <section id="dialog" role="dialog" aria-modal="true" aria-label="Confirm exit" hidden></section>
+  <script src="app.js" defer></script>
+</body>
+</html>

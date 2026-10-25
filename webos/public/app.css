@@ -1,0 +1,67 @@
+/* Plezy's Mono dark palette, adapted for a 10-foot HTML interface. */
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; background: #0e0f12; color: #ededed; font: 22px/1.45 Arial, sans-serif; overflow: hidden; }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; border: 2px solid #363940; border-radius: 10px; background: #20232a; padding: 12px 20px; }
+button { cursor: pointer; }
+button:hover { background: #30343d; }
+button:focus, input:focus, select:focus, .card:focus { outline: 4px solid #ededed; outline-offset: 4px; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { color: #111; background: #ededed; border-color: #ededed; }
+h1 { font-size: 42px; line-height: 1.15; margin: 0 0 20px; }
+h2 { font-size: 28px; margin: 0 0 18px; }
+p { margin: 0 0 20px; }
+small, .muted { color: #a2a5ae; }
+#shell { display: flex; height: 100%; }
+aside { flex: 0 0 240px; padding: 42px 22px; border-right: 1px solid #2c2f35; display: flex; flex-direction: column; background: #111318; }
+.brand { display: flex; align-items: center; font-weight: bold; font-size: 32px; margin: 0 12px 48px; }
+.brand img { width: 45px; height: 45px; margin-right: 12px; border-radius: 10px; }
+.brand small { display: block; font-size: 13px; letter-spacing: 4px; text-transform: uppercase; }
+nav { overflow-y: auto; padding: 7px; }
+nav button { text-align: left; display: block; width: 100%; margin-bottom: 12px; border-color: transparent; background: transparent; font-size: 21px; }
+nav button.active { background: #292d35; }
+.sidebar-footer { margin-top: auto; padding: 28px 14px 0; color: #717781; font-size: 16px; }
+main { flex: 1; min-width: 0; overflow-y: auto; padding: 48px 48px 80px; }
+.eyebrow { text-transform: uppercase; letter-spacing: 3px; color: #a2a5ae; font-size: 15px; margin-bottom: 12px; }
+.intro { max-width: 780px; margin-bottom: 36px; color: #a2a5ae; }
+.shelf { margin-bottom: 36px; }
+.cards { display: flex; overflow-x: auto; padding: 10px 8px 20px; margin-left: -8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); grid-gap: 26px 20px; padding: 10px 8px 24px; }
+.card { flex: 0 0 180px; min-width: 0; width: 180px; border: 0; background: transparent; border-radius: 8px; padding: 0; text-align: left; position: relative; }
+.grid .card { width: 100%; }
+.cards .card { margin-right: 22px; }
+.card .poster { width: 100%; height: 260px; border-radius: 8px; overflow: hidden; background: #232730; display: flex; align-items: center; justify-content: center; color: #747b89; font-size: 54px; }
+.poster img { width: 100%; height: 100%; object-fit: cover; }
+.card strong { display: block; font-size: 19px; margin-top: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card small { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { position: absolute; top: 12px; right: 10px; background: #ededed; color: #111; border-radius: 20px; padding: 2px 8px; font-size: 16px; }
+.card progress { width: 100%; height: 5px; position: absolute; top: 255px; left: 0; }
+.actions { display: flex; flex-wrap: wrap; margin: 26px 0; }
+.actions > * { margin: 0 15px 15px 0; }
+.panel { padding: 30px; border: 1px solid #30333b; border-radius: 16px; background: #15171c; max-width: 860px; margin-bottom: 24px; }
+form label { display: block; margin: 20px 0; }
+form label input, form label select { display: block; width: 100%; margin-top: 8px; }
+form button { margin-top: 12px; margin-right: 16px; }
+.error { color: #ffb5b5; white-space: pre-wrap; }
+.detail { display: flex; margin: 26px 0 42px; }
+.detail > .poster { flex: 0 0 270px; height: 400px; background: #20232a; border-radius: 12px; overflow: hidden; margin-right: 40px; }
+.detail-info { max-width: 850px; }
+.detail-info p { color: #b8bbc3; }
+.pin { font-size: 70px; font-weight: bold; letter-spacing: 14px; margin: 24px 0; }
+#toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); padding: 18px 28px; border: 1px solid #666; border-radius: 12px; background: #252932; max-width: 80%; z-index: 10; }
+#player { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: black; z-index: 5; }
+video { width: 100%; height: 100%; object-fit: contain; }
+.controls { position: absolute; bottom: 0; left: 0; right: 0; padding: 90px 50px 36px; background: linear-gradient(transparent, rgba(0,0,0,.95) 35%); }
+.hidden-controls { visibility: hidden; }
+.player-heading { display: flex; justify-content: space-between; align-items: center; }
+.play-method { font-size: 18px; color: #bbb; }
+.controls progress { width: 100%; height: 8px; }
+.elapsed { font-size: 18px; margin: 10px 0 20px; }
+.player-buttons button { margin: 0 12px 14px 0; }
+.track-controls { display: flex; }
+.track-controls label { margin-right: 25px; font-size: 18px; }
+.track-controls select { max-width: 470px; margin-left: 8px; padding: 8px; font-size: 18px; }
+.player-status { position: absolute; top: 12%; left: 15%; right: 15%; text-align: center; background: rgba(0,0,0,.75); border-radius: 12px; }
+.player-status:empty { display: none; }
+#dialog { position: fixed; left: 25%; right: 25%; top: 30%; background: #20232a; padding: 45px; border: 2px solid #555; border-radius: 18px; z-index: 20; box-shadow: 0 0 0 100vmax rgba(0,0,0,.8); }
+@media (max-width: 1100px) { html, body { font-size: 18px; } aside { flex-basis: 190px; padding: 26px 12px; } main { padding: 32px; } .card { flex-basis: 155px; width: 155px; } .card .poster { height: 225px; } .card progress { top: 220px; } h1 { font-size: 34px; } .detail > .poster { flex-basis: 200px; height: 300px; } }

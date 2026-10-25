@@ -1,0 +1,17 @@
+{
+  "id": "com.tvkanters.plezy",
+  "version": "0.1.0",
+  "vendor": "Plezy webOS contributors",
+  "type": "web",
+  "main": "index.html",
+  "title": "Plezy",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "appDescription": "Community webOS port of Plezy for Plex, Jellyfin and Emby",
+  "resolution": "1920x1080",
+  "bgColor": "#0e0f12",
+  "iconColor": "#0e0f12",
+  "disableBackHistoryAPI": true,
+  "uiRevision": 2,
+  "requiredACG": []
+}

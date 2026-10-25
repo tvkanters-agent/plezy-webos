@@ -1,0 +1,19 @@
+{
+  "name": "plezy-webos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "playwright test",
+    "package": "npm run build && ares-package --no-minify dist -o build",
+    "dev": "npm run build && ares-server dist"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.51.1",
+    "@webos-tools/cli": "^3.2.1",
+    "esbuild": "^0.25.0"
+  }
+}
