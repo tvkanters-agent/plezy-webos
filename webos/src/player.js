@@ -5,6 +5,7 @@ export class Player {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
     this.video = root.querySelector('video');
     this.controls = root.querySelector('.controls');
+    this.sheet = root.querySelector('.player-sheet');
     this.status = root.querySelector('.player-status');
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
     this.video.addEventListener('loadedmetadata', () => this.resume());
@@ -29,6 +30,12 @@ export class Player {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
     };
     root.querySelector('[data-action="transcode"]').onclick = () => this.reopen({transcode: true});
+    root.querySelector('[data-action="options"]').onclick = () => {
+      this.sheet.hidden = false; this.reveal();
+      const first = this.sheet.querySelector('select:not([disabled])');
+      if (first) first.focus();
+    };
+    root.querySelector('[data-action="close-options"]').onclick = () => this.closeSheet();
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => this.reopen({[kind]: Number(event.target.value), transcode: true});
     }
@@ -36,6 +43,11 @@ export class Player {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
   }
   get active() { return !this.root.hidden; }
+  closeSheet() {
+    this.sheet.hidden = true;
+    this.root.querySelector('[data-action="options"]').focus();
+    this.reveal();
+  }
   async open(api, item, options = {}, preserveTracking = false) {
     const tracking = preserveTracking ? this.playbackTracking : null;
     this.closing = false;
@@ -47,6 +59,7 @@ export class Player {
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = 'Preparing video…';
+    this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
     this.root.querySelector('[data-action="skip"]').hidden = true; this.marker = null;
     this.root.querySelector('.player-title').textContent = item.title;
@@ -198,7 +211,7 @@ export class Player {
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (this.session && !this.video.paused && !['SELECT'].includes(document.activeElement.tagName)) {
+      if (this.session && this.sheet.hidden && !this.video.paused && !['SELECT'].includes(document.activeElement.tagName)) {
         this.controls.classList.add('hidden-controls');
         this.root.querySelector('.player-top').classList.add('hidden-controls');
         this.video.focus();
@@ -207,6 +220,9 @@ export class Player {
   }
   key(event) {
     const code = event.keyCode;
+    if (!this.sheet.hidden && [461, 27, 413].includes(code)) {
+      event.preventDefault(); this.closeSheet(); return true;
+    }
     if ([461, 27, 413].includes(code)) { event.preventDefault(); this.close(); return true; }
     if ([415, 19, 10252, 32, 412, 417].includes(code)) {
       event.preventDefault();

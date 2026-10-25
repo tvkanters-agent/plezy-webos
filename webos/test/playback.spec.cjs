@@ -36,7 +36,8 @@ test('Back during delayed stream cleanup cannot resurrect playback',async({page}
     if(new URL(route.request().url()).searchParams.get('state')==='stopped')await new Promise(resolve=>{release=resolve;});
     await route.fulfill({json:{}});
   });
-  await page.getByRole('button',{name:'Compatible playback',exact:true}).last().click();
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Compatible playback',exact:true}).click();
   await expect.poll(()=>!!release).toBe(true);
   await page.keyboard.press('Escape'); release();
   await expect(page.locator('#player')).toBeHidden();
@@ -49,6 +50,7 @@ test('failed audio restart still stops the existing Simkl viewing',async({page})
   // Add a real server audio option to the next metadata-independent restart.
   await page.route('http://plex.test/library/parts/part**',route=>route.fulfill({status:500}));
   // The default selector is enough to exercise the track PUT before opening HLS.
+  await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByLabel('Subtitle track').selectOption('-1');
   await expect(page.locator('.player-status')).toContainText('HTTP 500');
   await page.keyboard.press('Escape');
@@ -73,6 +75,7 @@ test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async
  await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Skip intro',exact:true}).click();
  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(15);
+ await page.getByRole('button',{name:'Playback settings'}).click();
  await page.getByLabel('Chapter',{exact:true}).selectOption('45');
  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(45);
  await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeHidden();
@@ -129,4 +132,15 @@ test('transport icons use vector graphics and expose accessible button labels',a
   expect(await buttons.locator('svg').count()).toBe(5);
   await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeVisible();
   await expect(page.locator('.player-buttons button[data-action="pause"] .pause-glyph')).toBeVisible();
+});
+
+test('video settings use a Plezy-style side sheet rather than browser dropdown toolbar',async({page})=>{
+  await setup(page);
+  await expect(page.locator('.player-sheet')).toBeHidden();
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await expect(page.locator('.player-sheet')).toBeVisible();
+  await expect(page.getByLabel('Audio track')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.player-sheet')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
 });

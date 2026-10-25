@@ -41,13 +41,24 @@
         </div>
         <div class="player-secondary">
           <button data-action="skip" class="player-pill" hidden>Skip intro</button>
-          <button data-action="transcode" class="player-pill">Compatible playback</button>
+          <button data-action="options" class="transport-icon" aria-label="Playback settings" title="Playback settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 4v4M15 10v4M10 16v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
         </div>
+      </div>
+    </div>
+    <!-- Upstream TrackChapterControls opens a sheet, rather than rendering
+         oversized native HTML dropdowns on the video itself. -->
+    <div class="player-sheet" hidden>
+      <div class="player-sheet-header">
+        <h3>Playback settings</h3>
+        <button data-action="close-options" aria-label="Close playback settings">Close</button>
       </div>
       <div class="track-controls">
         <label data-chapters hidden>Chapters <select aria-label="Chapter" data-chapter></select></label>
         <label>Audio <select data-track="audio" aria-label="Audio track"></select></label>
         <label>Subtitles <select data-track="subtitle" aria-label="Subtitle track"></select></label>
+        <button data-action="transcode" class="player-pill">Compatible playback</button>
       </div>
     </div>
   </section>
