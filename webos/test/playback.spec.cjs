@@ -1,7 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}) {
+async function setup(page, extra = {}, version) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
@@ -24,6 +24,7 @@ async function setup(page, extra = {}) {
     return route.fulfill({json:url.pathname==='/hubs'?{MediaContainer:{Hub:[{title:'Movies',Metadata:[item]}]}}:{MediaContainer:{Metadata:[item]}}});
   });
   await page.goto('/'); await page.getByRole('button',{name:'Test Movie',exact:true}).click();
+  if (version !== undefined) await page.getByLabel('Media version',{exact:true}).selectOption(String(version));
   await page.getByRole('button',{name:'Play',exact:true}).first().click();
   await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
   await expect.poll(()=>events.length).toBeGreaterThan(0);
@@ -77,4 +78,17 @@ test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async
  await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeHidden();
  expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
  expect(calls.find(u=>u.pathname==='/library/metadata/movie').searchParams.get('includeMarkers')).toBe('1');
+});
+
+test('selected Plex version survives compatible playback restart',async({page})=>{
+ const {calls}=await setup(page,{Media:[
+   {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'first',key:'/wrong.webm'}]},
+   {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'second',key:'/video.webm'}]}
+ ]},1);
+ expect(calls.some(u=>u.pathname==='/wrong.webm')).toBe(false);
+ await page.getByRole('button',{name:'Compatible playback',exact:true}).last().click();
+ await expect.poll(()=>calls.some(u=>u.pathname.endsWith('/start.m3u8') && u.searchParams.get('mediaIndex')==='1')).toBe(true);
+ await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
+ await page.getByRole('button',{name:'Stop',exact:true}).click();
+ await expect(page.getByLabel('Media version',{exact:true})).toHaveValue('1');
 });

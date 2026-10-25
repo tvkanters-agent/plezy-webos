@@ -260,3 +260,21 @@ test('Plex chapters and intro markers use seconds, sorted and clipped to the tit
  assert.deepEqual(navigation.chapters.map(c=>c.start),[0,50]);
  assert.deepEqual(navigation.markers,[{type:'intro',start:5,end:15},{type:'credits',start:90,end:100}]);
 });
+
+test('Plex chosen version controls direct URL, HLS media index and track mutations', async () => {
+  const calls=[]; const restore=mock(async(url,options)=>{calls.push({url:new URL(url),options});return json({});});
+  const api=new Plex(server,'device');
+  const item={id:'movie',raw:{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'first',key:'/first.mp4'}]},
+    {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'second',key:'/second.mp4',Stream:[{streamType:2,id:42,language:'French'}]}]}]}};
+  try {
+    const direct=await api.playback(item,{mediaIndex:1});
+    assert.equal(new URL(direct.url).pathname,'/prefix/second.mp4');
+    assert.equal(direct.audio[0].id,42);
+    const converted=await api.playback(item,{mediaIndex:1,audio:42,transcode:true});
+    assert.equal(new URL(converted.url).searchParams.get('mediaIndex'),'1');
+    assert.equal(calls[0].url.pathname,'/prefix/library/parts/second');
+    for(const mediaIndex of [-1,1.5,9]) await assert.rejects(api.playback(item,{mediaIndex}));
+    item.raw.Media[1].Part.push({id:'third',key:'/third.mp4'});
+    await assert.rejects(api.playback(item,{mediaIndex:1}),/Multi-part/);
+  } finally {restore();}
+});

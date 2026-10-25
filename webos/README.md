@@ -131,3 +131,7 @@ Final stop events are saved with the linked Simkl session before delivery (up to
 ### Plex chapters and skips
 
 Titles with server-provided chapters offer a chapter selector during playback. Intro and credits markers show a skip button only while the marker is active. These controls seek within the current stream and update Plex progress without creating extra Simkl playback events. Marker availability depends on your Plex server and library analysis.
+
+### Plex media versions
+
+When a title has multiple media versions, choose one on its detail screen before Play, Resume, or Compatible playback. Audio/subtitle changes and decoder fallback retain the selected version. Multi-part files currently show an explicit unsupported message instead of silently playing only the first part; choose a single-part version.

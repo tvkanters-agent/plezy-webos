@@ -185,15 +185,18 @@ export class Plex {
   image(item) { return item.poster ? this.url(item.poster) : ''; }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
   async playback(item, options = {}) {
-    const media = (item.raw.Media || [])[0];
+    const mediaIndex = options.mediaIndex ?? 0;
+    if (!Number.isInteger(mediaIndex) || mediaIndex < 0) throw new Error('Invalid media version.');
+    const media = (item.raw.Media || [])[mediaIndex];
     const part = media && (media.Part || [])[0];
-    if (!part) throw new Error('This item has no playable media.');
+    if (!part) throw new Error('This version has no playable media.');
+    if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
     const sessionId = id();
     const transcode = options.transcode || !['mp4', 'm4v', 'mov'].includes(media.container)
       || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
       || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
     // Conservative direct play, with user-accessible HLS fallback for TV-specific limits.
-    const params = {path: '/library/metadata/' + item.id, mediaIndex: 0, partIndex: 0,
+    const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId, offset: 0, subtitleSize: 100, subtitles: 'burn',

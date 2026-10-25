@@ -192,6 +192,19 @@ async function render() {
       if (item.duration) info.append(el('p', time(item.duration), 'muted'));
       const actions = el('div', undefined, 'actions');
       if (!item.folder) {
+        const versions = api instanceof Plex ? item.raw.Media || [] : [];
+        if (versions.length > 1) {
+          const label = el('label', 'Version '), select = el('select');
+          select.setAttribute('aria-label', 'Media version'); select.dataset.focus = 'media-version';
+          versions.forEach((media, index) => {
+            const detail = [media.videoResolution, media.videoCodec, media.audioCodec, media.container].filter(Boolean).join(' · ');
+            const option = el('option', 'Version ' + (index + 1) + (detail ? ' · ' + detail : ''));
+            option.value = index; select.append(option);
+          });
+          select.value = String(route.mediaIndex || 0);
+          select.onchange = () => { route.mediaIndex = Number(select.value); };
+          label.append(select); info.append(label);
+        }
         if (item.resume > 0) actions.append(button('Resume · ' + time(item.resume), () => play(item, item.resume), 'primary'));
         actions.append(button(item.resume > 0 ? 'Play from beginning' : 'Play', () => play(item, 0), item.resume > 0 ? '' : 'primary'));
         actions.append(button('Compatible playback', () => play(item, item.resume, true)));
@@ -229,7 +242,7 @@ async function render() {
     } else focusFirst();
   }
 }
-function play(item, start, transcode = false) { return player.open(api, item, {start, transcode: transcode || state.quality === 'transcode'}); }
+function play(item, start, transcode = false) { return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0, transcode: transcode || state.quality === 'transcode'}); }
 function settings() {
   title(api ? 'Servers & settings' : 'Welcome to Plezy', 'Connect your media server and settle in. Use the remote arrows and OK, or the Magic Remote pointer.');
   state.servers.forEach(server => {
