@@ -163,3 +163,16 @@ main > .detail,main > .detail-children-title, main > .grid,main > .error { posit
 .player-options-list button[aria-pressed="true"] { background:rgba(255,255,255,.2); }
 .player-options-list button:focus { background:#ededed; color:#121212; outline:0; }
 .player-sheet .track-controls { display:none; }
+
+/* Plezy's compact rail state + individually hidden libraries. */
+aside { -webkit-transition: flex-basis .12s ease-out; }
+aside.collapsed { flex-basis:78px; padding:24px 9px; }
+aside.collapsed .brand { margin:0 4px 40px; }
+aside.collapsed .brand span { display:none; }
+aside.collapsed .brand img { margin:0; width:42px; height:42px; }
+aside.collapsed nav button:not(.rail-collapse) { font-size:0; width:50px; overflow:hidden; padding:10px; }
+aside.collapsed nav button svg { margin:0 auto; }
+aside.collapsed .rail-library-header { display:none; }
+.rail-collapse { font-size:15px; width:100%; margin-top:20px; padding:10px 8px; }
+aside.collapsed .rail-collapse { font-size:0; width:50px; padding:10px; }
+aside.collapsed .rail-collapse:before { content:'››'; font-size:23px; display:block; }

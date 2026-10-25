@@ -461,3 +461,16 @@ test('Plex show detail displays metadata and browsable seasons',async({page})=>{
   await expect(page.getByRole('heading',{name:'Seasons'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Season 1'})).toBeVisible();
 });
+
+test('sidebar can collapse, and settings can hide individual Plex libraries',async({page})=>{
+  await mockServer(page);await page.goto('/');
+  await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeVisible();
+  await page.getByRole('button',{name:'Collapse sidebar'}).click();
+  await expect(page.locator('aside')).toHaveClass(/collapsed/);
+  await page.getByRole('button',{name:'Expand sidebar'}).click();
+  await page.getByRole('button',{name:'Servers & settings'}).click();
+  await expect(page.getByRole('button',{name:'Hide Movies in sidebar'})).toBeVisible();
+  await page.getByRole('button',{name:'Hide Movies in sidebar'}).click();
+  await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Show Movies in sidebar'})).toBeVisible();
+});

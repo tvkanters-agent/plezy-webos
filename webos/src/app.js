@@ -110,6 +110,7 @@ function railButton(label, action, className, iconName) {
   return control;
 }
 function navigation() {
+  document.querySelector('aside').classList.toggle('collapsed', state.sidebarCollapsed);
   // Plezy's Flutter side rail lists the connected server's libraries inline.
   // Fetch once per server, then keep this list as navigation moves between pages.
   const focused = document.activeElement?.dataset?.navId;
@@ -129,10 +130,11 @@ function navigation() {
     toggle.title = state.librariesHidden ? 'Show libraries' : 'Hide libraries';
     toggle.setAttribute('aria-label', toggle.title);
     libraryHeader.append(listing, toggle); nav.append(libraryHeader);
-    if (!state.librariesHidden) {
+    if (!state.librariesHidden && !state.sidebarCollapsed) {
       const section = el('div', undefined, 'rail-library-items');
       const libraries = libraryCacheFor === api ? libraryCache : null;
-      if (libraries) libraries.forEach(library => {
+      if (libraries) libraries.filter(library => !state.hiddenLibraryIds.includes(
+        activeServer().id + ':' + library.id)).forEach(library => {
         const active = route.type === 'library' && String(route.library.id) === String(library.id);
         const control = button(library.title, () => go({type:'library', library}),
           active ? 'active' : '');
@@ -149,11 +151,18 @@ function navigation() {
         if (currentApi !== api) return;
         libraryCacheFor = currentApi; libraryCache = libraries; libraryLoading = false;
         navigation();
+        if (route.type === 'settings') render();
       }).catch(() => { if (currentApi === api) libraryLoading = false; });
     }
     nav.append(railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search'));
   }
   nav.append(railButton('Servers & settings', () => go({type:'settings'}), route.type === 'settings' ? 'active' : '', 'settings'));
+  const collapse = button(state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar', () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed; persist(); navigation();
+  }, 'rail-collapse');
+  collapse.dataset.navId = 'collapse';
+  collapse.setAttribute('title', collapse.textContent);
+  nav.append(collapse);
   if (focused) {
     const restore = Array.from(nav.querySelectorAll('[data-nav-id]')).find(x => x.dataset.navId === focused);
     if (restore) restore.focus();
@@ -515,7 +524,23 @@ function settings() {
     simklPanel.append(el('p', 'Optional: automatically sync Plex movie and episode playback to your Simkl account. Link with a code on your phone.', 'muted'));
     simklPanel.append(button('Connect Simkl', () => go({type: 'simkl'}), 'primary'));
   }
-  main.append(simklPanel, el('p', 'Community port · ' + VERSION + ' alpha · webOS 4.x+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
+  main.append(simklPanel);
+  if (api && libraryCacheFor === api && libraryCache) {
+    const manager = el('section', undefined, 'panel');
+    manager.append(el('h2', 'Library visibility'),
+      el('p', 'Choose which libraries appear in Plezy’s navigation rail.', 'muted'));
+    libraryCache.forEach(library => {
+      const key = activeServer().id + ':' + library.id;
+      const hidden = state.hiddenLibraryIds.includes(key);
+      manager.append(button((hidden ? 'Show ' : 'Hide ') + library.title + ' in sidebar', () => {
+        state.hiddenLibraryIds = hidden
+          ? state.hiddenLibraryIds.filter(x => x !== key) : state.hiddenLibraryIds.concat(key);
+        persist(); navigation(); render();
+      }));
+    });
+    main.append(manager);
+  }
+  main.append(el('p', 'Community port · ' + VERSION + ' alpha · webOS 4.x+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
 }
 function field(form, text, type = 'text', value = '') {
   const label = el('label', text), input = el('input'); input.type = type; input.value = value; input.autocomplete = type === 'password' ? 'current-password' : 'off';

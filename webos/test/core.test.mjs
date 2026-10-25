@@ -322,3 +322,11 @@ test('Plex collection and playlist details use their distinct item APIs',async()
    ]);
  }finally{restore();}
 });
+
+test('sidebar collapse and individually hidden libraries persist safely',()=>{
+ const state=readState({getItem:()=>JSON.stringify({
+   sidebarCollapsed:true,hiddenLibraryIds:['plex:12',null,31,'plex:13']
+ })});
+ assert.equal(state.sidebarCollapsed,true);
+ assert.deepEqual(state.hiddenLibraryIds,['plex:12','plex:13']);
+});
