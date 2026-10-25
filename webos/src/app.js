@@ -96,7 +96,7 @@ function railButton(label, action, className, iconName) {
     home: 'M12 2 2 11h3v10h6v-6h2v6h6V11h3L12 2z',
     libraries: 'M4 5h16v3H4zm0 6h16v3H4zm0 6h16v3H4z',
     search: 'M10.5 3a7.5 7.5 0 0 0 0 15c1.7 0 3.2-.6 4.4-1.5l4.6 4.5 1.5-1.5-4.5-4.6A7.5 7.5 0 0 0 10.5 3zm0 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z',
-    settings: 'M3 7h18v2H3zm0 7h18v2H3z'
+    settings: 'M19.14 12.94a7.8 7.8 0 0 0 0-1.88l2.02-1.58-2-3.46-2.43.97a7.6 7.6 0 0 0-1.63-.94L14.72 3h-4l-.38 3.05a7.6 7.6 0 0 0-1.63.94l-2.43-.97-2 3.46 2.02 1.58a7.8 7.8 0 0 0 0 1.88l-2.02 1.58 2 3.46 2.43-.97c.5.39 1.05.7 1.63.94l.38 3.05h4l.38-3.05c.58-.24 1.13-.55 1.63-.94l2.43.97 2-3.46-2.02-1.58z M12.72 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z'
   };
   const control = button(label, action, className);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -118,19 +118,11 @@ function navigation() {
   if (api) {
     const home = railButton('Home', () => go({type: 'home'}), route.type === 'home' ? 'active' : '', 'home');
     home.dataset.navId = 'home'; nav.append(home);
-    const libraryHeader = el('div', undefined, 'rail-library-header');
-    const listing = button('Libraries', () => go({type:'libraries'}), 'rail-library-label');
-    listing.dataset.navId = 'libraries';
-    const toggle = button(state.librariesHidden ? 'Show libraries' : 'Hide libraries', () => {
-      state.librariesHidden = !state.librariesHidden; persist(); navigation();
-    }, 'rail-toggle');
-    toggle.setAttribute('aria-expanded', String(!state.librariesHidden));
-    toggle.dataset.navId = 'library-toggle';
-    toggle.textContent = state.librariesHidden ? '▸' : '▾';
-    toggle.title = state.librariesHidden ? 'Show libraries' : 'Hide libraries';
-    toggle.setAttribute('aria-label', toggle.title);
-    libraryHeader.append(listing, toggle); nav.append(libraryHeader);
-    if (!state.librariesHidden && !state.sidebarCollapsed) {
+    const libraryHeader = el('div', 'Libraries', 'rail-library-header');
+    // Heading only: the individual libraries are the actual destinations.
+    // Library visibility is controlled from Settings.
+    nav.append(libraryHeader);
+    if (!state.librariesHidden) {
       const section = el('div', undefined, 'rail-library-items');
       const libraries = libraryCacheFor === api ? libraryCache : null;
       if (libraries) libraries.filter(library => !state.hiddenLibraryIds.includes(
@@ -156,16 +148,12 @@ function navigation() {
     }
     nav.append(railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search'));
   }
-  nav.append(railButton('Servers & settings', () => go({type:'settings'}), route.type === 'settings' ? 'active' : '', 'settings'));
-  const collapse = button(state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar', () => {
-    state.sidebarCollapsed = !state.sidebarCollapsed; persist(); navigation();
-  }, 'rail-collapse');
-  collapse.dataset.navId = 'collapse';
-  collapse.setAttribute('title', collapse.textContent);
-  nav.append(collapse);
+  const settingsLink = railButton('Settings', () => go({type:'settings'}), route.type === 'settings' ? 'active' : '', 'settings');
+  settingsLink.dataset.navId = 'settings';
+  nav.append(settingsLink);
   if (focused) {
     const restore = Array.from(nav.querySelectorAll('[data-nav-id]')).find(x => x.dataset.navId === focused);
-    if (restore) restore.focus();
+    if (restore) focusWithoutJump(restore, false);
   }
 }
 function go(next, remember = true) {
@@ -485,7 +473,7 @@ async function render() {
 }
 function play(item, start, transcode = false) { return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0, transcode: transcode || state.quality === 'transcode'}); }
 function settings() {
-  title(api ? 'Servers & settings' : 'Welcome to Plezy', 'Connect your media server and settle in. Use the remote arrows and OK, or the Magic Remote pointer.');
+  title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');
   state.servers.forEach(server => {
     const panel = el('section', undefined, 'panel'); panel.append(el('h2', server.name), el('p', server.kind.toUpperCase() + ' · ' + server.url, 'muted'));
     const actions = el('div', undefined, 'actions');

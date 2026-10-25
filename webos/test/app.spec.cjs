@@ -405,9 +405,8 @@ test('navigation follows Plezy rail layout without invented webOS branding',asyn
 test('libraries are navigable in the rail and can be hidden and restored',async({page})=>{
   await mockServer(page);await page.goto('/');
   await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeVisible();
-  await page.getByRole('button',{name:'Hide libraries'}).click();
-  await expect(page.locator('.rail-library-items')).toHaveCount(0);
-  await page.getByRole('button',{name:'Show libraries'}).click();
+  await expect(page.getByRole('button',{name:'Hide libraries'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Libraries',exact:true})).toHaveCount(0);
   await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
   await expect(page.getByRole('button',{name:'Browse',exact:true})).toHaveAttribute('aria-pressed','true');
   await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
@@ -465,12 +464,19 @@ test('Plex show detail displays metadata and browsable seasons',async({page})=>{
 test('sidebar can collapse, and settings can hide individual Plex libraries',async({page})=>{
   await mockServer(page);await page.goto('/');
   await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeVisible();
-  await page.getByRole('button',{name:'Collapse sidebar'}).click();
-  await expect(page.locator('aside')).toHaveClass(/collapsed/);
-  await page.getByRole('button',{name:'Expand sidebar'}).click();
-  await page.getByRole('button',{name:'Servers & settings'}).click();
+  await expect(page.getByRole('button',{name:'Collapse sidebar'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('button',{name:'Hide Movies in sidebar'})).toBeVisible();
   await page.getByRole('button',{name:'Hide Movies in sidebar'}).click();
   await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Show Movies in sidebar'})).toBeVisible();
+});
+
+test('Settings has gear icon and Libraries heading is not focusable',async({page})=>{
+  await mockServer(page);await page.goto('/');
+  await expect(page.getByRole('button',{name:'Libraries',exact:true})).toHaveCount(0);
+  const settings=page.getByRole('button',{name:'Settings',exact:true});
+  await expect(settings.locator('svg path')).toHaveAttribute('d',/M19.14/);
+  await settings.click();
+  await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
 });
