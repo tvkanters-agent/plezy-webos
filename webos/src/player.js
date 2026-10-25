@@ -51,7 +51,7 @@ export class Player {
     this.root.querySelector('[data-action="skip"]').hidden = true; this.marker = null;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
-    this.root.querySelector('[data-action="stop"]').focus();
+    this.root.querySelector('[data-action="pause"]').focus();
     let session;
     try {
       session = await api.playback(item, options);
@@ -195,10 +195,13 @@ export class Player {
   }
   reveal() {
     this.controls.classList.remove('hidden-controls');
+    this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
       if (this.session && !this.video.paused && !['SELECT'].includes(document.activeElement.tagName)) {
-        this.controls.classList.add('hidden-controls'); this.video.focus();
+        this.controls.classList.add('hidden-controls');
+        this.root.querySelector('.player-top').classList.add('hidden-controls');
+        this.video.focus();
       }
     }, 5000);
   }

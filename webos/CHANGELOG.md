@@ -1,5 +1,15 @@
 # webOS changelog
 
+## 0.2.3 alpha — Simkl JSON requests and Plezy TV UI alignment
+
+- Correct Simkl OAuth V2 device code, polling, and refresh to JSON request bodies; retain original Plezy grant fields, write scope, and sanitized error UI.
+- Translate focus size/border/glow, video timeline and transport controls from upstream Flutter widgets, rather than using default TV browser outline and button styling.
+- Remove browser scrollbars from horizontal shelves, preserve scroll positions in library D-pad navigation, and lazily request on-screen artwork to reduce webOS 4.x workload.
+- Keep player title/header in sync with auto-hide, and retain controls, Plex playback and progress-scrobble APIs.
+- Browser/UI acceptance still requires checking on the LG webOS 4.4.3-22 device.
+
+
+
 ## 0.2.2 alpha — Simkl device linking
 
 - Match upstream Plezy's Simkl V2 device-code HTTP request: no application-identity query parameters on OAuth endpoints; send the client ID and requested write scopes as form fields.

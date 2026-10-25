@@ -105,3 +105,19 @@ test('player chrome has upstream-style compact transport controls and timeline',
   expect(metrics.width).toBeLessThanOrEqual(52);
   expect(metrics.height).toBeLessThanOrEqual(52);
 });
+
+test('player header and controls hide together during playback inactivity',async({page})=>{
+  await setup(page);
+  const controls=page.locator('.controls'), header=page.locator('.player-top');
+  await expect(header).toBeVisible();
+  await expect(controls).toBeVisible();
+  await page.evaluate(()=>{
+    document.querySelector('.controls').classList.add('hidden-controls');
+    document.querySelector('.player-top').classList.add('hidden-controls');
+  });
+  await expect(header).toBeHidden();
+  await expect(controls).toBeHidden();
+  await page.locator('video').dispatchEvent('mousemove');
+  await expect(header).toBeVisible();
+  await expect(controls).toBeVisible();
+});

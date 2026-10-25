@@ -91,3 +91,8 @@ The compatibility suite also simulates missing Chromium 53-era APIs in a modern 
 ## 0.2.2 Simkl device-link regression
 
 Test the exact `POST /oauth2/device` request shape (bare OAuth URL and URL-encoded form client ID/write scope) and `POST /oauth2/token` form grant. A 400 now displays Simkl's sanitized structured error, allowing the real rejection cause to be diagnosed without sharing credentials. WebOS 4.4.3 linking and successful playback tracking remain to be verified on the TV.
+
+## 0.2.3 Plezy UI translation and Simkl JSON
+
+- Simkl device, poll and refresh OAuth requests must carry `Content-Type: application/json` and JSON bodies; preceding webOS releases incorrectly sent URL-encoded form content despite Simkl returning `invalid_request: Invalid JSON request`.
+- Inspect the on-device focus border (2.5px inside card), row scrolling (no browser shelves), D-pad scrolling (no row pinned to top), image load performance and compact player timeline/icons against upstream Plezy native Flutter UI. CI tests UI semantics and browser scrolling; GPU/video performance requires testing on webOS 4.4.3-22.

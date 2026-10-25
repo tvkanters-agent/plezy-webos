@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.2 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, version 0.2.3 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Build the 0.2.2 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.2 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
+4. **Build the 0.2.3 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.3 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.2_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.3_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -149,4 +149,8 @@ The required browser-engine compatibility target is Chromium 53 for webOS 4.x. N
 
 ### Simkl HTTP 400 at device linking (0.2.2)
 
-The previous webOS port added regular Simkl API identity query parameters to `POST /oauth2/device` and `POST /oauth2/token`. Version 0.2.2 sends these **OAuth grant requests to bare endpoint URLs**, matching Plezy's native Simkl V2 device flow, with `client_id` and `scope` in the form body. The UI now includes Simkl's safe structured OAuth error code and short explanatory message after an HTTP error. If device linking still fails, report only the **visible error text**, never a token, raw response, or device code.
+The previous webOS port sent form-encoded Simkl OAuth data, which Simkl rejects with HTTP 400 `invalid_request: Invalid JSON request`. Version 0.2.3 sends **JSON request bodies** for `/oauth2/device`, `/oauth2/token` and refresh grants, while keeping the OAuth URLs bare. Plezy's upstream request-field names are preserved; this corrects the webOS browser serialization rather than changing the authentication protocol. The UI now includes Simkl's safe structured OAuth error code and short explanatory message after an HTTP error. If device linking still fails, report only the **visible error text**, never a token, raw response, or device code.
+
+### Native-UI fidelity pass (0.2.3)
+
+The webOS TV frontend is still a platform-specific HTML/JavaScript implementation, not the actual upstream Flutter tree (the Flutter/MPV runtime is not available inside a webOS 4.4 Chromium 53 web application). This pass translates upstream `FocusTheme`, `PlayerFocusDisc`, `VideoTimelineBar` and TV shelf behaviors: small inset focus borders instead of thick outline boxes, 48px transport discs, horizontal timeline with remaining time, chrome that hides during playback, no browser shelf scrollbars, TV D-pad scrolling that keeps the focused grid row in view without snapping it to the top, and near-viewport poster loading for older TV GPU/CPU performance. **This is a partial visual port, not feature or layout parity**; the original Flutter UI remains the reference for future work.
