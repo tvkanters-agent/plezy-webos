@@ -210,3 +210,45 @@ test('Plex home retains useful shelves when one fallback endpoint fails',async()
     assert.equal(rows[0].title,'Recently added · TV');
   }finally{restore();}
 });
+
+test('Plex next episode follows episode order and crosses season boundaries',async()=>{
+  const calls=[];
+  const season1=[
+    {ratingKey:'ep1',title:'Episode 1',type:'episode',index:1,parentRatingKey:'s1',grandparentRatingKey:'show',parentIndex:1},
+    {ratingKey:'ep2',title:'Episode 2',type:'episode',index:2,parentRatingKey:'s1',grandparentRatingKey:'show',parentIndex:1}
+  ];
+  const season2=[{ratingKey:'ep3',title:'Episode 3',type:'episode',index:1,parentRatingKey:'s2',grandparentRatingKey:'show',parentIndex:2}];
+  const restore=mock(async url=>{
+    const path=new URL(url).pathname;calls.push(path);
+    let entries=[];
+    if(path==='/prefix/library/metadata/s1/children')entries=season1;
+    else if(path==='/prefix/library/metadata/s2/children')entries=season2;
+    else if(path==='/prefix/library/metadata/show/children')entries=[
+      {ratingKey:'s1',title:'Season 1',type:'season',index:1},
+      {ratingKey:'s2',title:'Season 2',type:'season',index:2}
+    ];
+    return json({MediaContainer:{Metadata:entries,totalSize:entries.length}});
+  });
+  try{
+    const plex=new Plex(server,'device');
+    const inSeason=await plex.nextEpisode({type:'episode',raw:season1[0]});
+    assert.equal(inSeason.id,'ep2');
+    assert.deepEqual(calls,['/prefix/library/metadata/s1/children']);
+    calls.length=0;
+    const nextSeason=await plex.nextEpisode({type:'episode',raw:season1[1]});
+    assert.equal(nextSeason.id,'ep3');
+    assert.deepEqual(calls,['/prefix/library/metadata/s1/children','/prefix/library/metadata/show/children','/prefix/library/metadata/s2/children']);
+    const final=await plex.nextEpisode({type:'episode',raw:season2[0]});
+    assert.equal(final,null);
+  }finally{restore();}
+});
+test('Plex episode posters prefer the series poster',async()=>{
+  const restore=mock(async()=>json({MediaContainer:{Metadata:[
+    {ratingKey:'ep',title:'Episode',type:'episode',thumb:'/episode.jpg',
+      grandparentThumb:'/series.jpg',parentThumb:'/season.jpg'}]}}));
+  try{
+    const plex=new Plex(server,'device');
+    const detail=await plex.detail('ep');
+    assert.match(plex.image(detail),/series.jpg/);
+  }finally{restore();}
+});

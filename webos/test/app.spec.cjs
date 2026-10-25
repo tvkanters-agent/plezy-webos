@@ -167,3 +167,31 @@ test('unwatched filter and sort can be combined without client-side slicing',asy
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
 });
+
+test('Plex Next episode navigates to the next episode across seasons',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',name:'Plex test',url:'http://plex.test',token:'test-token'}]
+  })));
+  const ep1={ratingKey:'ep1',title:'Pilot',type:'episode',index:1,parentIndex:1,parentRatingKey:'s1',
+    grandparentRatingKey:'show',grandparentTitle:'Test Show',duration:900000};
+  const ep2={ratingKey:'ep2',title:'Finale',type:'episode',index:1,parentIndex:2,parentRatingKey:'s2',
+    grandparentRatingKey:'show',grandparentTitle:'Test Show',duration:900000};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    let data={MediaContainer:{}};
+    if(path==='/hubs')data={MediaContainer:{Hub:[{title:'Continue watching',Metadata:[ep1]}]}};
+    else if(path==='/library/metadata/ep1')data={MediaContainer:{Metadata:[ep1]}};
+    else if(path==='/library/metadata/ep2')data={MediaContainer:{Metadata:[ep2]}};
+    else if(path==='/library/metadata/s1/children')data={MediaContainer:{Metadata:[ep1],totalSize:1}};
+    else if(path==='/library/metadata/s2/children')data={MediaContainer:{Metadata:[ep2],totalSize:1}};
+    else if(path==='/library/metadata/show/children')data={MediaContainer:{Metadata:[
+      {ratingKey:'s1',type:'season',index:1,title:'Season 1'},
+      {ratingKey:'s2',type:'season',index:2,title:'Season 2'}],totalSize:2}};
+    return route.fulfill({json:data});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Pilot, Test Show'}).click();
+  await page.getByRole('button',{name:'Next episode',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Finale'})).toBeVisible();
+});

@@ -9,7 +9,8 @@ function plexItem(raw) {
     subtitle: raw.grandparentTitle || raw.parentTitle || String(raw.year || ''),
     summary: raw.summary || '', year: raw.year, duration: (raw.duration || 0) / 1000,
     resume: (raw.viewOffset || 0) / 1000, watched: !!raw.viewCount,
-    poster: raw.thumb || raw.parentThumb || raw.grandparentThumb,
+    poster: raw.type === 'episode' ? (raw.grandparentThumb || raw.parentThumb || raw.thumb)
+      : (raw.thumb || raw.parentThumb || raw.grandparentThumb),
     folder: ['show', 'season', 'collection'].includes(raw.type), raw};
 }
 function jellyItem(raw) {
@@ -122,6 +123,44 @@ export class Plex {
     const data = (await this.get('/library/metadata/' + enc(itemId) + '/children', {
       'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE})).MediaContainer;
     return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
+  }
+  // Walk a show's episodes by metadata hierarchy, including season boundaries.
+  // Avoid fetching a whole series' thousands of episodes for a single next item.
+  async episodeChildren(parentId) {
+    const episodes = [];
+    for (let start = 0; start < 1000; ) {
+      const page = await this.children(parentId, start);
+      episodes.push(...page.items);
+      if (!page.items.length) break;
+      start += page.items.length;
+      if (start >= page.total) break;
+    }
+    return episodes;
+  }
+  async nextEpisode(item) {
+    if (!item || item.type !== 'episode' || !item.raw || !item.raw.parentRatingKey) return null;
+    const raw = item.raw;
+    const siblings = await this.episodeChildren(raw.parentRatingKey);
+    const index = Number(raw.index);
+    const later = siblings.filter(episode => episode.type === 'episode'
+      && Number.isFinite(index) && Number(episode.raw.index) > index)
+      .sort((a, b) => Number(a.raw.index) - Number(b.raw.index));
+    if (later.length) return later[0];
+    if (!raw.grandparentRatingKey) return null;
+    const seasons = await this.episodeChildren(raw.grandparentRatingKey);
+    const currentSeason = seasons.find(season => String(season.id) === String(raw.parentRatingKey));
+    const currentIndex = Number.isFinite(Number(raw.parentIndex)) ? Number(raw.parentIndex)
+      : (currentSeason ? Number(currentSeason.raw.index) : NaN);
+    if (!Number.isFinite(currentIndex)) return null;
+    const following = seasons.filter(season => season.type === 'season'
+      && Number(season.raw.index) > currentIndex)
+      .sort((a, b) => Number(a.raw.index) - Number(b.raw.index));
+    for (const season of following) {
+      const episodes = (await this.episodeChildren(season.id)).filter(episode => episode.type === 'episode');
+      episodes.sort((a, b) => Number(a.raw.index) - Number(b.raw.index));
+      if (episodes.length) return episodes[0];
+    }
+    return null;
   }
   image(item) { return item.poster ? this.url(item.poster) : ''; }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }

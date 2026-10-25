@@ -181,6 +181,13 @@ async function render() {
         actions.append(button(item.resume > 0 ? 'Play from beginning' : 'Play', () => play(item, 0), item.resume > 0 ? '' : 'primary'));
         actions.append(button('Compatible playback', () => play(item, item.resume, true)));
         actions.append(button(item.watched ? 'Mark unwatched' : 'Mark watched', async () => { await api.watched(item, !item.watched); render(); }));
+        if (api instanceof Plex && item.type === 'episode' && item.raw.parentRatingKey) {
+          actions.append(button('Next episode', async () => {
+            const next = await api.nextEpisode(item);
+            if (next) go({type: 'detail', id: next.id});
+            else notify('No further episodes are available for this show.');
+          }));
+        }
       }
       actions.append(button('Back', back)); info.append(actions); content.append(poster(item), info); main.append(content);
       if (item.folder) { main.append(el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' : 'Titles')); const currentApi = api;
