@@ -70,6 +70,7 @@ function focusWithoutJump(target, reveal = true) {
   target.focus();
   if (vertical) vertical.scrollTop = Math.max(0, previousTop + dy);
   if (row) row.scrollLeft = Math.max(0, previousLeft + dx);
+  schedulePosters();
 }
 function focusFirst(root = main) {
   const expectedRevision = revision;
@@ -110,11 +111,33 @@ function card(item) {
   if (item.resume > 0 && item.duration > 0) { const p = el('progress'); p.max = item.duration; p.value = item.resume; node.append(p); }
   return node;
 }
+// Flutter's sliver-based library lists inflate artwork near the viewport.
+ // Chromium 53 ignores <img loading="lazy">, so queue only visible posters
+ // (with one screen of prefetch) instead of decoding all 60 per library page.
+let posterFrame = 0;
+function loadVisiblePosters() {
+  posterFrame = 0;
+  const view = main.getBoundingClientRect();
+  const images = main.querySelectorAll('img[data-poster-src]');
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i], rect = img.getBoundingClientRect();
+    if (rect.bottom < view.top - view.height || rect.top > view.bottom + view.height ||
+        rect.right < view.left - 250 || rect.left > view.right + 250) continue;
+    const url = img.getAttribute('data-poster-src');
+    img.removeAttribute('data-poster-src');
+    img.src = url;
+  }
+}
+function schedulePosters() {
+  if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
+}
+main.addEventListener('scroll', schedulePosters, true);
 function poster(item) {
   const node = el('div', undefined, 'poster'); const image = api.image(item);
   if (image) {
-    const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.src = image;
-    img.onerror = () => { node.textContent = '▷'; }; node.append(img);
+    const img = el('img'); img.alt = ''; img.setAttribute('data-poster-src', image);
+    img.onerror = () => { node.textContent = '▷'; };
+    node.append(img); schedulePosters();
   } else node.textContent = '▷';
   return node;
 }
@@ -135,6 +158,7 @@ async function paginated(loader, currentRevision) {
       const page = await loader(start);
       if (currentRevision !== revision) return;
       page.items.forEach(item => grid.append(card(item))); start += page.items.length;
+      schedulePosters();
       more.hidden = !page.items.length || start >= page.total;
       more.textContent = 'Load more';
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));

@@ -361,3 +361,28 @@ test('TV D-pad navigation does not pin every library card to top of viewport',as
   expect(after).toBeGreaterThan(0);
   expect(after).toBeLessThan(previous+450);
 });
+
+test('offscreen library posters are deferred until reaching the viewport',async({page})=>{
+  const images=[];
+  await mockServer(page);
+  await page.route('http://media.test/**/Images/**',route=>{
+    images.push(route.request().url());return route.fulfill({status:404});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await page.evaluate(()=>{
+    const grid=document.querySelector('.grid');
+    const entry=grid.querySelector('.card');
+    for(let n=0;n<30;n++){
+      const clone=entry.cloneNode(true);
+      clone.querySelector('img')?.removeAttribute('src');
+      clone.querySelector('img')?.setAttribute('data-poster-src','http://media.test/Items/offscreen-'+n+'/Images/Primary');
+      grid.append(clone);
+    }
+  });
+  await page.evaluate(()=>document.querySelector('main').dispatchEvent(new Event('scroll')));
+  await page.waitForTimeout(100);
+  const pending=await page.locator('.grid img[data-poster-src]').count();
+  expect(pending).toBeGreaterThan(0);
+});
