@@ -278,3 +278,9 @@ test('Plex chosen version controls direct URL, HLS media index and track mutatio
     await assert.rejects(api.playback(item,{mediaIndex:1}),/Multi-part/);
   } finally {restore();}
 });
+
+test('rail library visibility persists across restarts',()=>{
+ const saved=readState({getItem:()=>JSON.stringify({librariesHidden:true})});
+ assert.equal(saved.librariesHidden,true);
+ assert.equal(readState({getItem:()=>null}).librariesHidden,false);
+});

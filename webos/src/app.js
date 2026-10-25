@@ -39,7 +39,12 @@ function persist() {
   } catch (_) { notify('TV storage is unavailable. Settings will last only until the app closes.'); }
 }
 function activeServer() { return state.servers.find(s => s.id === state.active) || state.servers[0]; }
-function setClient() { const server = activeServer(); api = server ? client(server, state.deviceId) : null; }
+let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
+function setClient() {
+  const server = activeServer();
+  api = server ? client(server, state.deviceId) : null;
+  libraryCache = null; libraryCacheFor = null; libraryLoading = false;
+}
 function addServer(server) {
   state.servers = state.servers.filter(s => s.id !== server.id).concat(server);
   state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
@@ -105,13 +110,54 @@ function railButton(label, action, className, iconName) {
   return control;
 }
 function navigation() {
+  // Plezy's Flutter side rail lists the connected server's libraries inline.
+  // Fetch once per server, then keep this list as navigation moves between pages.
+  const focused = document.activeElement?.dataset?.navId;
   nav.textContent = '';
   if (api) {
-    nav.append(railButton('Home', () => go({type: 'home'}), route.type === 'home' ? 'active' : '', 'home'),
-      railButton('Libraries', () => go({type: 'libraries'}), route.type === 'libraries' || route.type === 'library' ? 'active' : '', 'libraries'),
-      railButton('Search', () => go({type: 'search'}), route.type === 'search' ? 'active' : '', 'search'));
+    const home = railButton('Home', () => go({type: 'home'}), route.type === 'home' ? 'active' : '', 'home');
+    home.dataset.navId = 'home'; nav.append(home);
+    const libraryHeader = el('div', undefined, 'rail-library-header');
+    const listing = button('Libraries', () => go({type:'libraries'}), 'rail-library-label');
+    listing.dataset.navId = 'libraries';
+    const toggle = button(state.librariesHidden ? 'Show libraries' : 'Hide libraries', () => {
+      state.librariesHidden = !state.librariesHidden; persist(); navigation();
+    }, 'rail-toggle');
+    toggle.setAttribute('aria-expanded', String(!state.librariesHidden));
+    toggle.dataset.navId = 'library-toggle';
+    toggle.textContent = state.librariesHidden ? '▸' : '▾';
+    toggle.title = state.librariesHidden ? 'Show libraries' : 'Hide libraries';
+    toggle.setAttribute('aria-label', toggle.title);
+    libraryHeader.append(listing, toggle); nav.append(libraryHeader);
+    if (!state.librariesHidden) {
+      const section = el('div', undefined, 'rail-library-items');
+      const libraries = libraryCacheFor === api ? libraryCache : null;
+      if (libraries) libraries.forEach(library => {
+        const active = route.type === 'library' && String(route.library.id) === String(library.id);
+        const control = button(library.title, () => go({type:'library', library}),
+          active ? 'active' : '');
+        control.dataset.navId = 'library:' + library.id;
+        section.append(control);
+      });
+      else section.append(el('p', 'Loading libraries…', 'muted'));
+      nav.append(section);
+    }
+    if (libraryCacheFor !== api && !libraryLoading) {
+      const currentApi = api;
+      libraryLoading = true;
+      currentApi.libraries().then(libraries => {
+        if (currentApi !== api) return;
+        libraryCacheFor = currentApi; libraryCache = libraries; libraryLoading = false;
+        navigation();
+      }).catch(() => { if (currentApi === api) libraryLoading = false; });
+    }
+    nav.append(railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search'));
   }
-  nav.append(railButton('Servers & settings', () => go({type: 'settings'}), route.type === 'settings' ? 'active' : '', 'settings'));
+  nav.append(railButton('Servers & settings', () => go({type:'settings'}), route.type === 'settings' ? 'active' : '', 'settings'));
+  if (focused) {
+    const restore = Array.from(nav.querySelectorAll('[data-nav-id]')).find(x => x.dataset.navId === focused);
+    if (restore) restore.focus();
+  }
 }
 function go(next, remember = true) {
   if (remember) history.push({...route, scroll: main.scrollTop, focus: main.contains(document.activeElement) ? document.activeElement.dataset.focus : null});
@@ -224,11 +270,42 @@ async function render() {
       rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(section); });
     } else if (route.type === 'libraries') {
       title('Libraries', activeServer().name);
-      const libraries = await api.libraries(); if (!valid()) return;
+      const libraries = libraryCacheFor === api ? libraryCache : await api.libraries(); if (!valid()) return;
+      if (libraryCacheFor !== api) { libraryCacheFor = api; libraryCache = libraries; navigation(); }
       const list = el('div', undefined, 'actions'); libraries.forEach(library => list.append(button(library.title, () => go({type: 'library', library}))));
       main.append(list); if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
     } else if (route.type === 'library') {
       title(route.library.title); const currentApi = api;
+      const view = route.view || 'browse';
+      const tabs = el('div', undefined, 'library-tabs');
+      [{id:'recommended', name:'Recommended'}, {id:'browse',name:'Browse'},
+        {id:'collections',name:'Collections'}, {id:'playlists',name:'Playlists'}].forEach(tab => {
+        const control = button(tab.name, () => go({...route, view: tab.id}, false),
+          view === tab.id ? 'active' : '');
+        control.setAttribute('aria-pressed', String(view === tab.id));
+        tabs.append(control);
+      });
+      main.append(tabs);
+      if (currentApi instanceof Plex && view === 'collections') {
+        await paginated(start => currentApi.collections(route.library.id, start), currentRevision);
+        return;
+      }
+      if (currentApi instanceof Plex && view === 'playlists') {
+        await paginated(start => currentApi.playlists(start), currentRevision);
+        return;
+      }
+      if (currentApi instanceof Plex && view === 'recommended') {
+        const shelves = await currentApi.recommended(route.library.id);
+        if (!valid()) return;
+        if (!shelves.length) main.append(el('p','No recommendations for this library.', 'muted'));
+        shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
+          section.append(el('h2', shelf.title), cards(shelf.items)); main.append(section); });
+        schedulePosters(); return;
+      }
+      if (view !== 'browse') {
+        main.append(el('p','This library view is currently available for Plex libraries.', 'muted'));
+        return;
+      }
       const choices = [{id: 'title', label: 'Title A–Z'}, {id: 'recent', label: 'Recently added'},
         {id: 'release', label: 'Release date'}];
       const selected = route.sort || 'title', selectedFilter = route.filter || 'all';
@@ -237,7 +314,7 @@ async function render() {
       filters.setAttribute('aria-label', 'Sort library');
       choices.forEach(choice => {
         const control = button(choice.label, () =>
-          go({type: 'library', library: route.library, sort: choice.id,
+          go({type: 'library', library: route.library, view: 'browse', sort: choice.id,
             filter: selectedFilter, focus: 'sort:' + choice.id}, false),
           choice.id === selected ? 'active' : '');
         control.dataset.focus = 'sort:' + choice.id;
@@ -250,7 +327,7 @@ async function render() {
       watchFilters.setAttribute('aria-label', 'Filter watched status');
       [{id: 'all', label: 'All titles'}, {id: 'unwatched', label: 'Unwatched'}].forEach(choice => {
         const control = button(choice.label, () =>
-          go({type: 'library', library: route.library, sort: selected,
+          go({type: 'library', library: route.library, view: 'browse', sort: selected,
             filter: choice.id, focus: 'filter:' + choice.id}, false),
           choice.id === selectedFilter ? 'active' : '');
         control.dataset.focus = 'filter:' + choice.id;

@@ -88,8 +88,9 @@ export function readState(storage) {
     return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
       servers, active: typeof state.active === 'string' ? state.active : '',
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
-      simkl: state.simkl && typeof state.simkl === 'object' ? state.simkl : null};
-  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', simkl: null}; }
+      simkl: state.simkl && typeof state.simkl === 'object' ? state.simkl : null,
+      librariesHidden: state.librariesHidden === true};
+  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', simkl: null, librariesHidden: false}; }
 }
 export function saveState(storage, state) {
   storage.setItem('plezy.webos', JSON.stringify(state));

@@ -401,3 +401,14 @@ test('navigation follows Plezy rail layout without invented webOS branding',asyn
   const setting=page.getByRole('button',{name:'Servers & settings'});
   await expect(setting.locator('svg')).toHaveCount(1);
 });
+
+test('libraries are navigable in the rail and can be hidden and restored',async({page})=>{
+  await mockServer(page);await page.goto('/');
+  await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeVisible();
+  await page.getByRole('button',{name:'Hide libraries'}).click();
+  await expect(page.locator('.rail-library-items')).toHaveCount(0);
+  await page.getByRole('button',{name:'Show libraries'}).click();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.getByRole('button',{name:'Browse',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
+});

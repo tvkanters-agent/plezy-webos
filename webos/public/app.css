@@ -106,3 +106,15 @@ video { width: 100%; height: 100%; object-fit: contain; }
 .player-status:empty { display: none; }
 #dialog { position: fixed; left: 25%; right: 25%; top: 30%; background: #20232a; padding: 45px; border: 2px solid #555; border-radius: 18px; z-index: 20; box-shadow: 0 0 0 100vmax rgba(0,0,0,.8); }
 @media (max-width: 1100px) { html, body { font-size: 18px; } aside { flex-basis: 190px; padding: 26px 12px; } main { padding: 32px; } .card { flex-basis: 155px; width: 155px; } .card .poster { height: 225px; } .card progress { top: 220px; } h1 { font-size: 34px; } .detail > .poster { flex-basis: 200px; height: 300px; } }
+
+/* Library rail and tab structure translated from upstream LibrariesScreen. */
+.rail-library-header { display:flex; align-items:center; margin:14px 0 2px; }
+.rail-library-label { flex:1; text-align:left; font-size:18px; padding:8px 14px; min-width:0; }
+.rail-toggle { flex:0 0 38px; width:38px; height:38px; min-height:38px; text-align:center; padding:0; border:0; border-radius:50%; background:transparent; }
+.rail-library-items { padding-left:20px; margin-bottom:10px; }
+.rail-library-items button { font-size:17px; min-height:38px; padding:6px 10px; margin-bottom:2px; }
+.rail-library-items p { font-size:14px; margin:10px; }
+.library-tabs { display:flex; margin:4px 0 20px; gap:8px; flex-wrap:wrap; }
+.library-tabs button { padding:7px 18px; border:0; border-radius:22px; background:transparent; font-size:18px; }
+.library-tabs button.active { color:#101115; background:#ededed; }
+nav::-webkit-scrollbar { width:0; display:none; }

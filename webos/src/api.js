@@ -11,7 +11,7 @@ function plexItem(raw) {
     resume: (raw.viewOffset || 0) / 1000, watched: !!raw.viewCount,
     poster: raw.type === 'episode' ? (raw.grandparentThumb || raw.parentThumb || raw.thumb)
       : (raw.thumb || raw.parentThumb || raw.grandparentThumb),
-    folder: ['show', 'season', 'collection'].includes(raw.type), raw};
+    folder: ['show', 'season', 'collection', 'playlist'].includes(raw.type), raw};
 }
 function jellyItem(raw) {
   return {id: raw.Id, title: raw.Name || 'Untitled', type: raw.Type,
@@ -77,6 +77,22 @@ export class Plex {
   async libraries() {
     const data = await this.get('/library/sections');
     return (data.MediaContainer.Directory || []).filter(x => ['movie', 'show'].includes(x.type)).map(x => ({id: x.key, title: x.title}));
+  }
+  async collections(library, start = 0) {
+    const data = (await this.get('/library/sections/' + enc(library) + '/collections', {
+      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE})).MediaContainer;
+    return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
+  }
+  async playlists(start = 0) {
+    const data = (await this.get('/playlists', {playlistType: 'video',
+      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE})).MediaContainer;
+    return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
+  }
+  async recommended(library) {
+    const data = (await this.get('/library/sections/' + enc(library) + '/hubs', {count: 20})).MediaContainer;
+    return (data.Hub || []).map(h => ({title: h.title || 'Recommended',
+      items: (h.Metadata || []).filter(item => ['movie', 'show', 'episode', 'season'].includes(item.type)).map(plexItem)}))
+      .filter(h => h.items.length);
   }
   async home() {
     // Different Plex Media Server versions and accounts expose different
