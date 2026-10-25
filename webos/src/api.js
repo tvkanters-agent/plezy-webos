@@ -66,9 +66,10 @@ export class Plex {
     return (data.MediaContainer.Hub || []).map(h => ({title: h.title, items: (h.Metadata || [])
       .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem)})).filter(x => x.items.length);
   }
-  async list(library, start = 0) {
+  async list(library, start = 0, sort = 'title') {
+    const order = {title: 'titleSort', recent: 'addedAt:desc', release: 'originallyAvailableAt:desc'}[sort] || 'titleSort';
     const data = (await this.get('/library/sections/' + enc(library) + '/all', {
-      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE, sort: 'titleSort'})).MediaContainer;
+      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE, sort: order})).MediaContainer;
     return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
   }
   async search(query) {
@@ -142,17 +143,23 @@ export class Jellyfin {
       .map(x => ({id: x.Id, title: x.Name}));
   }
   async home() {
-    const [resume, latest, next] = await Promise.all([
+    // Emby and older Jellyfin instances can omit one of these endpoints. Keep
+    // usable home shelves when another endpoint still returns valid content.
+    const results = await Promise.allSettled([
       this.call(this.userPath('/Items/Resume'), {Limit: 20, MediaTypes: 'Video', Fields: FIELDS}),
       this.call(this.userPath('/Items/Latest'), {Limit: 20, IncludeItemTypes: 'Movie,Episode', Fields: FIELDS}),
       this.call('/Shows/NextUp', {UserId: this.server.userId, Limit: 20, Fields: FIELDS})]);
+    if (results.every(result => result.status === 'rejected')) throw results[0].reason;
+    const [resume, latest, next] = results.map(result => result.status === 'fulfilled' ? result.value : {});
     return [{title: 'Continue watching', items: (resume.Items || []).map(jellyItem)},
       {title: 'Next up', items: (next.Items || []).map(jellyItem)},
       {title: 'Recently added', items: (Array.isArray(latest) ? latest : latest.Items || []).map(jellyItem)}].filter(x => x.items.length);
   }
-  async list(library, start = 0) {
+  async list(library, start = 0, sort = 'title') {
+    const order = {title: ['SortName', 'Ascending'], recent: ['DateCreated', 'Descending'],
+      release: ['PremiereDate', 'Descending']}[sort] || ['SortName', 'Ascending'];
     const data = await this.call(this.userPath('/Items'), {ParentId: library, StartIndex: start, Limit: PAGE,
-      Fields: FIELDS, SortBy: 'SortName', SortOrder: 'Ascending'});
+      Fields: FIELDS, SortBy: order[0], SortOrder: order[1]});
     return {items: (data.Items || []).map(jellyItem), total: data.TotalRecordCount || 0};
   }
   async search(query) {

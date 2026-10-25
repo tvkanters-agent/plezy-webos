@@ -110,7 +110,10 @@ async function render() {
       title('Your next watch', activeServer().name);
       const loading = el('p', 'Loading your library…', 'muted'); main.append(loading);
       const rows = await api.home(); if (!valid()) return; loading.remove();
-      if (!rows.length) main.append(el('p', 'No recommendations yet. Open Libraries to browse your media.'));
+      if (!rows.length) {
+        main.append(el('p', 'No recommendations yet. Browse a library to find something to watch.'));
+        main.append(button('Browse libraries', () => go({type: 'libraries'}), 'primary'));
+      }
       rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(section); });
     } else if (route.type === 'libraries') {
       title('Libraries', activeServer().name);
@@ -119,7 +122,22 @@ async function render() {
       main.append(list); if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
     } else if (route.type === 'library') {
       title(route.library.title); const currentApi = api;
-      await paginated(start => currentApi.list(route.library.id, start), currentRevision);
+      const choices = [{id: 'title', label: 'Title A–Z'}, {id: 'recent', label: 'Recently added'},
+        {id: 'release', label: 'Release date'}];
+      const selected = route.sort || 'title';
+      const filters = el('div', undefined, 'sort-actions');
+      filters.setAttribute('role', 'group');
+      filters.setAttribute('aria-label', 'Sort library');
+      choices.forEach(choice => {
+        const control = button(choice.label, () =>
+          go({type: 'library', library: route.library, sort: choice.id, focus: 'sort:' + choice.id}, false),
+          choice.id === selected ? 'active' : '');
+        control.dataset.focus = 'sort:' + choice.id;
+        control.setAttribute('aria-pressed', String(choice.id === selected));
+        filters.append(control);
+      });
+      main.append(filters);
+      await paginated(start => currentApi.list(route.library.id, start, selected), currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id); if (!valid()) return;

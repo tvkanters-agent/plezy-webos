@@ -100,3 +100,39 @@ test('startup creates a local device ID without Web Crypto', () => {
     Object.defineProperty(globalThis, 'crypto', {configurable: true, value: previous});
   }
 });
+
+test('Plex and Jellyfin library sorting is performed server-side', async () => {
+  const calls = [];
+  const restore = mock(async url => {
+    calls.push(new URL(url));
+    return json(url.includes('/library/sections/') ? {MediaContainer:{Metadata:[], totalSize:0}} : {Items:[],TotalRecordCount:0});
+  });
+  try {
+    await new Plex(server,'device').list('movies',60,'recent');
+    await new Plex(server,'device').list('movies',0,'release');
+    await new Jellyfin(server,'device').list('movies',60,'recent');
+    await new Jellyfin(server,'device').list('movies',0,'release');
+    assert.equal(calls[0].searchParams.get('sort'),'addedAt:desc');
+    assert.equal(calls[1].searchParams.get('sort'),'originallyAvailableAt:desc');
+    assert.equal(calls[2].searchParams.get('SortBy'),'DateCreated');
+    assert.equal(calls[2].searchParams.get('SortOrder'),'Descending');
+    assert.equal(calls[2].searchParams.get('StartIndex'),'60');
+    assert.equal(calls[3].searchParams.get('SortBy'),'PremiereDate');
+  } finally {restore();}
+});
+test('Jellyfin home still works when one optional shelf endpoint is unsupported', async () => {
+  const restore = mock(async url => {
+    if (url.includes('/Shows/NextUp')) return new Response('',{status:404});
+    if (url.includes('/Items/Resume')) return json({Items:[{Id:'1',Name:'Continue me',Type:'Movie'}]});
+    return json([]);
+  });
+  try {
+    const shelves=await new Jellyfin(server,'device').home();
+    assert.equal(shelves.length,1);
+    assert.equal(shelves[0].items[0].title,'Continue me');
+  } finally {restore();}
+});
+test('Jellyfin home reports failure when all shelves are unavailable', async () => {
+  const restore = mock(async () => new Response('',{status:503}));
+  try { await assert.rejects(new Jellyfin(server,'device').home(), /HTTP 503/); } finally {restore();}
+});

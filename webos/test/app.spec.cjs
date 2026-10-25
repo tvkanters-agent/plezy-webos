@@ -12,7 +12,7 @@ async function mockServer(page,{saved=true,failed=false}={}){
   const calls=[];
   if(saved)await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'server',quality:'auto',servers:[{id:'server',kind:'jellyfin',name:'Test cinema',url:'http://media.test',token:'test-token',userId:'user'}]})));
   await page.route('http://media.test/**',async route=>{
-    const request=route.request(),url=new URL(request.url());calls.push({path:url.pathname,method:request.method(),body:request.postDataJSON()});
+    const request=route.request(),url=new URL(request.url());calls.push({path:url.pathname,query:url.search,method:request.method(),body:request.postDataJSON()});
     if(url.pathname.includes('/Images/')){await route.fulfill({status:404});return;}
     if(failed){await route.fulfill({status:401,json:{}});return;}
     let data={};
@@ -108,4 +108,18 @@ test('backgrounding the app pauses video',async({page})=>{
   await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
   await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(true);
+});
+
+test('library sort controls request server-side ordering and preserve selection',async({page})=>{
+  const calls=await mockServer(page);await page.goto('/');
+  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await page.getByRole('button',{name:'Recently added',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
+  await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
+    new URLSearchParams(call.query).get('SortBy')==='DateCreated')).toBe(true);
+  await page.getByRole('button',{name:'The Test Film',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
 });
