@@ -79,15 +79,39 @@ function focusFirst(root = main) {
     focusWithoutJump(root.querySelector('button:not(:disabled),input,select') || root);
   });
 }
-function title(text, subtitle) { main.append(el('p', 'PLEZY / WEBOS', 'eyebrow'), el('h1', text)); if (subtitle) main.append(el('p', subtitle, 'intro')); }
+function title(text, subtitle) {
+  main.append(el('h1', text));
+  if (subtitle) main.append(el('p', subtitle, 'intro'));
+}
+// The upstream Plezy navigation rail uses Material Symbols with leading
+// icons and a soft pill indicator. Bundle equivalent basic vector icons so
+// the Chromium 53 TV does not depend on external icon fonts or CDNs.
+function railButton(label, action, className, iconName) {
+  const symbols = {
+    home: 'M12 2 2 11h3v10h6v-6h2v6h6V11h3L12 2z',
+    libraries: 'M4 5h16v3H4zm0 6h16v3H4zm0 6h16v3H4z',
+    search: 'M10.5 3a7.5 7.5 0 0 0 0 15c1.7 0 3.2-.6 4.4-1.5l4.6 4.5 1.5-1.5-4.5-4.6A7.5 7.5 0 0 0 10.5 3zm0 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z',
+    settings: 'M3 7h18v2H3zm0 7h18v2H3z'
+  };
+  const control = button(label, action, className);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  shape.setAttribute('d', symbols[iconName]);
+  shape.setAttribute('fill', 'currentColor');
+  svg.appendChild(shape);
+  control.insertBefore(svg, control.firstChild);
+  return control;
+}
 function navigation() {
   nav.textContent = '';
   if (api) {
-    nav.append(button('Home', () => go({type: 'home'}), route.type === 'home' ? 'active' : ''),
-      button('Libraries', () => go({type: 'libraries'}), route.type === 'libraries' || route.type === 'library' ? 'active' : ''),
-      button('Search', () => go({type: 'search'}), route.type === 'search' ? 'active' : ''));
+    nav.append(railButton('Home', () => go({type: 'home'}), route.type === 'home' ? 'active' : '', 'home'),
+      railButton('Libraries', () => go({type: 'libraries'}), route.type === 'libraries' || route.type === 'library' ? 'active' : '', 'libraries'),
+      railButton('Search', () => go({type: 'search'}), route.type === 'search' ? 'active' : '', 'search'));
   }
-  nav.append(button('Servers & settings', () => go({type: 'settings'}), route.type === 'settings' ? 'active' : ''));
+  nav.append(railButton('Servers & settings', () => go({type: 'settings'}), route.type === 'settings' ? 'active' : '', 'settings'));
 }
 function go(next, remember = true) {
   if (remember) history.push({...route, scroll: main.scrollTop, focus: main.contains(document.activeElement) ? document.activeElement.dataset.focus : null});

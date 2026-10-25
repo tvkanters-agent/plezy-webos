@@ -393,3 +393,11 @@ test('offscreen library posters are deferred until reaching the viewport',async(
   const pending=await page.locator('.grid img[data-poster-src]').count();
   expect(pending).toBeGreaterThan(0);
 });
+
+test('navigation follows Plezy rail layout without invented webOS branding',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.brand')).toHaveText('Plezy');
+  await expect(page.getByText('Your media.')).toHaveCount(0);
+  const setting=page.getByRole('button',{name:'Servers & settings'});
+  await expect(setting.locator('svg')).toHaveCount(1);
+});
