@@ -458,7 +458,7 @@ async function render() {
     }
   } catch (error) {
     if (!valid()) return;
-    main.append(el('p', error.message, 'error'), button('Retry', render), button('Servers & settings', () => go({type: 'settings'})));
+    main.append(el('p', error.message, 'error'), button('Retry', render), button('Settings', () => go({type: 'settings'})));
   }
   if (valid()) {
     schedulePosters();

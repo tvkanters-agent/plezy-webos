@@ -64,7 +64,7 @@ test('failed Simkl stop is saved and can be retried from settings',async({page})
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await expect.poll(()=>attempts).toBe(1);
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(1);
-  await page.getByRole('button',{name:'Servers & settings',exact:true}).click();succeed=true;
+  await page.getByRole('button',{name:'Settings',exact:true}).click();succeed=true;
   await page.getByRole('button',{name:'Retry saved Simkl stops (1)',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(0);
   expect(attempts).toBe(2);

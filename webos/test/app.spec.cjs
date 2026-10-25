@@ -44,7 +44,7 @@ test('sign-in saves token but clears password',async({page})=>{
   const saved=await page.evaluate(()=>localStorage.getItem('plezy.webos'));expect(saved).not.toContain('never-save-me');expect(saved).toContain('test-token');
 });
 test('libraries, details, watch-state and back restore focus',async({page})=>{
-  const calls=await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  const calls=await mockServer(page);await page.goto('/');await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();await page.getByRole('button',{name:'The Test Film',exact:true}).click();
   await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
   await page.getByRole('button',{name:'Mark watched',exact:true}).click();await expect.poll(()=>calls.some(x=>x.path==='/Users/user/PlayedItems/movie'&&x.method==='POST')).toBe(true);
@@ -58,10 +58,10 @@ test('search renders results and focuses the first match',async({page})=>{
 });
 test('expired credentials leave a reachable settings action',async({page})=>{
   await mockServer(page,{failed:true});await page.goto('/');await expect(page.getByText(/Sign-in was rejected/)).toBeVisible();
-  await page.locator('main').getByRole('button',{name:'Servers & settings',exact:true}).click();await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
+  await page.locator('main').getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
 });
 test('removing a server removes its token',async({page})=>{
-  await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Servers & settings',exact:true}).click();await page.getByRole('button',{name:'Remove from this TV'}).click();
+  await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Remove from this TV'}).click();
   expect(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).not.toContain('test-token');
 });
 test('Back 461 opens an exit confirmation and traps navigation inside it',async({page})=>{
@@ -112,7 +112,7 @@ test('backgrounding the app pauses video',async({page})=>{
 
 test('library sort controls request server-side ordering and preserve selection',async({page})=>{
   const calls=await mockServer(page);await page.goto('/');
-  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await page.getByRole('button',{name:'Recently added',exact:true}).click();
   await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
@@ -156,7 +156,7 @@ test('a broken library query has a visible retry action',async({page})=>{
   await mockServer(page);
   await page.route(/\/Users\/user\/Items\?/,route=>route.fulfill({status:503,json:{}}));
   await page.goto('/');
-  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.getByText(/Could not load library titles/)).toBeVisible();
   await expect(page.getByRole('button',{name:'Retry loading'})).toBeVisible();
@@ -164,7 +164,7 @@ test('a broken library query has a visible retry action',async({page})=>{
 
 test('unwatched filter and sort can be combined without client-side slicing',async({page})=>{
   const calls=await mockServer(page);await page.goto('/');
-  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await page.getByRole('button',{name:'Unwatched',exact:true}).click();
   await page.getByRole('button',{name:'Recently added',exact:true}).click();
@@ -340,7 +340,7 @@ test('webOS 4.x missing browser APIs do not block first launch or Plex login',as
 test('TV D-pad navigation does not pin every library card to top of viewport',async({page})=>{
   await mockServer(page);
   await page.goto('/');
-  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   // Put the main scroll partway down without moving a focused element.
   await page.evaluate(()=>{
@@ -369,7 +369,7 @@ test('offscreen library posters are deferred until reaching the viewport',async(
     images.push(route.request().url());return route.fulfill({status:404});
   });
   await page.goto('/');
-  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await page.evaluate(()=>{
     const grid=document.querySelector('.grid');
@@ -398,7 +398,7 @@ test('navigation follows Plezy rail layout without invented webOS branding',asyn
   await page.goto('/');
   await expect(page.locator('.brand')).toHaveText('Plezy');
   await expect(page.getByText('Your media.')).toHaveCount(0);
-  const setting=page.getByRole('button',{name:'Servers & settings'});
+  const setting=page.getByRole('button',{name:'Settings'});
   await expect(setting.locator('svg')).toHaveCount(1);
 });
 
