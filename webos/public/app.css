@@ -153,3 +153,13 @@ main > .detail,main > .detail-children-title, main > .grid,main > .error { posit
 .player-sheet .track-controls select { display:block; width:100%; max-width:none; padding:12px;
   font-size:17px; margin:5px 0 0; }
 .player-sheet .track-controls [data-action="transcode"] { margin:8px 0 0; width:100%; }
+
+/* Upstream TrackChapterControls uses icon discs and a list-based choice sheet. */
+.player-secondary .transport-icon { margin-left:2px; width:42px; height:42px; padding:8px; }
+.player-options-list { display:flex; flex-direction:column; margin-top:12px; }
+.player-options-list button { display:block; text-align:left; margin-bottom:7px; width:100%;
+  background:rgba(255,255,255,.07); border:0; border-radius:9px; padding:12px 14px;
+  font-size:17px; }
+.player-options-list button[aria-pressed="true"] { background:rgba(255,255,255,.2); }
+.player-options-list button:focus { background:#ededed; color:#121212; outline:0; }
+.player-sheet .track-controls { display:none; }

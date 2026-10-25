@@ -30,11 +30,9 @@ export class Player {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
     };
     root.querySelector('[data-action="transcode"]').onclick = () => this.reopen({transcode: true});
-    root.querySelector('[data-action="options"]').onclick = () => {
-      this.sheet.hidden = false; this.reveal();
-      const first = this.sheet.querySelector('select:not([disabled])');
-      if (first) first.focus();
-    };
+    for (const action of ['options','audio-options','subtitle-options','chapter-options']) {
+      root.querySelector('[data-action="' + action + '"]').onclick = () => this.openSheet(action);
+    }
     root.querySelector('[data-action="close-options"]').onclick = () => this.closeSheet();
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => this.reopen({[kind]: Number(event.target.value), transcode: true});
@@ -43,9 +41,47 @@ export class Player {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
   }
   get active() { return !this.root.hidden; }
+  openSheet(action) {
+    const kind = {options:'settings', 'audio-options':'audio',
+      'subtitle-options':'subtitle', 'chapter-options':'chapter'}[action];
+    this.openSheetAction = action;
+    this.sheet.querySelector('[data-sheet-title]').textContent = {
+      settings:'Playback settings', audio:'Audio tracks',
+      subtitle:'Subtitles', chapter:'Chapters'}[kind];
+    const list = this.sheet.querySelector('.player-options-list');
+    list.textContent = '';
+    if (kind === 'settings') {
+      const quality = this.root.querySelector('[data-action="transcode"]');
+      const button = document.createElement('button');
+      button.textContent = quality.textContent;
+      button.onclick = () => quality.click();
+      list.appendChild(button);
+    } else {
+      const select = this.root.querySelector(kind === 'chapter'
+        ? '[data-chapter]' : '[data-track="' + kind + '"]');
+      Array.from(select.options).forEach(option => {
+        if (option.value === '' && kind === 'chapter') return;
+        const button = document.createElement('button');
+        button.textContent = option.textContent;
+        button.setAttribute('aria-pressed', String(select.value === option.value));
+        button.onclick = () => {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change'));
+          if (kind === 'chapter') this.closeSheet();
+        };
+        list.appendChild(button);
+      });
+      if (!list.children.length) list.textContent = 'No tracks available.';
+    }
+    this.sheet.hidden = false;
+    this.reveal();
+    const first = list.querySelector('button');
+    if (first) first.focus();
+    else this.sheet.querySelector('[data-action="close-options"]').focus();
+  }
   closeSheet() {
     this.sheet.hidden = true;
-    this.root.querySelector('[data-action="options"]').focus();
+    this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
   async open(api, item, options = {}, preserveTracking = false) {
@@ -90,6 +126,7 @@ export class Player {
         option.textContent = time(chapter.start) + ' · ' + chapter.title; chapters.append(option);
       });
       this.root.querySelector('[data-chapters]').hidden = !session.chapters?.length;
+    this.root.querySelector('[data-action="chapter-options"]').hidden = !session.chapters?.length;
       this.video.src = session.url;
       this.video.load();
       this.report('start');

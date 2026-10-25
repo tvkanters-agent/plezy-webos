@@ -41,9 +41,10 @@
         </div>
         <div class="player-secondary">
           <button data-action="skip" class="player-pill" hidden>Skip intro</button>
-          <button data-action="options" class="transport-icon" aria-label="Playback settings" title="Playback settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 4v4M15 10v4M10 16v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </button>
+          <button data-action="options" class="transport-icon" aria-label="Playback settings" title="Playback settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M9 4v4M15 10v4M10 16v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+          <button data-action="audio-options" class="transport-icon" aria-label="Audio tracks" title="Audio tracks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4zm12-3q5 5 0 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+          <button data-action="subtitle-options" class="transport-icon" aria-label="Subtitles" title="Subtitles"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 12h5m2 0h5M6 16h12" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button data-action="chapter-options" class="transport-icon" aria-label="Chapters" title="Chapters"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h2v14H4zm5 0h11v4H9zm0 6h11v4H9zm0 6h11v3H9z" fill="currentColor"/></svg></button>
         </div>
       </div>
     </div>
@@ -51,9 +52,10 @@
          oversized native HTML dropdowns on the video itself. -->
     <div class="player-sheet" hidden>
       <div class="player-sheet-header">
-        <h3>Playback settings</h3>
+        <h3 data-sheet-title>Playback settings</h3>
         <button data-action="close-options" aria-label="Close playback settings">Close</button>
       </div>
+      <div class="player-options-list"></div>
       <div class="track-controls">
         <label data-chapters hidden>Chapters <select aria-label="Chapter" data-chapter></select></label>
         <label>Audio <select data-track="audio" aria-label="Audio track"></select></label>

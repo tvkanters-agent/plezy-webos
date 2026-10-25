@@ -51,7 +51,8 @@ test('failed audio restart still stops the existing Simkl viewing',async({page})
   await page.route('http://plex.test/library/parts/part**',route=>route.fulfill({status:500}));
   // The default selector is enough to exercise the track PUT before opening HLS.
   await page.getByRole('button',{name:'Playback settings'}).click();
-  await page.getByLabel('Subtitle track').selectOption('-1');
+  await page.getByRole('button',{name:'Subtitles',exact:true}).click();
+  await page.getByRole('button',{name:'Subtitles off',exact:true}).click();
   await expect(page.locator('.player-status')).toContainText('HTTP 500');
   await page.keyboard.press('Escape');
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
@@ -76,7 +77,8 @@ test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async
  await page.getByRole('button',{name:'Skip intro',exact:true}).click();
  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(15);
  await page.getByRole('button',{name:'Playback settings'}).click();
- await page.getByLabel('Chapter',{exact:true}).selectOption('45');
+ await page.getByRole('button',{name:'Chapters',exact:true}).click();
+ await page.getByRole('button',{name:/45:00|0:45|Later/}).click();
  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(45);
  await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeHidden();
  expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
@@ -139,8 +141,18 @@ test('video settings use a Plezy-style side sheet rather than browser dropdown t
   await expect(page.locator('.player-sheet')).toBeHidden();
   await page.getByRole('button',{name:'Playback settings'}).click();
   await expect(page.locator('.player-sheet')).toBeVisible();
-  await expect(page.getByLabel('Audio track')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Compatible playback'})).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.player-sheet')).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
+});
+
+test('audio, subtitle and chapter buttons open focused choice sheets',async({page})=>{
+  await setup(page,{Chapter:[{title:'Beginning',startTimeOffset:0},{title:'Later',startTimeOffset:45000}]});
+  await page.getByRole('button',{name:'Audio tracks'}).click();
+  await expect(page.locator('[data-sheet-title]')).toHaveText('Audio tracks');
+  await expect(page.getByRole('button',{name:'Default audio'})).toBeVisible();
+  await page.getByRole('button',{name:'Close playback settings'}).click();
+  await page.getByRole('button',{name:'Chapters',exact:true}).click();
+  await expect(page.getByRole('button',{name:/Later/})).toBeVisible();
 });
