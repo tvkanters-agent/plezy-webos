@@ -374,7 +374,8 @@ test('offscreen library posters are deferred until reaching the viewport',async(
   await page.evaluate(()=>{
     const grid=document.querySelector('.grid');
     const entry=grid.querySelector('.card');
-    for(let n=0;n<30;n++){
+    // Enough rows to extend beyond the one-viewport prefetch margin.
+    for(let n=0;n<120;n++){
       const clone=entry.cloneNode(true);
       // Mock image failures replace the poster contents with a placeholder.
       // Install a fresh deferred image rather than assuming an img survived.
