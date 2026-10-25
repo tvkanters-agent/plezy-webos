@@ -3,7 +3,11 @@ import {baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
-let state = readState(localStorage), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
+// Accessing localStorage itself may throw in a restricted webOS app context.
+function tvStorage() {
+  try { return window.localStorage; } catch (_) { return null; }
+}
+let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
 const player = new Player(document.querySelector('#player'), notify, () => render());
 function el(tag, text, className) {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text;
@@ -18,7 +22,11 @@ function notify(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000);
 }
 function persist() {
-  try { saveState(localStorage, state); } catch (_) { notify('TV storage is unavailable. Settings will last only until the app closes.'); }
+  try {
+    const storage = tvStorage();
+    if (!storage) throw new Error('Storage unavailable');
+    saveState(storage, state);
+  } catch (_) { notify('TV storage is unavailable. Settings will last only until the app closes.'); }
 }
 function activeServer() { return state.servers.find(s => s.id === state.active) || state.servers[0]; }
 function setClient() { const server = activeServer(); api = server ? client(server, state.deviceId) : null; }

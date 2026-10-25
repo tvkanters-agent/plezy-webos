@@ -2,7 +2,18 @@
 export const VERSION = '0.1.0';
 export function id() {
   const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  // A device ID is a local client identifier, not a secret. Some webOS app
+  // contexts do not expose Web Crypto; keep first launch working on those TVs.
+  let filled = false;
+  try {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+      filled = true;
+    }
+  } catch (_) { /* Fall back to a non-cryptographic device ID. */ }
+  if (!filled) {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 export function baseUrl(input) {
@@ -64,7 +75,7 @@ export function time(value) {
 export function clamp(value, min, max) { return Math.max(min, Math.min(value, max)); }
 export function readState(storage) {
   try {
-    const state = JSON.parse(storage.getItem('plezy.webos') || '{}');
+    const state = JSON.parse(storage ? storage.getItem('plezy.webos') || '{}' : '{}');
     return {deviceId: state.deviceId || id(), servers: Array.isArray(state.servers) ? state.servers : [],
       active: state.active || '', quality: state.quality === 'transcode' ? 'transcode' : 'auto'};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto'}; }
