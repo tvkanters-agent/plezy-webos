@@ -133,3 +133,21 @@ test('Simkl manual watched and unwatched changes use movie/episode history endpo
     assert.equal(calls[1].body.shows[0].seasons[0].episodes[0].number,2);
   }finally{restore();}
 });
+
+test('Simkl never sends an old account playback after disconnect and relink',async()=>{
+  const calls=[];let session=saved();
+  const restore=mock(async(url,opts)=>{calls.push(new URL(url).pathname);return respond({});});
+  try{
+    let finish;const blocker=new Promise(resolve=>{finish=resolve;});
+    const api={server:{kind:'plex'},detail:()=>blocker};
+    const item={type:'episode',raw:{index:1,parentIndex:1,grandparentRatingKey:'show',grandparentTitle:'A'}};
+    const tracker=new SimklTracker(()=>session,newSession=>{session=newSession;});
+    const playback=tracker.createPlayback(api,item);
+    const first=playback.event('start',10,100);
+    tracker.reset();
+    session=saved({accessToken:'simkl_at_second'});
+    finish({raw:{title:'A',Guid:[{id:'tvdb://23'}]}});
+    await first;
+    assert.deepEqual(calls,[]);
+  }finally{restore();}
+});

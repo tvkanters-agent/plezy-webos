@@ -49,9 +49,10 @@ async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
   }
 }
 export function parseSession(response, previous) {
+  const scope = response && (response.scope || previous?.scope);
   if (!response || typeof response.access_token !== 'string' ||
       !response.access_token.startsWith('simkl_at_') ||
-      !(response.scope || previous?.scope || '').split(' ').includes('media:write')) {
+      typeof scope !== 'string' || !scope.split(' ').includes('media:write')) {
     throw new Error('Simkl did not grant a writable session. Reconnect with media:write permission.');
   }
   const refreshToken = response.refresh_token || (previous && previous.refreshToken);
@@ -139,6 +140,12 @@ export class SimklTracker {
     this.refreshTask = null;
     this.lastWrite = 0;
     this.holdUntil = 0;
+    this.epoch = 0;
+  }
+  reset() {
+    // Pending writes from a disconnected account must never be sent using
+    // credentials for a different account linked on the same TV.
+    ++this.epoch;
   }
   async itemPayload(api, item) {
     let show = null;
@@ -149,7 +156,7 @@ export class SimklTracker {
   }
   createPlayback(api, item) {
     if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return null;
-    const context = this.itemPayload(api, item);
+    const context = this.itemPayload(api, item), epoch = this.epoch;
     // A failure to look up Plex show identifiers must not interrupt playback.
     context.catch(() => {});
     let lastAction = null, stopped = false;
@@ -164,9 +171,9 @@ export class SimklTracker {
         const percent = progressPercent(position, duration, ended);
         if (percent === null) return Promise.resolve();
         this.queue = this.queue.catch(() => {}).then(async () => {
-          if (!validSession(this.getSession())) return;
+          if (this.epoch !== epoch || !validSession(this.getSession())) return;
           const payload = await context;
-          if (!payload) return;
+          if (!payload || this.epoch !== epoch) return;
           await this.scrobble(action, {...payload, progress: percent});
         }).catch(error => this.onError(error.message));
         return this.queue;
@@ -177,12 +184,12 @@ export class SimklTracker {
   // movie/episode was never opened in the player.
   markWatched(api, item, watched) {
     if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return Promise.resolve();
-    const context = this.itemPayload(api, item);
+    const context = this.itemPayload(api, item), epoch = this.epoch;
     context.catch(() => {});
     this.queue = this.queue.catch(() => {}).then(async () => {
-      if (!validSession(this.getSession())) return;
+      if (this.epoch !== epoch || !validSession(this.getSession())) return;
       const payload = await context;
-      if (!payload) return;
+      if (!payload || this.epoch !== epoch) return;
       const body = payload.movie ? {movies: [payload.movie]} : {
         shows: [{...payload.show, seasons: [{number: payload.episode.season,
           episodes: [{number: payload.episode.number}]}]}]
