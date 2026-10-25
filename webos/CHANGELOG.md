@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 0.2.2 alpha — Simkl device linking
+
+- Match upstream Plezy's Simkl V2 device-code HTTP request: no application-identity query parameters on OAuth endpoints; send the client ID and requested write scopes as form fields.
+- Display sanitized OAuth rejection codes and messages instead of an uninformative HTTP 400.
+- Add an explicit OAuth request-shape regression and an HTTP 400/error-redaction test.
+- Keep webOS 4.4.3 / Chromium 53 as the primary device target. Real-account confirmation pending.
+
+
 ## 0.2.1 alpha — webOS startup syntax compatibility
 
 - Lower the compiled TV app syntax target to Chromium 53 (now targeting the confirmed webOS 4.4.3 / Chromium 53 device), addressing a reported `Unexpected token {` parser error at startup on a physical LG TV.

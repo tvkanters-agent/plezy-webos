@@ -87,3 +87,7 @@ On a physical LG TV the previous build displayed `Plezy could not start / Uncaug
 For webOS 4.4.3-22, automated compatibility tests must cover older missing browser APIs, not merely Chromium 134 with a Chromium 53 syntax target. WebOS hardware, CORS and video pipeline still require device testing.
 
 The compatibility suite also simulates missing Chromium 53-era APIs in a modern Playwright context, and CSS has a flexbox fallback for the media grid (CSS Grid is newer than Chromium 53). These tests supplement, but do not replace, on-device testing of the webOS 4.4.3-22 target.
+
+## 0.2.2 Simkl device-link regression
+
+Test the exact `POST /oauth2/device` request shape (bare OAuth URL and URL-encoded form client ID/write scope) and `POST /oauth2/token` form grant. A 400 now displays Simkl's sanitized structured error, allowing the real rejection cause to be diagnosed without sharing credentials. WebOS 4.4.3 linking and successful playback tracking remain to be verified on the TV.

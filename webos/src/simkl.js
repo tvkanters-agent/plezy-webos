@@ -11,10 +11,28 @@ const WRITE_GAP_MS = 1100;
 
 function endpoint(path) {
   const url = new URL(path, BASE);
-  url.searchParams.set('client_id', SIMKL_CLIENT_ID);
-  url.searchParams.set('app-name', 'plezy');
-  url.searchParams.set('app-version', VERSION);
+  // OAuth V2 endpoints are NOT normal Simkl API requests. Plezy's original
+  // working client posts client_id/scope in the form body to a bare OAuth URL.
+  // Do not add regular API identity query parameters to OAuth grant requests.
+  if (!path.startsWith('/oauth2/')) {
+    url.searchParams.set('client_id', SIMKL_CLIENT_ID);
+    url.searchParams.set('app-name', 'plezy');
+    url.searchParams.set('app-version', VERSION);
+  }
   return url.href;
+}
+function oauthFailure(label, result) {
+  const data = result && result.data || {};
+  // Simkl includes a structured OAuth error and sometimes an explanation on
+  // HTTP 400. Show the reason, never tokens, device codes or full responses.
+  const code = typeof data.error === 'string' && /^[a-z_]{2,40}$/.test(data.error)
+    ? data.error : '';
+  const description = typeof data.error_description === 'string'
+    ? data.error_description : (typeof data.message === 'string' ? data.message : '');
+  const safeDescription = description.replace(/[A-Za-z0-9_\-]{24,}/g, '[redacted]')
+    .replace(/[\r\n\t]+/g, ' ').slice(0, 160);
+  return new Error(label + ' (HTTP ' + result.status + (code ? ': ' + code : '') + ').' +
+    (safeDescription ? ' ' + safeDescription : ''));
 }
 async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
   const controller = new AbortController();
@@ -70,7 +88,7 @@ export function validSession(session) {
 }
 export async function beginSimklLink(signal) {
   const result = await send('/oauth2/device', {form: {client_id: SIMKL_CLIENT_ID, scope: SCOPE}, signal});
-  if (result.status !== 200) throw new Error('Simkl device linking failed (HTTP ' + result.status + ').');
+  if (result.status !== 200) throw oauthFailure('Simkl device linking failed', result);
   const code = result.data;
   if (!code.device_code || !code.user_code || !code.verification_uri) throw new Error('Simkl returned an incomplete link code.');
   return code;
@@ -85,7 +103,7 @@ export async function pollSimklLink(code, signal) {
   if (error === 'access_denied' || error === 'expired_token' || error === 'invalid_client') {
     throw new Error('Simkl authorization ' + (error === 'access_denied' ? 'was declined.' : 'expired or was rejected.'));
   }
-  throw new Error('Simkl authorization failed (HTTP ' + result.status + ').');
+  throw oauthFailure('Simkl authorization failed', result);
 }
 export function simklMovieIds(raw) {
   const ids = {};

@@ -27,7 +27,11 @@ test('Simkl V2 device link requests write access and polls using form encoding',
     assert.equal(calls[1].url.pathname,'/oauth2/token');
     assert.equal(new URLSearchParams(calls[1].opts.body).get('grant_type'),'urn:ietf:params:oauth:grant-type:device_code');
     assert.equal(new URLSearchParams(calls[1].opts.body).get('device_code'),'device');
-    assert.equal(calls[0].url.searchParams.get('client_id'),SIMKL_CLIENT_ID);
+    assert.equal(calls[0].url.search,'', 'OAuth requests must not carry API identity URL parameters');
+    assert.equal(calls[1].url.search,'', 'OAuth token polls also use the bare OAuth URL');
+    assert.equal(new URLSearchParams(calls[0].opts.body).get('client_id'),SIMKL_CLIENT_ID);
+    assert.equal(new URLSearchParams(calls[1].opts.body).get('client_id'),SIMKL_CLIENT_ID);
+    assert.equal(calls[0].opts.headers['Content-Type'],'application/x-www-form-urlencoded');
   }finally{restore();}
 });
 test('Simkl device flow treats pending and slow down as nonterminal but rejects read-only tokens',async()=>{
@@ -220,4 +224,22 @@ test('Simkl manual unwatched action supersedes a saved stop for that title',asyn
   try{const tracker=new SimklTracker(()=>session,value=>{session=value;});await tracker.markWatched({server:{kind:'plex'}},movie,false);
     assert.deepEqual(session.pendingStops,[]);assert.deepEqual(calls,['/sync/history/remove']);
   }finally{restore();}
+});
+
+test('Simkl HTTP 400 displays the structured OAuth reason without leaking secrets', async()=>{
+  const restore=mock(async()=>respond({error:'invalid_request',error_description:
+    'Missing device authorization parameter'},400));
+  try {
+    await assert.rejects(beginSimklLink(),/HTTP 400: invalid_request.*Missing device authorization parameter/);
+  } finally {restore();}
+  const secret='simkl_rt_' + 'a'.repeat(32);
+  const restoreSecret=mock(async()=>respond({error:'invalid_request',message:
+    'Rejected token ' + secret},400));
+  try {
+    await assert.rejects(beginSimklLink(),error=>{
+      assert.match(error.message,/invalid_request/);
+      assert.ok(!error.message.includes(secret));
+      return true;
+    });
+  } finally {restoreSecret();}
 });
