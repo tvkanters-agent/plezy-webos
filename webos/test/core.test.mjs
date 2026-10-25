@@ -148,3 +148,19 @@ test('partially corrupted saved servers do not crash startup or hide valid accou
   assert.equal(state.deviceId,'device');
   assert.equal(state.active,'good');
 });
+
+test('unwatched library filtering is server-side for Plex and Jellyfin',async()=>{
+  const calls=[];
+  const restore=mock(async url=>{
+    calls.push(new URL(url));
+    return json(url.includes('/library/sections/') ? {MediaContainer:{Metadata:[],totalSize:0}} : {Items:[],TotalRecordCount:0});
+  });
+  try{
+    await new Plex(server,'device').list('movies',0,'title','unwatched');
+    await new Jellyfin(server,'device').list('movies',0,'title','unwatched');
+    await new Jellyfin(server,'device').list('movies',0,'title','all');
+    assert.equal(calls[0].pathname,'/prefix/library/sections/movies/unwatched');
+    assert.equal(calls[1].searchParams.get('IsPlayed'),'false');
+    assert.equal(calls[2].searchParams.has('IsPlayed'),false);
+  }finally{restore();}
+});

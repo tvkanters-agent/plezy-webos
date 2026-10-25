@@ -33,7 +33,7 @@ The TV must be able to reach the selected server. Browser preview and reverse pr
 
 - Plex PIN linking, server discovery and manual token connection.
 - Jellyfin and Emby username/password authentication.
-- Saved servers and switching, library browsing with pagination, search, show/season/episode navigation and details.
+- Saved servers and switching, library browsing with pagination and server-side sorting/filtering (including unwatched titles), search, show/season/episode navigation and details.
 - Continue Watching / Next Up / Recently Added (server-provided hubs on Plex).
 - Mark watched/unwatched, resume, periodic server progress reporting and stop reports.
 - Native HTML video playback; conservative H.264/AAC MP4 direct play and HLS server transcoding for other media.

@@ -141,20 +141,34 @@ async function render() {
       title(route.library.title); const currentApi = api;
       const choices = [{id: 'title', label: 'Title A–Z'}, {id: 'recent', label: 'Recently added'},
         {id: 'release', label: 'Release date'}];
-      const selected = route.sort || 'title';
+      const selected = route.sort || 'title', selectedFilter = route.filter || 'all';
       const filters = el('div', undefined, 'sort-actions');
       filters.setAttribute('role', 'group');
       filters.setAttribute('aria-label', 'Sort library');
       choices.forEach(choice => {
         const control = button(choice.label, () =>
-          go({type: 'library', library: route.library, sort: choice.id, focus: 'sort:' + choice.id}, false),
+          go({type: 'library', library: route.library, sort: choice.id,
+            filter: selectedFilter, focus: 'sort:' + choice.id}, false),
           choice.id === selected ? 'active' : '');
         control.dataset.focus = 'sort:' + choice.id;
         control.setAttribute('aria-pressed', String(choice.id === selected));
         filters.append(control);
       });
       main.append(filters);
-      await paginated(start => currentApi.list(route.library.id, start, selected), currentRevision);
+      const watchFilters = el('div', undefined, 'sort-actions');
+      watchFilters.setAttribute('role', 'group');
+      watchFilters.setAttribute('aria-label', 'Filter watched status');
+      [{id: 'all', label: 'All titles'}, {id: 'unwatched', label: 'Unwatched'}].forEach(choice => {
+        const control = button(choice.label, () =>
+          go({type: 'library', library: route.library, sort: selected,
+            filter: choice.id, focus: 'filter:' + choice.id}, false),
+          choice.id === selectedFilter ? 'active' : '');
+        control.dataset.focus = 'filter:' + choice.id;
+        control.setAttribute('aria-pressed', String(choice.id === selectedFilter));
+        watchFilters.append(control);
+      });
+      main.append(watchFilters);
+      await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id); if (!valid()) return;

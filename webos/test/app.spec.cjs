@@ -152,3 +152,18 @@ test('a broken library query has a visible retry action',async({page})=>{
   await expect(page.getByText(/Could not load library titles/)).toBeVisible();
   await expect(page.getByRole('button',{name:'Retry loading'})).toBeVisible();
 });
+
+test('unwatched filter and sort can be combined without client-side slicing',async({page})=>{
+  const calls=await mockServer(page);await page.goto('/');
+  await page.getByRole('button',{name:'Libraries',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await page.getByRole('button',{name:'Unwatched',exact:true}).click();
+  await page.getByRole('button',{name:'Recently added',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
+    new URLSearchParams(call.query).get('SortBy')==='DateCreated'&&
+    new URLSearchParams(call.query).get('IsPlayed')==='false')).toBe(true);
+  await page.getByRole('button',{name:'The Test Film',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
+});
