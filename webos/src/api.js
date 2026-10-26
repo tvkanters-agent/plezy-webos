@@ -289,10 +289,55 @@ export class Plex {
     return {biography:person.summary||null, bornAt:person.bornAt||null,
       diedAt:person.diedAt||null,birthPlace:person.birthPlace||null};
   }
-  async personMedia(personId, start = 0) {
-    const data=(await this.get('/library/people/' + enc(personId) + '/media',{
-      'X-Plex-Container-Start':start,'X-Plex-Container-Size':PAGE})).MediaContainer;
-    return {items:(data.Metadata||[]).map(plexItem),total:data.totalSize||data.size||0};
+  // Plex's per-person /media can be section-scoped. Cross-library actors have
+  // separate numeric tags: search returns the corresponding exact-name filters.
+  async personMedia(personId, start = 0, actorName = '') {
+    if(!this._personFilmographies)this._personFilmographies=new Map();
+    const key=String(personId)+'|'+String(actorName).toLowerCase();
+    if(!this._personFilmographies.has(key)) {
+      const promise=this.loadPersonFilmography(personId,actorName).catch(error=>{
+        this._personFilmographies.delete(key);throw error;
+      });
+      this._personFilmographies.set(key,promise);
+    }
+    const items=await this._personFilmographies.get(key);
+    return {items:items.slice(start,start+PAGE),total:items.length};
+  }
+  async loadPersonFilmography(personId, actorName) {
+    const sources=[{path:'/library/people/'+enc(personId)+'/media',actor:null}];
+    if(actorName?.trim()){
+      try{
+        const response=(await this.get('/hubs/search',{query:actorName.trim(),limit:100})).MediaContainer;
+        for(const hub of response?.Hub||[])for(const person of hub.Directory||[]){
+          if(String(person.tag||'').trim().toLowerCase()!==actorName.trim().toLowerCase())continue;
+          const match=/^\/(library\/sections\/\d+\/all)\?actor=(\d+)(?:&|$)/.exec(person.key||'');
+          if(!match)continue;
+          const path='/'+match[1];
+          if(!sources.some(x=>x.path===path&&x.actor===match[2]))
+            sources.push({path,actor:match[2]});
+        }
+      }catch(_){/* Preserve PMS person listing when actor search is unavailable. */}
+    }
+    const lists=await Promise.all(sources.map(async(source,index)=>{
+      const found=[];
+      for(let offset=0;offset<2000;offset+=200) {
+        try{
+          const params={'X-Plex-Container-Start':offset,'X-Plex-Container-Size':200};
+          if(source.actor)params.actor=source.actor;
+          const container=(await this.get(source.path,params)).MediaContainer;
+          const rows=Array.isArray(container?.Metadata)?container.Metadata:[];
+          found.push(...rows.filter(x=>x.type==='movie'||x.type==='show').map(plexItem));
+          if(!rows.length || offset+rows.length>=Number(container?.totalSize||container?.size||rows.length))break;
+        }catch(error) {
+          if(index===0&&sources.length===1&&offset===0)throw error;
+          break;
+        }
+      }
+      return found;
+    }));
+    const items=new Map();
+    for(const list of lists)for(const item of list)items.set(item.id,item);
+    return [...items.values()];
   }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
   async rate(item, value) {
