@@ -774,8 +774,8 @@ test('connected Simkl movie and series rating rows read existing user score and 
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}],
    simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',scope:'media:read media:write',
      expiresAt:Date.now()+3600000}})));
- const show={ratingKey:'series',type:'show',title:'Rated Series',year:2024,
-   Guid:[{id:'tvdb://321'}],rating:8.0,ratingImage:'imdb://rating'};
+ const show={ratingKey:'series',type:'show',title:'Rated Series',
+   Guid:[{id:'tvdb://321'}]};
  const writes=[];
  await page.route('https://api.simkl.com/**',route=>{
    const url=new URL(route.request().url());
@@ -808,7 +808,8 @@ test('connected Simkl movie and series rating rows read existing user score and 
  await page.keyboard.press('ArrowRight');
  await page.keyboard.press('ArrowRight');
  await page.keyboard.press('Enter');
- await expect.poll(()=>writes.length).toBe(1);
+ await expect.poll(()=>writes.length,{timeout:8000,
+   message:'Simkl save status: '+await simkl.locator('.rating-service-status').textContent()}).toBe(1);
  expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
 });
 
