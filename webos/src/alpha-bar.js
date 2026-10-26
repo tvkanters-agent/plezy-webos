@@ -60,7 +60,7 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
   element.setAttribute('role', 'group');
   element.setAttribute('aria-label', 'Alphabet navigation');
   let displayed = [], current = helper.letters[0] || '#', highlighted = 0;
-  let focused = false, pressed = false, debounce = null;
+  let focused = false, pressed = false, consumeClick = false, debounce = null;
   const nearest = letter => {
     if (!letter || !displayed.length) return '';
     if (displayed.indexOf(letter) >= 0) return letter;
@@ -104,6 +104,9 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
       circle.style.width = circle.style.height = marker + 'px';
       circle.style.fontSize = Math.max(7, Math.min(10, height * .58)) + 'px';
       slot.addEventListener('click', () => {
+        // A pointer gesture already jumped on down (like Flutter onTapDown).
+        // Do not issue a second page request for its subsequent click.
+        if (consumeClick) { consumeClick = false; return; }
         highlighted = i; element.focus(); mark(); jump(letter);
       });
       element.append(slot);
@@ -127,6 +130,7 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
   element.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
     pressed = true;
+    consumeClick = true;
     element.focus();
     selectY(e.clientY);
     e.preventDefault();
@@ -136,7 +140,8 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', release);
   element.addEventListener('touchstart', e => {
-    pressed = true; element.focus(); selectY(e.touches[0].clientY); e.preventDefault();
+    pressed = true; consumeClick = true;
+    element.focus(); selectY(e.touches[0].clientY); e.preventDefault();
   }, {passive:false});
   element.addEventListener('touchmove', e => {
     if (pressed) { selectY(e.touches[0].clientY); e.preventDefault(); }
