@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {baseUrl, endpoint, time, seconds, nextFocus, readState, request, id} from '../src/core.js';
-import {Plex, Jellyfin, plexPin, plexServers, plexNavigation} , plexTrackLabel from '../src/api.js';
+import {Plex, Jellyfin, plexPin, plexServers, plexNavigation, plexTrackLabel} from '../src/api.js';
 const server = {url: 'https://media.test/prefix', token: 'secret&token', userId: 'user', kind: 'jellyfin'};
 const json = value => new Response(JSON.stringify(value));
 function mock(fn) { const old = global.fetch; global.fetch = fn; return () => { global.fetch = old; }; }
