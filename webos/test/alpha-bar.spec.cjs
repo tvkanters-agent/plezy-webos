@@ -79,9 +79,12 @@ test('alphabet rail is reachable with right arrow, and up/down request letter ju
   await page.locator('.alpha-window-grid .card').last().focus();
   await page.keyboard.press('ArrowRight');
   await expect(rail).toBeFocused();
+  const before=await rail.locator('.alpha-letter-slot.highlighted').getAttribute('aria-label');
+  const order='ABCDEF';
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(175); // Flutter's 150ms D-pad jump debounce.
-  await expect(rail.locator('.alpha-letter-slot.highlighted')).toContainText('B');
+  await expect(rail.locator('.alpha-letter-slot.highlighted')).toHaveAttribute('aria-label',
+    order[Math.min(order.length-1,order.indexOf(before)+1)]);
   await page.keyboard.press('ArrowLeft');
   await expect(page.locator('.alpha-window-grid .card:focus')).toHaveCount(1);
 });
