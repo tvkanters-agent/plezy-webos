@@ -453,12 +453,16 @@ export class Jellyfin {
       {title: 'Next up', items: (next.Items || []).map(jellyItem)},
       {title: 'Recently added', items: (Array.isArray(latest) ? latest : latest.Items || []).map(jellyItem)}].filter(x => x.items.length);
   }
-  async list(library, start = 0, sort = 'title', filter = 'all') {
+  async list(library, start = 0, sort = 'title', filter = 'all', limit = PAGE, alphaPrefix = null) {
     const order = {title: ['SortName', 'Ascending'], recent: ['DateCreated', 'Descending'],
       release: ['PremiereDate', 'Descending']}[sort] || ['SortName', 'Ascending'];
-    const data = await this.call(this.userPath('/Items'), {ParentId: library, StartIndex: start, Limit: PAGE,
+    // MediaBrowserAlphaBarStrategy uses NameStartsWith, with # as
+    // NameLessThan=A, unlike Plex's cumulative index jumps.
+    const data = await this.call(this.userPath('/Items'), {ParentId: library, StartIndex: start, Limit: limit,
       Fields: FIELDS, SortBy: order[0], SortOrder: order[1],
-      IsPlayed: filter === 'unwatched' ? false : undefined});
+      IsPlayed: filter === 'unwatched' ? false : undefined,
+      NameStartsWith: alphaPrefix && alphaPrefix !== '#' ? alphaPrefix : undefined,
+      NameLessThan: alphaPrefix === '#' ? 'A' : undefined});
     return {items: (data.Items || []).map(jellyItem), total: data.TotalRecordCount || 0};
   }
   async search(query) {
