@@ -114,7 +114,8 @@ test('library sort controls request server-side ordering and preserve selection'
   const calls=await mockServer(page);await page.goto('/');
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
-  await page.getByRole('button',{name:'Recently added',exact:true}).click();
+  await page.getByRole('button',{name:'Sort',exact:true}).click();
+  await page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added',exact:true}).click();
   await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
   await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
     new URLSearchParams(call.query).get('SortBy')==='DateCreated')).toBe(true);
@@ -166,8 +167,10 @@ test('unwatched filter and sort can be combined without client-side slicing',asy
   const calls=await mockServer(page);await page.goto('/');
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
-  await page.getByRole('button',{name:'Unwatched',exact:true}).click();
-  await page.getByRole('button',{name:'Recently added',exact:true}).click();
+  await page.getByRole('button',{name:'Filters',exact:true}).click();
+  await page.getByRole('group',{name:'Filter watched status'}).getByRole('button',{name:'Unwatched',exact:true}).click();
+  await page.getByRole('button',{name:'Sort',exact:true}).click();
+  await page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added',exact:true}).click();
   await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
   await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
     new URLSearchParams(call.query).get('SortBy')==='DateCreated'&&
