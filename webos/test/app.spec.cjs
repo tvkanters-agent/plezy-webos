@@ -716,6 +716,8 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await page.keyboard.press('Enter');
  await expect.poll(()=>put.length).toBe(1);
  expect(put[0]).toEqual({method:'PUT',key:'film',rating:'9'});
+ await expect(page.getByRole('button',{name:'Rate',exact:true})).toBeFocused();
+ await expect(page.locator('.cast-strip')).not.toBeFocused();
 });
 
 test('Plezy cast is below episode list with locked D-pad focus, invisible scrollbar and actor filmography',async({page})=>{
@@ -756,6 +758,8 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  await page.keyboard.press('ArrowRight');
  await expect(cast).toBeFocused();
  await expect(cast).toHaveAttribute('aria-label',/Person 1/);
+ // Moving among already visible actors must not snap each actor left.
+ await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBe(0);
  for(let i=0;i<9;i++)await page.keyboard.press('ArrowRight');
  await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBeGreaterThan(0);
  const hidden=await cast.evaluate(el=>getComputedStyle(el).scrollbarWidth==='none');
@@ -829,5 +833,40 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.getByRole('button',{name:/Partially Viewed Series/}).first().click();
  await page.getByRole('button',{name:'Play',exact:true}).first().click();
  await expect(page.locator('#player')).toBeVisible();
- await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=125');
+ await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=0');
+ // The original resume point is preserved for timeline syncing, even though
+ // Plex's older HLS decoder cannot open its stream with a nonzero offset.
+ await expect.poll(()=>page.locator('#player .player-spinner').isVisible()).toBe(true);
+});
+
+test('Plezy actor page displays compact portrait, character, biography and filmography',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const actor={id:'411',tag:'Movie Actor',role:'The Lead',thumb:'/cast/411.jpg'};
+ const film={ratingKey:'film',type:'movie',title:'Movie with Actor',Role:[actor]};
+ const other={ratingKey:'other',type:'movie',title:'Another Film'};
+ await page.route('https://discover.provider.plex.tv/library/people/plex-person',route=>
+   route.fulfill({json:{MediaContainer:{Metadata:[{
+     summary:'Biography about the actor.',bornAt:'1970-01-12',
+     birthPlace:'Rotterdam, Netherlands'}]}}}));
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   if(path==='/library/people/411')
+     return route.fulfill({json:{MediaContainer:{Directory:[{tagKey:'plex-person'}]}}});
+   const entries=path==='/hubs'?[film]:
+     path==='/library/metadata/film'?[film]:
+     path==='/library/people/411/media'?[film,other]:[];
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?
+     {Hub:[{title:'Movies',Metadata:entries}]}:{Metadata:entries,totalSize:entries.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Movie with Actor/}).first().click();
+ await page.locator('.cast-strip').focus();
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Movie Actor'})).toBeVisible();
+ await expect(page.locator('.actor-avatar img')).toHaveCount(1);
+ await expect(page.getByText('The Lead')).toBeVisible();
+ await expect(page.getByText('Rotterdam, Netherlands')).toBeVisible();
+ await expect(page.getByText('Biography about the actor.')).toBeVisible();
+ await expect(page.locator('main .grid .card')).toHaveCount(2);
 });

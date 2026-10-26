@@ -274,3 +274,19 @@ test('spinner remains available after committing a remote seek with controls hid
  await page.locator('video').dispatchEvent('playing');
  await expect(page.locator('.player-buffering')).toBeHidden();
 });
+
+test('subtitle descriptions occupy a distinct line under primary track labels',async({page})=>{
+ await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+   Part:[{id:'part',key:'/video.webm',Stream:[
+     {id:31,streamType:3,languageCode:'eng',title:'English SDH',displayTitle:'English (SDH)'}]}]}]});
+ await page.getByRole('button',{name:'Subtitles'}).click();
+ const row=page.locator('.player-options-list button').filter({hasText:'SDH'}).first();
+ await expect(row.locator('strong')).toBeVisible();
+ await expect(row.locator('small')).toBeVisible();
+ const positions=await row.evaluate(el=>{
+   const title=el.querySelector('strong').getBoundingClientRect();
+   const description=el.querySelector('small').getBoundingClientRect();
+   return {titleBottom:title.bottom,subtitleTop:description.top};
+ });
+ expect(positions.subtitleTop).toBeGreaterThanOrEqual(positions.titleBottom-1);
+});
