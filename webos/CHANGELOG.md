@@ -1,5 +1,18 @@
 # webOS changelog
 
+## 0.2.7 — Authenticated community ratings
+
+- Port Plezy's Simkl redirect → title-detail lookup with the connected account's
+  access token and shared token refresh. The previous unauthenticated request
+  returned `401 user_token_required`.
+- Bundle a small webOS JS service to read the unfollowed redirect Location;
+  browser fetch cannot expose it. Preserve IMDb, Simkl and MAL community scores
+  alongside Plex/MDBList scores in the metadata bubble.
+- Replace misleading public-endpoint fixtures with authenticated movie/anime,
+  refresh, service transport and rendered chip regression tests.
+- Validation: 85 unit tests, 68 browser tests, Chromium 53 bundle and IPK build.
+  Actual LG TV service startup and authenticated API responses remain unverified.
+
 ## 0.2.6 alpha — Simkl queue and upstream ID parity (2026-10-26)
 
 - Fix a reproduced port bug where a saved title-only stop returned `404 id_err` and prevented valid current playback from sending start/pause.

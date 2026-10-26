@@ -36,3 +36,27 @@ jobs:
         with:
           name: webos-test-results
           path: webos/test-results/
+  release:
+    needs: test-and-package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: plezy-webos-ipk
+          path: release-assets
+      - name: Publish versioned webOS release when release notes exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./webos/package.json').version")
+          notes="webos/releases/v${version}.md"
+          if [ ! -f "$notes" ]; then exit 0; fi
+          if gh release view "v${version}" >/dev/null 2>&1; then exit 0; fi
+          gh release create "v${version}" release-assets/*.ipk \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Plezy webOS ${version} alpha" --notes-file "$notes"

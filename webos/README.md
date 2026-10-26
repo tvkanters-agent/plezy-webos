@@ -180,3 +180,12 @@ To reduce artwork stalls on webOS 4.4 / Chromium 53, Plezy asks Plex for pre-siz
 ### 0.2.6 Simkl syncing repair
 
 Install the [0.2.6 release](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.6). No account relinking is required. Old saved stops with empty IDs are removed automatically on the next playback action or explicit retry; those old records cannot be recovered because they did not save a Plex rating key. A rejected older ID-bearing stop remains retryable but no longer cancels a new viewing's start/pause. Current titles use the same dedicated movie/show ID fetch and ID-only bodies as native Plezy, without Fribb remapping. Local automated validation passes; live TV/Simkl verification remains required.
+
+### Community ratings transport (0.2.7)
+
+Install the full IPK built by `npm run package`; it now contains a native webOS JS
+service as well as the UI. A connected Simkl account supplies IMDb, Simkl and MAL
+community scores when the title has matching external IDs. The service preserves
+Plezy's authenticated redirect/detail flow. Additional MDBList scores continue to
+use your configured MDBList account. Desktop `dist/` previews do not provide the
+TV's Luna service and therefore cannot perform Simkl community lookups.
