@@ -13,6 +13,16 @@ The `webos/` app is a **port of Plezy**, not a new TV client design. Original Fl
 
 **Never introduce speculative matching, fallback endpoints, UI controls, labels or new layouts in place of an existing upstream implementation.** New solutions require a demonstrated incompatibility, written justification, and tests.
 
+### Missing cast portraits
+
+Native `CastMemberStrip` and `ActorMediaScreen` pass
+`Symbols.person_rounded` to `OptimizedMediaImage`, using a centered
+40px symbol for absent, loading and failed images. The webOS port uses
+a shared inline SVG because Chromium 53 does not ship Flutter's icon font.
+Only a successfully loaded image covers the placeholder; an error removes
+the image to avoid the browser's broken-image glyph. Square and circular
+portrait clipping is retained.
+
 ## Source map
 
 | WebOS area | Authoritative Flutter source |

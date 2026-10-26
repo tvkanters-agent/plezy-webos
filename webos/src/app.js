@@ -542,6 +542,27 @@ function schedulePosters() {
   if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
 }
 main.addEventListener('scroll', schedulePosters, true);
+// OptimizedMediaImage uses Symbols.person_rounded in Plezy's cast strip and actor screen.
+// Use the same filled person fallback for absent, pending and failed images on Chromium 53.
+function personPortrait(imageUrl, className) {
+  const node=el('div',undefined,className);
+  const fallback=el('span',undefined,'person-placeholder');
+  fallback.setAttribute('aria-hidden','true');
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d','M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.66-5.33-4-8-4z');
+  path.setAttribute('fill','currentColor');
+  svg.appendChild(path);fallback.appendChild(svg);node.appendChild(fallback);
+  if (imageUrl) {
+    const img=el('img');img.alt='';img.style.visibility='hidden';
+    img.onload=()=>{img.style.visibility='visible';};
+    img.onerror=()=>{img.remove();};
+    img.setAttribute('data-poster-src',imageUrl);
+    node.appendChild(img);
+  }
+  return node;
+}
 function poster(item, options = {}) {
   const node = el('div', undefined, 'poster'); const image = api.image(item, options);
   if (image) {
@@ -770,12 +791,8 @@ async function render() {
       const currentApi=api;
       const header=el('section',undefined,'actor-hero');
       const identity=el('div',undefined,'actor-identity');
-      const portrait=el('div',undefined,'actor-avatar');
-      if(route.thumb){
-        const img=el('img');img.alt='';
-        img.setAttribute('data-poster-src',currentApi.image({poster:route.thumb}));
-        portrait.append(img);
-      } else portrait.append(el('span','●','actor-placeholder'));
+      const portrait=personPortrait(route.thumb?
+        currentApi.image({poster:route.thumb}):'', 'actor-avatar');
       const labels=el('div',undefined,'actor-heading');
       labels.append(el('h1',route.actor||'Cast member'));
       if(route.role)labels.append(el('p',route.role,'actor-role'));
@@ -1158,12 +1175,8 @@ async function render() {
         };
         actors.forEach((actor,index)=>{
           const tile=el('div',undefined,'cast-member');
-          const picture=el('div',undefined,'cast-picture');
-          if (actor.thumb) {
-            const image=el('img');image.alt='';
-            image.setAttribute('data-poster-src',api.image({poster:actor.thumb}));
-            picture.append(image);
-          } else picture.textContent='?';
+          const picture=personPortrait(actor.thumb?
+            api.image({poster:actor.thumb}):'', 'cast-picture');
           tile.append(picture,el('strong',actor.tag||actor.title||'Unknown'));
           if (actor.role) tile.append(el('small',actor.role));
           tile.onclick=()=>{select(index);openActor(actor);};

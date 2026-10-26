@@ -890,6 +890,47 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });
 
+test('Plezy person fallback handles absent and failed portraits on cast strip and actor page',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',
+     url:'http://plex.test',token:'token'}]})));
+ const actors=[{id:'missing',tag:'No Portrait',role:'First role'},
+   {id:'broken',tag:'Failed Portrait',role:'Second role',thumb:'/cast/missing.jpg'}];
+ const film={ratingKey:'film',type:'movie',title:'Portrait Test Film',Role:actors};
+ let attempts=0;
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   if(path==='/photo/:/transcode'){attempts++;return route.fulfill({status:404,body:''});}
+   if(path==='/hubs')return route.fulfill({json:{MediaContainer:{
+     Hub:[{title:'Movies',Metadata:[film]}]}}});
+   const items=path==='/library/metadata/film'?[film]:[];
+   return route.fulfill({json:{MediaContainer:{Metadata:items,totalSize:items.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Portrait Test Film/}).first().click();
+ const strip=page.locator('.cast-strip'), portraits=strip.locator('.cast-picture');
+ await expect(portraits).toHaveCount(2);
+ await expect(portraits.locator('.person-placeholder svg')).toHaveCount(2);
+ await expect(portraits.nth(0).locator('img')).toHaveCount(0);
+ await portraits.nth(1).scrollIntoViewIfNeeded();
+ await expect.poll(()=>attempts).toBeGreaterThan(0);
+ await expect(portraits.nth(1).locator('img')).toHaveCount(0);
+ await strip.focus();
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'No Portrait'})).toBeVisible();
+ await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar img')).toHaveCount(0);
+ await page.keyboard.press('Escape');
+ await expect(strip).toHaveCount(1);
+ await strip.focus();
+ await page.keyboard.press('ArrowRight');
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Failed Portrait'})).toBeVisible();
+ await expect.poll(()=>attempts).toBeGreaterThan(1);
+ await expect(page.locator('.actor-avatar img')).toHaveCount(0);
+ await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+});
+
 test('Plezy actor page displays compact portrait, character, biography and filmography',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));

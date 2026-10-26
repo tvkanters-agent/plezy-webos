@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 0.2.10 — Cast portrait fallbacks
+
+- Use Plezy's filled person placeholder in cast tiles and actor profiles.
+- Handle absent URLs, images being loaded, and failed image requests without a browser broken-image indicator.
+- Cover both views with mocked image failure browser regression; LG TV validation remains outstanding.
+
 ## 0.2.9 — Smooth playback exit
 
 - Preserve the mounted detail page and remote focus when stopping playback; avoid a blank re-render between two copies of the screen.
