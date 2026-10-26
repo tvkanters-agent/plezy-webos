@@ -5,6 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {mountAlphabetLibrary} from './library-alpha.js';
+import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
@@ -493,6 +494,7 @@ function back() {
       main.appendChild(previous.snapshot);
       navigation();
       main.scrollTop = route.scroll || 0;
+      main.classList.toggle('has-alpha-bar', !!previous.alphabet);
       if (previous.alphabet) {
         const restoredRevision = revision;
         activeAlphabet = previous.alphabet;
@@ -695,6 +697,7 @@ async function render() {
   let preferredFocus = null;
   cancelAuth(); detailMenu = null;
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
+  main.classList.remove('has-alpha-bar');
   main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
@@ -801,7 +804,8 @@ async function render() {
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
       const libraryLoader = (start, count) =>
-        currentApi.list(route.library.id, start, selected, selectedFilter, count);
+        currentApi.list(route.library.id, start, selected, selectedFilter, count,
+          currentApi instanceof Jellyfin ? route.alpha : undefined);
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -813,6 +817,7 @@ async function render() {
         if (pageResult.error) {
           await paginated(start => libraryLoader(start), currentRevision);
         } else if (showPlexAlphaBar(pageResult.total, characters, selected)) {
+          main.classList.add('has-alpha-bar');
           activeAlphabet = mountAlphabetLibrary({
             main, firstPage: pageResult, characters,
             loader: (start, count) => libraryLoader(start, count),
@@ -821,9 +826,26 @@ async function render() {
         } else {
           await paginated(start => libraryLoader(start), currentRevision, {initialPage: pageResult});
         }
+      } else if (currentApi instanceof Jellyfin) {
+        // Native MediaBrowserAlphaBarStrategy uses a synthetic 27-letter
+        // NameStartsWith filter rather than the Plex offset/scroll strategy.
+        const firstPage = await libraryLoader(0);
+        if (!valid()) return;
+        if (firstPage.total >= 80 || route.alpha) {
+          main.classList.add('has-alpha-bar');
+          await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
+          if (!valid()) return;
+          activeAlphabet = mountMediaBrowserAlphabet({
+            main, selected:route.alpha, focusWithoutJump,
+            onPrefixChange(next) => go({...route, alpha:next, alphaFocus:true}, false)
+          });
+        } else {
+          await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
+        }
       } else {
         await paginated(start => libraryLoader(start), currentRevision);
       }
+      if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {
         pendingRailEntryRevision=null;
         focusFirst(main, preferredPaneControl(), true);
@@ -1265,7 +1287,8 @@ async function render() {
       main.scrollTop = route.scroll || 0;
       if (found) focusWithoutJump(found, false);
       else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
-    } else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
+    } else if (!(route.alphaFocus && activeAlphabet))
+      focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
   }
 }
 function play(item, start, transcode = false) {
@@ -1552,10 +1575,10 @@ window.addEventListener('keydown', event => {
   const root = !dialog.hidden ? dialog : player.active ? player.root : document.querySelector('#shell');
   const inRail = nav.contains(current);
   const inMain = main.contains(current);
-  if (activeAlphabet && inMain && direction === 'right' &&
-      current.matches('.alpha-window-grid .card')) {
+  if (activeAlphabet && route.type === 'library' && (route.view||'browse') === 'browse' &&
+      inMain && direction === 'right' && current.matches('.grid .card')) {
     const rect = current.getBoundingClientRect();
-    const later = Array.from(main.querySelectorAll('.alpha-window-grid .card')).some(node => {
+    const later = Array.from(main.querySelectorAll('.grid .card')).some(node => {
       const other = node.getBoundingClientRect();
       return other.left > rect.left + 5 && Math.abs(other.top - rect.top) < 4;
     });
