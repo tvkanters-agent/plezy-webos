@@ -441,3 +441,32 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .rating-sheet-rows .rating-star { width:30px;height:32px;display:flex;align-items:center;justify-content:center; }
 .rating-sheet-rows .rating-star svg { width:25px;height:25px; }
 .rating-sheet-rows .rating-service-status { font-size:13px; min-width:80px; margin-left:10px; }
+
+/* Plezy RatingBottomSheet: reserve the leading/logo and star control widths.
+   Variable "Saving / Saved / Error" text belongs underneath the heading;
+   it must never push stars sideways or overlap the five glyphs. */
+.rating-sheet-rows .rating-row { display:flex; align-items:center; box-sizing:border-box; min-width:0; }
+.rating-sheet-rows .rating-service-logo { flex:0 0 26px; }
+.rating-sheet-rows .rating-service-heading { flex:1 1 auto; min-width:0; overflow:hidden; }
+.rating-sheet-rows .rating-service-heading strong,
+.rating-sheet-rows .rating-service-heading small { display:block; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.rating-sheet-rows .rating-stars { flex:0 0 150px; width:150px; min-width:150px;
+  height:34px; align-items:center; justify-content:flex-end; }
+.rating-sheet-rows .rating-star { flex:0 0 30px; width:30px; }
+.rating-sheet-rows .rating-service-status { display:block; flex:0 0 0; position:absolute;
+  max-width:calc(100% - 44px); margin:0; bottom:1px; left:44px;
+  font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rating-sheet-rows .rating-row { position:relative; padding-bottom:19px; }
+.rating-sheet-rows .rating-row:focus { box-shadow:inset 0 0 0 1px #eee; }
+
+/* The list-track source supplies two different text lines.
+   Use a vertical stack, not inline strong/small that draw over each other. */
+.player-options-list button { display:flex; flex-direction:column; align-items:flex-start;
+  justify-content:center; min-height:50px; box-sizing:border-box; }
+.player-options-list button strong { display:block; width:100%; font-size:17px;
+  line-height:22px; white-space:normal; }
+.player-options-list button small { display:block; position:static; width:100%;
+  font-size:13px; line-height:18px; margin-top:3px; color:#aeb2bc;
+  font-weight:400; white-space:normal; overflow-wrap:break-word; }
+.player-options-list button:focus small { color:#555b65; }
