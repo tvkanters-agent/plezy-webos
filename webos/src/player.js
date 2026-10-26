@@ -26,6 +26,21 @@ export class Player {
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
     root.querySelector('[data-action="stop"]').onclick = () => this.close();
     root.querySelector('[data-action="skip"]').onclick = () => { if (this.marker) this.seekTo(this.marker.end); };
+    this.seekBar = root.querySelector('[data-action="seek"]');
+    this.scrubbing = false;
+    this.seekBar.addEventListener('input', () => {
+      this.scrubbing = true;
+      const seconds = Number(this.seekBar.value);
+      this.root.querySelector('.elapsed-current').textContent = time(seconds);
+      this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, this.timelineDuration() - seconds));
+      this.seekBar.setAttribute('aria-valuetext', time(seconds) + ' of ' + time(this.timelineDuration()));
+      this.root.querySelector('.timeline-track progress').value = this.timelineDuration() ? seconds / this.timelineDuration() : 0;
+      this.reveal();
+    });
+    this.seekBar.addEventListener('change', () => {
+      this.scrubbing = false;
+      this.seekTo(Number(this.seekBar.value));
+    });
     root.querySelector('[data-chapter]').onchange = event => {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
     };
@@ -172,8 +187,13 @@ export class Player {
     this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
     this.root.querySelector('.elapsed-current').textContent = time(played);
     this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, total - played));
-    const fraction = this.video.duration ? clamp(this.video.currentTime / this.video.duration, 0, 1) : 0;
-    this.root.querySelector('progress').value = fraction;
+    const fraction = total > 0 ? clamp(played / total, 0, 1) : 0;
+    if (!this.scrubbing) {
+      this.seekBar.max = String(Math.max(0, Math.floor(total)));
+      this.seekBar.value = String(Math.min(Math.floor(total), Math.floor(played)));
+      this.seekBar.setAttribute('aria-valuetext', time(played) + ' of ' + time(total));
+    }
+    this.root.querySelector('.timeline-track progress').value = fraction;
     const pause = this.root.querySelector('[data-action="pause"]');
     pause.setAttribute('aria-label', this.video.paused ? 'Play' : 'Pause');
     pause.setAttribute('title', this.video.paused ? 'Play' : 'Pause');
@@ -246,19 +266,31 @@ export class Player {
     if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
     this.reveal();
   }
-  seek(delta) { this.seekTo(this.video.currentTime + delta); }
+  timelineDuration() {
+    const duration = this.video.duration;
+    return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
+  }
+  seek(delta) { this.seekTo((this.pendingStart || this.video.currentTime || 0) + delta); }
   seekTo(position) {
-    if (!this.session || this.video.readyState < 1 || !Number.isFinite(position)) return;
-    const duration = Number.isFinite(this.video.duration) ? this.video.duration : this.item.duration;
-    this.video.currentTime = clamp(position, 0, Math.max(0, duration - 0.1));
-    this.report(this.video.paused ? 'paused' : 'playing'); this.reveal();
+    if (!this.session || !Number.isFinite(position)) return;
+    const total = this.timelineDuration();
+    if (!(total > 0)) return;
+    const target = clamp(position, 0, Math.max(0, total - 0.1));
+    if (this.video.readyState < 1) this.pendingStart = target;
+    else {
+      try { this.video.currentTime = target; } catch (_) { this.pendingStart = target; }
+    }
+    this.seekBar.value = String(Math.round(target));
+    this.seekBar.setAttribute('aria-valuetext', time(target) + ' of ' + time(total));
+    this.report(this.video.paused ? 'paused' : 'playing');
+    this.update(); this.reveal();
   }
   reveal() {
     this.controls.classList.remove('hidden-controls');
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (this.session && this.sheet.hidden && !this.video.paused && !['SELECT'].includes(document.activeElement.tagName)) {
+      if (this.session && this.sheet.hidden && !this.video.paused && document.activeElement !== this.seekBar && !['SELECT'].includes(document.activeElement.tagName)) {
         this.controls.classList.add('hidden-controls');
         this.root.querySelector('.player-top').classList.add('hidden-controls');
         this.video.focus();
@@ -278,6 +310,12 @@ export class Player {
       else if (code === 415) this.video.play().catch(() => this.failed());
       else if (code === 19) this.video.pause();
       else this.toggle();
+      return true;
+    }
+    if (event.target === this.seekBar && [37, 39].includes(code)) {
+      event.preventDefault();
+      this.seek(code === 37 ? -10 : 10);
+      this.seekBar.focus();
       return true;
     }
     if (this.controls.classList.contains('hidden-controls') && [13, 37, 38, 39, 40].includes(code)) {

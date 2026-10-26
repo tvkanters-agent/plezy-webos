@@ -287,3 +287,21 @@ nav button.active:focus, .rail-library-items button.active:focus {
   background:rgba(72,75,85,.6); font-size:17px; }
 .library-toolbar-button svg { width:21px; height:21px; margin-right:8px; }
 .library-toolbar-button:focus { background:#ededed; color:#16171b; }
+
+/* webOS 4's Chromium doesn't have a focusable progress element. Layer a
+   native range control on top to make Plezy's playhead seekable by pointer
+   and remote; retain progress for the buffered line and existing accessibility. */
+.timeline-row .timeline-track { position:relative; display:flex; align-items:center; flex:1;
+  height:36px; min-width:0; margin:0 12px; }
+.timeline-row .timeline-track progress { position:absolute; width:100%; height:6px; margin:0;
+  border-radius:5px; overflow:hidden; pointer-events:none; }
+.timeline-track input[type=range] { -webkit-appearance:none; appearance:none; display:block;
+  width:100%; height:36px; margin:0; padding:0; border:0; background:transparent;
+  box-shadow:none; cursor:pointer; position:relative; }
+.timeline-track input[type=range]::-webkit-slider-runnable-track { -webkit-appearance:none;
+  height:6px; background:transparent; }
+.timeline-track input[type=range]::-webkit-slider-thumb { -webkit-appearance:none;
+  width:19px; height:19px; margin-top:-7px; border-radius:50%;
+  border:2px solid #f8f8fa; background:#fff; box-shadow:0 0 0 4px rgba(0,0,0,.4); }
+.timeline-track input[type=range]:focus { outline:0; box-shadow:0 0 0 2px #fff; border-radius:15px; }
+.timeline-track input[type=range]:focus::-webkit-slider-thumb { width:23px; height:23px; margin-top:-9px; }

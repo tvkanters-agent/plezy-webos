@@ -102,6 +102,7 @@ test('selected Plex version survives compatible playback restart',async({page})=
 test('player chrome has upstream-style compact transport controls and timeline',async({page})=>{
   await setup(page);
   await expect(page.locator('.timeline-row progress')).toBeVisible();
+  await expect(page.getByRole('slider',{name:'Seek playback'})).toBeVisible();
   await expect(page.locator('.player-buttons .transport-icon')).toHaveCount(4);
   await expect(page.getByRole('button',{name:'−10 seconds',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeVisible();

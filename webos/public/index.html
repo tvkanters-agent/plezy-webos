@@ -28,7 +28,11 @@
     <div class="controls">
       <div class="timeline-row">
         <span class="elapsed-current" aria-hidden="true">0:00</span>
-        <progress max="1" value="0" aria-label="Playback progress"></progress>
+        <div class="timeline-track">
+          <progress max="1" value="0" aria-label="Playback progress"></progress>
+          <input type="range" data-action="seek" min="0" max="100" step="1" value="0"
+            aria-label="Seek playback" aria-valuetext="0:00" title="Seek playback">
+        </div>
         <span class="elapsed-remaining" aria-hidden="true">-0:00</span>
       </div>
       <p class="elapsed" aria-hidden="true" hidden>0:00 / 0:00</p>
