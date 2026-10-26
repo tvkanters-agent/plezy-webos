@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.1.2 — Alphabet jump placement and focus
+
+- Align alphabet jumps to the actual top of the media grid rather than adding a full page-padding inset. Previously this exposed a preceding row.
+- Port Plezy's return-to-grid selection by targeting the last item in the requested row, even when another row is partially visible. A single Left/Back press now selects the intended row.
+- Prevent the normal 32px D-pad focus margin from shifting the top row downward after alphabet navigation.
+- Correct the first-visible-index calculation and cover scroll alignment, row selection and stable focus with browser regressions.
+
+
 ## 1.1.1 — Artwork loading and alphabet scroll layout
 
 - Fade in asynchronously loaded album and poster artwork over 300ms, matching Plezy's OptimizedMediaImage; instantly reveal images already in memory cache.
