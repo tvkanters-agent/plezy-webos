@@ -700,7 +700,7 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await expect(page.getByRole('heading',{name:'Cast'})).toBeVisible();
  await expect(page.getByText('Actor Example')).toBeVisible();
  await expect(page.getByText('Detective')).toBeVisible();
- await expect(page.locator('.cast-picture img')).toHaveAttribute('data-poster-src',/cast%2Factor/);
+ await expect(page.locator('.cast-picture img')).toHaveAttribute('src',/cast%2Factor/);
  await page.getByRole('button',{name:'Rate',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Rate The Great Film'})).toBeVisible();
  await page.getByRole('button',{name:'4.5 stars'}).click();

@@ -94,6 +94,9 @@ function focusFirst(root = main, preferred = null, fromRail = false) {
     // already moved from the page into the navigation rail. Do not steal
     // their active remote focus when an earlier render finally completes.
     const active = document.activeElement;
+    // A render may finish after the user already returned to the rail;
+    // never let a queued initial-focus animation override that decision.
+    if (root === main && rememberedPaneFocus?.isConnected && nav.contains(active)) return;
     if (root === main && !fromRail && active && active !== document.body &&
         active !== main && !main.contains(active)) return;
     focusWithoutJump(preferred && root.contains(preferred) ? preferred :
@@ -1127,7 +1130,15 @@ window.addEventListener('keydown', event => {
       const card = current.closest('.grid .card, .cards .card');
       const firstPoster = card && card.parentNode && card ===
         card.parentNode.querySelector('.card');
-      const adjacent = firstPoster ? null : choose(rowCandidates, 'left');
+      if (firstPoster) {
+        const selected=nav.querySelector('button.active') || nav.querySelector('button:not(:disabled)');
+        if (selected) {
+          rememberedPaneFocus=current;
+          focusWithoutJump(selected);
+        }
+        return;
+      }
+      const adjacent = choose(rowCandidates, 'left');
       if (adjacent) { focusWithoutJump(adjacent); return; }
       const selected = nav.querySelector('button.active') ||
         nav.querySelector('button:not(:disabled)');
