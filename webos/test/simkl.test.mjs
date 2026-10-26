@@ -196,8 +196,11 @@ test('Simkl preserves failed final stops across reload and retries on the next u
     assert.equal(session.pendingStops.length,1);assert.equal(session.pendingStops[0].body.progress,90);
     failStop=false;
     tracker=new SimklTracker(()=>session,value=>{session=value;});
-    await tracker.createPlayback({server:{kind:'plex'}},movie).event('start',0,100);
-    assert.deepEqual(calls,['/scrobble/start','/scrobble/stop','/scrobble/stop','/scrobble/start']);
+    // A different title can trigger delivery of this pending stop. The live
+    // start must succeed BEFORE replaying the older stop.
+    const other={type:'movie',raw:{Guid:[{id:'tmdb://999999'}]}};
+    await tracker.createPlayback({server:{kind:'plex'}},other).event('start',0,100);
+    assert.deepEqual(calls,['/scrobble/start','/scrobble/stop','/scrobble/start','/scrobble/stop']);
     assert.deepEqual(session.pendingStops,[]);
   }finally{restore();}
 });
@@ -350,7 +353,7 @@ test('a persisted title-only stop cannot poison fresh movie tracking after upgra
     assert.deepEqual(session.pendingStops,[]);assert.deepEqual(errors,[]);
   } finally {restore();}
 });
-test('an ID-bearing saved stop rejected with id_err does not block the current episode',async()=>{
+test('stale saved 404 id_err is discarded and never alerts on fresh playback',async()=>{
   let session=saved({pendingStops:[{id:'old',body:{progress:81,movie:{ids:{tmdb:999}}}}]});
   const calls=[],errors=[];
   const restore=mock(async(url,options)=>{
@@ -363,8 +366,77 @@ test('an ID-bearing saved stop rejected with id_err does not block the current e
       assert.equal(id,'show');return {tvdb:12345};}},
       {type:'episode',raw:{grandparentRatingKey:'show',parentIndex:1,index:3}});
     await play.event('start',30,100);
-    assert.deepEqual(calls.map(c=>c.path),['/scrobble/stop','/scrobble/start']);
-    assert.deepEqual(calls[1].body,{show:{ids:{tvdb:12345}},episode:{season:1,number:3},progress:30});
-    assert.equal(session.pendingStops.length,1);assert.match(errors[0],/Saved Simkl update/);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop']);
+    assert.deepEqual(calls[0].body,{show:{ids:{tvdb:12345}},episode:{season:1,number:3},progress:30});
+    assert.deepEqual(session.pendingStops,[]);
+    assert.deepEqual(errors,[]);
+    await play.event('pause',45,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop','/scrobble/pause']);
+    const reloaded=new SimklTracker(()=>session,s=>session=s,e=>errors.push(e));
+    await reloaded.retryPending();
+    assert.equal(calls.length,3);
+    assert.deepEqual(errors,[]);
   } finally {restore();}
+});
+
+test('transient saved Simkl failures retry quietly with persisted exponential cooldown',async()=>{
+  let session=saved({pendingStops:[{id:'old',body:{progress:70,
+    movie:{ids:{tmdb:999}}}}]});
+  const calls=[],errors=[];
+  const restore=mock(async(url,opts)=>{
+    const path=new URL(url).pathname, body=JSON.parse(opts.body);
+    calls.push({path,body});
+    return body.movie?.ids.tmdb===999 ? respond({},503) : respond({});
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,value=>{session=value;},e=>errors.push(e));
+    const live=tracker.createPlayback({server:{kind:'plex'}},movie);
+    await live.event('start',10,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop']);
+    assert.equal(session.pendingStops.length,1);
+    assert.equal(session.pendingStops[0].attempts,1);
+    assert.ok(session.pendingStops[0].retryAfter>Date.now()+50000);
+    assert.deepEqual(errors,[]);
+    await live.event('pause',20,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop','/scrobble/pause']);
+    assert.deepEqual(errors,[]);
+    const reloaded=new SimklTracker(()=>session,value=>{session=value;},e=>errors.push(e));
+    await reloaded.retryPendingStops();
+    assert.equal(calls.length,3,'cooldown must survive application reload');
+    await reloaded.retryPending();
+    assert.equal(calls.length,4,'explicit Settings Retry overrides local cooldown');
+    assert.equal(session.pendingStops[0].attempts,2);
+    assert.equal(errors.length,1,'only an explicitly requested retry reports a transient error');
+  }finally{restore();}
+});
+
+test('new live playback supersedes a pending stop for the same identity',async()=>{
+  let session=saved({pendingStops:[{id:'legacy-stop',body:{progress:85,
+    movie:{ids:{imdb:'tt1234567',tmdb:9988},title:'Old title'}}}]});
+  const calls=[],errors=[];
+  const restore=mock(async(url,opts)=>{
+    calls.push({path:new URL(url).pathname,body:JSON.parse(opts.body)});
+    return respond({});
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,value=>{session=value;},e=>errors.push(e));
+    const playback=tracker.createPlayback({server:{kind:'plex'}},movie);
+    await playback.event('start',10,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start'],
+      'an older STOP cannot terminate the fresh viewing');
+    assert.deepEqual(session.pendingStops,[]);
+    await playback.event('stop',80,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop']);
+    assert.deepEqual(errors,[]);
+  }finally{restore();}
+});
+
+test('repeated saved stops for one identity are coalesced',()=>{
+  let session=saved();
+  const tracker=new SimklTracker(()=>session,value=>{session=value;});
+  tracker.saveStop('first',{...scrobblePayload(movie),progress:50},tracker.epoch);
+  tracker.saveStop('latest',{...scrobblePayload(movie),progress:95},tracker.epoch);
+  assert.equal(session.pendingStops.length,1);
+  assert.equal(session.pendingStops[0].id,'latest');
+  assert.equal(session.pendingStops[0].body.progress,95);
 });
