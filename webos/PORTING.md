@@ -156,3 +156,8 @@ D-pad decisions reuse each element's bounds only within one synchronous key
 handler; reveal still measures independently, and every new key measures afresh.
 The first poster's explicit sidebar exit needs no candidate geometry. This
 preserves spatial scoring and avoids caches becoming stale after scroll/resize.
+
+Alphabet-grid measurement reads the first row and the first card of row two,
+matching upstream's shared column/row metrics. Later rows need no measurements.
+The single-row height fallback and resize-triggered page realignment remain;
+browser tests cover the measurement bound and jump placement in grid and flex.

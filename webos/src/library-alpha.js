@@ -48,11 +48,18 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     const elements = allCards();
     if (!elements.length) return;
     const first = elements[0].getBoundingClientRect();
-    const sameRow = elements.filter(el => Math.abs(el.getBoundingClientRect().top - first.top) < 3);
-    columns = Math.max(1, sameRow.length);
-    const nextRow = elements.find(el => el.getBoundingClientRect().top > first.top + 3);
-    rowHeight = nextRow ? nextRow.getBoundingClientRect().top - first.top :
-      first.height + 26;
+    // Like upstream's grid geometry, only the first row and the next row's
+    // start determine columns/stride. Later rows cannot change either value.
+    columns = 1;
+    rowHeight = first.height + 26;
+    for (let i = 1; i < elements.length; i++) {
+      const top = elements[i].getBoundingClientRect().top;
+      if (Math.abs(top - first.top) < 3) columns++;
+      else if (top > first.top + 3) {
+        rowHeight = top - first.top;
+        break;
+      }
+    }
     rowHeight = Math.max(1, rowHeight);
   };
   const spacers = () => {

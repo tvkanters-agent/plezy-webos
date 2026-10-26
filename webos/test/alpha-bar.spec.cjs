@@ -181,6 +181,23 @@ for (const layout of ['grid', 'flex']) {
       `});
       await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
       const rail=page.getByRole('group',{name:'Alphabet navigation'});
+      await expect(rail).toBeVisible();
+      const measurements = await page.evaluate(() => {
+        const cards = Array.from(document.querySelectorAll('.alpha-window-grid .card'));
+        const firstTop = cards[0].getBoundingClientRect().top;
+        const columns = cards.filter(card => Math.abs(card.getBoundingClientRect().top-firstTop)<3).length;
+        const original = Element.prototype.getBoundingClientRect;
+        let reads = 0;
+        Element.prototype.getBoundingClientRect = function () {
+          if (this.matches('.alpha-window-grid .card')) reads++;
+          return original.call(this);
+        };
+        try { window.dispatchEvent(new Event('resize')); }
+        finally { Element.prototype.getBoundingClientRect = original; }
+        return {reads, columns, total:cards.length};
+      });
+      expect(measurements.total).toBeGreaterThan(measurements.columns + 1);
+      expect(measurements.reads).toBe(measurements.columns + 1);
       // Exercise a distant page, a backward jump and the first row.
       for (const [letter,index] of [['F',150],['C',60],['A',0]]) {
         await rail.getByRole('button',{name:letter,exact:true}).click();
