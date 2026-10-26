@@ -100,7 +100,9 @@ function detailButton(label, action, symbol, className = '') {
     play:'M8 5v14l11-7z',
     restart:'M12 5a7 7 0 1 1-7 7H2l4 4 4-4H7a5 5 0 1 0 5-5z',
     watched:'M9 12l2 2 4-4M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z',
-    more:'M5 12a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M19 12a2 2 0 1 0 0-.01',
+    more:'M5 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M19 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z',
+    sort:'M3 5h18v2H3z M3 11h12v2H3z M3 17h6v2H3z',
+    filter:'M3 4h18l-7 8v6l-4 2v-8L3 4z',
     version:'M5 9l7 7 7-7',
     next:'M5 4v16l12-8zm13 0h2v16h-2z',
     shuffle:'M3 7h3l12 10h3M17 14l4 3-4 3M3 17h3l4-4m4-4 4-4h3m-4-3 4 3-4 3'
@@ -473,14 +475,14 @@ async function render() {
         filters.hidden = !open;
         watchFilters.hidden = true;
         if (open) focusWithoutJump(filters.querySelector('button'));
-      }, 'more', 'library-toolbar-button');
+      }, 'sort', 'library-toolbar-button');
       sortAction.dataset.focus = 'toolbar:sort';
       const filterAction = detailButton('Filters', () => {
         const open = watchFilters.hidden;
         watchFilters.hidden = !open;
         filters.hidden = true;
         if (open) focusWithoutJump(watchFilters.querySelector('button'));
-      }, 'more', 'library-toolbar-button');
+      }, 'filter', 'library-toolbar-button');
       filterAction.dataset.focus = 'toolbar:filter';
       const refreshAction = detailButton('Refresh', () => go({...route}, false), 'restart', 'library-toolbar-button');
       toolbar.append(sortAction, filterAction, refreshAction);

@@ -305,3 +305,20 @@ nav button.active:focus, .rail-library-items button.active:focus {
   border:2px solid #f8f8fa; background:#fff; box-shadow:0 0 0 4px rgba(0,0,0,.4); }
 .timeline-track input[type=range]:focus { outline:0; box-shadow:0 0 0 2px #fff; border-radius:15px; }
 .timeline-track input[type=range]:focus::-webkit-slider-thumb { width:23px; height:23px; margin-top:-9px; }
+
+/* Strong legibility at 1080p / webOS Chromium 53: size the actual vector
+   shape, not just its surrounding tonal click target. */
+nav button svg { width:27px; height:27px; flex:0 0 27px; }
+.detail-actions button.detail-icon { width:56px; height:56px; min-height:56px;
+  flex:0 0 56px; border-radius:28px; padding:0; }
+.detail-actions button svg { width:30px; height:30px; flex:0 0 30px; }
+.detail-actions button.detail-icon svg { width:30px; height:30px; flex:0 0 30px; }
+.detail-actions button.detail-play { min-height:56px; height:56px; padding:0 22px; }
+.library-toolbar-button { min-height:54px; padding:10px 20px; border-radius:27px; }
+.library-toolbar-button svg { width:29px; height:29px; flex:0 0 29px; margin-right:10px; }
+.player-buttons .transport-icon { width:56px; height:56px; min-width:56px; border-radius:28px; }
+.player-buttons .transport-icon svg { width:33px; height:33px; }
+.player-secondary .transport-icon { width:52px; height:52px; min-width:52px;
+  border-radius:26px; padding:9px; }
+.player-secondary .transport-icon svg { width:34px; height:34px; }
+.episode-play-icon { width:46px; height:46px; font-size:24px; }
