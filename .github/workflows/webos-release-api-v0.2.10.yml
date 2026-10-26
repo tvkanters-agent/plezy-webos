@@ -1,0 +1,42 @@
+# One-off API publication for v0.2.10. The standard webOS workflow is
+# blocked in Playwright's Chromium prerequisite installation on GitHub runners.
+# Run package, unit tests and bundle checks without relaxing the standard job.
+name: Publish webOS 0.2.10 IPK
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/webos-release-api-v0.2.10.yml']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webos/package-lock.json
+      - name: Validate and build IPK
+        working-directory: webos
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm run test:bundle
+          npm run package
+      - name: Publish prerelease using GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(node -p "require('./webos/package.json').version")" = "0.2.10"
+          test -f webos/releases/v0.2.10.md
+          if gh release view v0.2.10 >/dev/null 2>&1; then
+            echo 'Release already published'
+            exit 0
+          fi
+          gh release create v0.2.10 webos/build/*.ipk \
+            --target "$GITHUB_SHA" --prerelease \
+            --title 'Plezy webOS 0.2.10 alpha' \
+            --notes-file webos/releases/v0.2.10.md
