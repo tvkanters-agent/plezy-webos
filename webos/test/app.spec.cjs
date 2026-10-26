@@ -540,6 +540,24 @@ test('back restores a covered library page without refetching items',async({page
  expect(calls.filter(x=>x.path.endsWith('/Items')).length).toBe(before);
 });
 
+test('compound detail icons use independent correctly sized strokes and shapes',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'The Test Film',exact:false}).first().click();
+  const check=page.getByRole('button',{name:'Mark watched'}).locator('svg');
+  await expect(check.locator('circle')).toHaveCount(1);
+  await expect(check.locator('path[fill="none"][stroke="currentColor"]')).toHaveCount(1);
+  const circle=await check.locator('circle').evaluate(el=>el.getBBox());
+  const tick=await check.locator('path').evaluate(el=>el.getBBox());
+  expect(circle.width).toBeGreaterThan(15);
+  expect(tick.width).toBeGreaterThan(6);
+  expect(tick.width).toBeLessThan(circle.width);
+  const dots=page.getByRole('button',{name:'More options'}).locator('svg circle');
+  await expect(dots).toHaveCount(3);
+  const widths=await dots.evaluateAll(nodes=>nodes.map(node=>node.getBBox().width));
+  expect(new Set(widths).size).toBe(1);
+});
+
 test('detail page renders Plezy-style separate metadata chips and tonal actions',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));

@@ -94,27 +94,65 @@ function focusFirst(root = main, preferred = null) {
 }
 // Translation of media_detail/action_buttons.dart FilledButton and
 // IconButton.filledTonal; use SVG so icons work without webOS font installs.
+// TV SVG symbols use a single 24x24 coordinate system. A compound symbol
+// must declare each stroke/fill separately: filling a collection of open
+// paths produces distorted triangles (notably shuffle, restart and check).
+const iconShapes = {
+  play: [
+    ['path', {d:'M8 5v14l11-7z',fill:'currentColor'}]
+  ],
+  restart: [
+    ['path', {d:'M3 3v6h6',fill:'none',stroke:'currentColor',
+      'stroke-width':'2','stroke-linecap':'round','stroke-linejoin':'round'}],
+    ['path', {d:'M3.7 13a8.5 8.5 0 1 0 2.1-6.4',fill:'none',
+      stroke:'currentColor','stroke-width':'2','stroke-linecap':'round'}]
+  ],
+  watched: [
+    ['circle', {cx:'12',cy:'12',r:'9',fill:'none',stroke:'currentColor','stroke-width':'2'}],
+    ['path', {d:'M8 12l2.8 2.8 5.3-5.5',fill:'none',stroke:'currentColor',
+      'stroke-width':'2.2','stroke-linecap':'round','stroke-linejoin':'round'}]
+  ],
+  more: [
+    ['circle', {cx:'5',cy:'12',r:'2',fill:'currentColor'}],
+    ['circle', {cx:'12',cy:'12',r:'2',fill:'currentColor'}],
+    ['circle', {cx:'19',cy:'12',r:'2',fill:'currentColor'}]
+  ],
+  sort: [
+    ['path', {d:'M3 5h18v2H3z M3 11h12v2H3z M3 17h6v2H3z',fill:'currentColor'}]
+  ],
+  filter: [
+    ['path', {d:'M3 4h18l-7 8v6l-4 2v-8L3 4z',fill:'currentColor'}]
+  ],
+  version: [
+    ['path', {d:'M5 9l7 7 7-7',fill:'none',stroke:'currentColor',
+      'stroke-width':'2','stroke-linecap':'round','stroke-linejoin':'round'}]
+  ],
+  next: [
+    ['path', {d:'M5 4v16l12-8zm13 0h2v16h-2z',fill:'currentColor'}]
+  ],
+  shuffle: [
+    ['path', {d:'M3 6h2c6 0 7 12 13 12h3 M17 15l4 3-4 3',
+      fill:'none',stroke:'currentColor','stroke-width':'2',
+      'stroke-linecap':'round','stroke-linejoin':'round'}],
+    ['path', {d:'M3 18h2c2.5 0 3.8-2.3 5-4.5 M14 10.5C15.3 8 16.7 6 19 6h2 M17 3l4 3-4 3',
+      fill:'none',stroke:'currentColor','stroke-width':'2',
+      'stroke-linecap':'round','stroke-linejoin':'round'}]
+  ]
+};
 function detailButton(label, action, symbol, className = '') {
   const control = button(label, action, className);
   control.setAttribute('aria-label', label);
   control.setAttribute('title', label);
-  const paths = {
-    play:'M8 5v14l11-7z',
-    restart:'M12 5a7 7 0 1 1-7 7H2l4 4 4-4H7a5 5 0 1 0 5-5z',
-    watched:'M9 12l2 2 4-4M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z',
-    more:'M5 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M19 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z',
-    sort:'M3 5h18v2H3z M3 11h12v2H3z M3 17h6v2H3z',
-    filter:'M3 4h18l-7 8v6l-4 2v-8L3 4z',
-    version:'M5 9l7 7 7-7',
-    next:'M5 4v16l12-8zm13 0h2v16h-2z',
-    shuffle:'M3 7h3l12 10h3M17 14l4 3-4 3M3 17h3l4-4m4-4 4-4h3m-4-3 4 3-4 3'
-  };
-  if (symbol && paths[symbol]) {
+  if (symbol && iconShapes[symbol]) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox','0 0 24 24'); svg.setAttribute('aria-hidden','true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-    path.setAttribute('d',paths[symbol]); path.setAttribute('fill','currentColor');
-    svg.appendChild(path); control.insertBefore(svg,control.firstChild);
+    svg.setAttribute('viewBox','0 0 24 24');
+    svg.setAttribute('aria-hidden','true');
+    iconShapes[symbol].forEach(([tag, attributes]) => {
+      const shape = document.createElementNS('http://www.w3.org/2000/svg',tag);
+      Object.keys(attributes).forEach(name => shape.setAttribute(name,attributes[name]));
+      svg.appendChild(shape);
+    });
+    control.insertBefore(svg,control.firstChild);
   }
   return control;
 }
@@ -168,6 +206,7 @@ function railButton(label, action, className, iconName) {
   const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   shape.setAttribute('d', symbols[iconName]);
   shape.setAttribute('fill', 'currentColor');
+  if (iconName === 'settings') shape.setAttribute('fill-rule','evenodd');
   svg.appendChild(shape);
   control.insertBefore(svg, control.firstChild);
   return control;
