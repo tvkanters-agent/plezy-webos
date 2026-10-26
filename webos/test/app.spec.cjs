@@ -81,7 +81,9 @@ test('stop during playback negotiation cleans the late session without reopening
   const calls=await mockServer(page);let reply;
   await page.route('http://media.test/Items/movie/PlaybackInfo**',async route=>{await new Promise(resolve=>{reply=resolve;});await route.fulfill({json:{PlaySessionId:'late',MediaSources:[{Id:'source',SupportsDirectPlay:false,TranscodingUrl:'/Videos/movie/master.m3u8'}]}});});
   await page.goto('/');await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();await page.getByRole('button',{name:'Play from beginning',exact:true}).click();
-  await expect(page.locator('#player')).toBeVisible();await expect.poll(()=>!!reply).toBe(true);await page.keyboard.press('Escape');reply();
+  await expect(page.locator('#player')).toBeVisible();await expect.poll(()=>!!reply).toBe(true);
+  await page.keyboard.press('Escape'); await expect(page.locator('.controls')).toBeHidden();
+  await page.keyboard.press('Escape');reply();
   await expect(page.locator('#player')).toBeHidden();await expect.poll(()=>calls.some(x=>x.path==='/Videos/ActiveEncodings'&&x.method==='DELETE')).toBe(true);
 });
 test('no uncaught exceptions during normal browsing',async({page})=>{
@@ -593,7 +595,7 @@ test('D-pad Right from every sidebar destination crosses directly into the main 
   await page.getByRole('button', {name:'Movies',exact:true}).click();
   await page.getByRole('button', {name:'Movies',exact:true}).focus();
   await page.keyboard.press('ArrowRight');
-  await expect(page.locator('main button').first()).toBeFocused();
+  await expect(page.locator('main .grid .card').first()).toBeFocused();
 });
 
 test('Plezy season header includes series information and functional actions',async({page})=>{
@@ -656,4 +658,53 @@ test('episode overflow opens actions without launching compatible playback',asyn
  await page.keyboard.press('Escape');
  await expect(page.getByRole('button',{name:'Compatible playback'})).toBeHidden();
  await expect(page.getByRole('heading',{name:'Pilot'})).toBeVisible();
+});
+
+test('library rail enters first poster, restores poster on return, and moves to search input',async({page})=>{
+  await mockServer(page);await page.goto('/');
+  await page.locator('#nav').getByRole('button',{name:'Movies',exact:true}).click();
+  const first=page.locator('main .grid .card').first();
+  await expect(first).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#nav').getByRole('button',{name:'Movies',exact:true})).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(first).toBeFocused();
+  await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
+  await expect(page.getByLabel('Title',{exact:true})).toBeFocused();
+});
+test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and allow rating',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
+ const film={ratingKey:'film',type:'movie',title:'The Great Film',year:2024,
+  rating:7.3,ratingImage:'rottentomatoes://image.rating.ripe',
+  Rating:[{image:'imdb://image.rating',type:'audience',value:8.3}],
+  Role:[{tag:'Actor Example',role:'Detective',thumb:'/cast/actor.jpg'}],
+  Media:[{videoResolution:'1080',Part:[{id:'part',key:'/movie.mp4'}]}]};
+ const put=[];
+ await page.route('https://api.simkl.com/ratings**',route=>route.fulfill({json:{
+   simkl:{rating:8.1,votes:120},imdb:{rating:8.6,votes:9000}}}));
+ await page.route('http://plex.test/**',route=>{
+   const url=new URL(route.request().url()),path=url.pathname;
+   if(path==='/:/rate') {put.push({method:route.request().method(),key:url.searchParams.get('key'),
+     rating:url.searchParams.get('rating')});return route.fulfill({status:200,body:''});}
+   if(path==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'Movies',Metadata:[film]}]}}});
+   if(path==='/library/metadata/film')return route.fulfill({json:{MediaContainer:{Metadata:[{...film,
+     Guid:[{id:'imdb://tt1234567'}]}]}}});
+   return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/The Great Film/}).first().click();
+ await expect(page.locator('.detail-chips')).toContainText('1080p');
+ await expect(page.locator('.rating-line')).toContainText('IMDb');
+ await expect(page.locator('.rating-line')).toContainText('Simkl');
+ await expect(page.getByRole('heading',{name:'Cast'})).toBeVisible();
+ await expect(page.getByText('Actor Example')).toBeVisible();
+ await expect(page.getByText('Detective')).toBeVisible();
+ await expect(page.locator('.cast-picture img')).toHaveAttribute('data-poster-src',/cast%2Factor/);
+ await page.getByRole('button',{name:'Rate',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Rate The Great Film'})).toBeVisible();
+ await page.getByRole('button',{name:'4.5 stars'}).click();
+ await page.getByRole('button',{name:'Save rating'}).click();
+ await expect.poll(()=>put.length).toBe(1);
+ expect(put[0]).toEqual({method:'PUT',key:'film',rating:'9'});
 });
