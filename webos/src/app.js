@@ -191,7 +191,7 @@ function showRatingSheet(item, client) {
   dialog.append(shell);
   let firstRow=null;
   function row(service, initial, tracker) {
-    const control=button('','', 'rating-row');
+    const control=button('',()=>{},'rating-row');
     // Set the callback explicitly: button() expects an action function.
     control.onclick=()=>save();
     control.dataset.service=service;
@@ -1240,6 +1240,13 @@ window.addEventListener('keydown', event => {
   if (player.active && player.key(event)) return;
   if ([461, 27].includes(event.keyCode)) { event.preventDefault(); back(); return; }
   const direction = {37: 'left', 38: 'up', 39: 'right', 40: 'down'}[event.keyCode];
+  const ratingControl=document.activeElement;
+  if(!dialog.hidden && ratingControl?.classList.contains('rating-row') &&
+     [37,39].includes(event.keyCode)) {
+    event.preventDefault();
+    ratingControl.ratingChange?.(event.keyCode===39?1:-1);
+    return;
+  }
   // CastMemberStrip captures OK as a locked-focus row (there is no focused
   // child button for the browser to synthesize a click on).
   if (event.keyCode===13 && document.activeElement?.classList.contains('cast-strip')) {
