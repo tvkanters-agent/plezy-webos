@@ -273,6 +273,11 @@ export class Plex {
     const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
     return (data.Metadata || []).map(plexItem)[0] || null;
   }
+  async personMedia(personId, start = 0) {
+    const data=(await this.get('/library/people/' + enc(personId) + '/media',{
+      'X-Plex-Container-Start':start,'X-Plex-Container-Size':PAGE})).MediaContainer;
+    return {items:(data.Metadata||[]).map(plexItem),total:data.totalSize||data.size||0};
+  }
   async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
   async rate(item, value) {
     if (!Number.isFinite(value) || (value !== -1 && (value < 0 || value > 10)))

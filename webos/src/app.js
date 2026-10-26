@@ -623,6 +623,10 @@ async function render() {
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
       await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
+    } else if (route.type === 'person' && api instanceof Plex) {
+      title(route.actor,route.role||'Cast');
+      if (route.thumb) main.append(poster({poster:route.thumb},{detail:false}));
+      await paginated(start => api.personMedia(route.id,start),currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id, route.kind); if (!valid()) return;
@@ -836,27 +840,6 @@ async function render() {
       else if (isSeason && item.background)
         content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       main.append(content);
-      const cast=Array.isArray(raw.Role) && raw.Role.length ? raw.Role :
-        (Array.isArray(showRaw.Role) ? showRaw.Role : []);
-      if (cast.length && api instanceof Plex) {
-        const section=el('section',undefined,'cast-section');
-        section.append(el('h2','Cast'));
-        const members=el('div',undefined,'cast-strip');
-        cast.slice(0,20).forEach(actor=>{
-          const tile=el('div',undefined,'cast-member');
-          const picture=el('div',undefined,'cast-picture');
-          if(actor.thumb){
-            const image=el('img');
-            image.alt=actor.tag || '';
-            image.setAttribute('data-poster-src',api.image({poster:actor.thumb}));
-            picture.append(image);
-          }else picture.textContent='?';
-          tile.append(picture,el('strong',actor.tag||actor.title||'Unknown'));
-          if(actor.role) tile.append(el('small',actor.role));
-          members.append(tile);
-        });
-        section.append(members);main.append(section);
-      }
       if (item.folder) {
         const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
           item.type === 'season' ? 'Episodes' : 'Titles');
@@ -865,6 +848,53 @@ async function render() {
         const currentApi = api;
         await paginated(start => currentApi.children(item.id, start, item.type),
           currentRevision, {episodes: item.type === 'season' || item.type === 'Season'});
+      }
+      // Port CastMemberStrip: one locked-focus D-pad row, internal horizontal
+      // scroll with no browser scrollbar, placed AFTER seasons/episodes.
+      const cast=Array.isArray(raw.Role) && raw.Role.length ? raw.Role :
+        (Array.isArray(showRaw.Role) ? showRaw.Role : []);
+      if (cast.length && api instanceof Plex) {
+        const section=el('section',undefined,'cast-section');
+        section.append(el('h2','Cast'));
+        const strip=el('div',undefined,'cast-strip');
+        strip.tabIndex=0; strip.dataset.focus='detail-cast';
+        strip.setAttribute('role','group');strip.setAttribute('aria-label','Cast');
+        const tiles=[];
+        const actors=cast.slice(0,20);
+        const openActor = actor => {
+          if (!actor.id) {notify('This Plex server has no person ID for '+(actor.tag||'the actor'));return;}
+          go({type:'person',id:String(actor.id),actor:actor.tag||'Actor',thumb:actor.thumb,role:actor.role});
+        };
+        actors.forEach((actor,index)=>{
+          const tile=el('div',undefined,'cast-member');
+          const picture=el('div',undefined,'cast-picture');
+          if (actor.thumb) {
+            const image=el('img');image.alt='';
+            image.setAttribute('data-poster-src',api.image({poster:actor.thumb}));
+            picture.append(image);
+          } else picture.textContent='?';
+          tile.append(picture,el('strong',actor.tag||actor.title||'Unknown'));
+          if (actor.role) tile.append(el('small',actor.role));
+          tile.onclick=()=>{select(index);openActor(actor);};
+          tiles.push(tile);strip.append(tile);
+        });
+        let selectedIndex=0;
+        function select(index) {
+          selectedIndex=Math.max(0,Math.min(tiles.length-1,index));
+          tiles.forEach((tile,i)=>tile.classList.toggle('cast-selected',i===selectedIndex));
+          const tile=tiles[selectedIndex];
+          strip.scrollLeft=Math.max(0,tile.offsetLeft-tiles[0].offsetLeft-12);
+          strip.setAttribute('aria-label','Cast: '+(actors[selectedIndex].tag||'Actor')+
+            (actors[selectedIndex].role?' as '+actors[selectedIndex].role:''));
+        }
+        strip.addEventListener('focus',()=>select(selectedIndex));
+        strip.castKey = code => {
+          if(code===37)select(selectedIndex-1);
+          if(code===39)select(selectedIndex+1);
+          if(code===13)openActor(actors[selectedIndex]);
+        };
+        select(0);
+        section.append(strip); main.append(section);
       }
     }
   } catch (error) {
@@ -1089,6 +1119,11 @@ window.addEventListener('keydown', event => {
   const direction = {37: 'left', 38: 'up', 39: 'right', 40: 'down'}[event.keyCode];
   if (!direction) return;
   const current = document.activeElement;
+  if (current.classList?.contains('cast-strip') && [37,39,13].includes(event.keyCode)) {
+    event.preventDefault();
+    current.castKey?.(event.keyCode);
+    return;
+  }
   if (current.tagName === 'SELECT' && ['left', 'right'].includes(direction)) {
     event.preventDefault(); current.selectedIndex = Math.max(0, Math.min(current.options.length - 1, current.selectedIndex + (direction === 'left' ? -1 : 1)));
     current.dispatchEvent(new Event('change')); return;
