@@ -129,6 +129,32 @@ test('player header and controls hide together during playback inactivity',async
   await expect(controls).toBeVisible();
 });
 
+test('compound playback SVGs use legible numerals and correctly scaled individual shapes',async({page})=>{
+  await setup(page);
+  for(const [action,number] of [['backward','10'],['forward','30']]){
+    const svg=page.locator('.player-buttons [data-action="'+action+'"] svg');
+    await expect(svg).toHaveAttribute('viewBox','0 0 24 24');
+    const numeral=svg.locator('text');
+    await expect(numeral).toHaveText(number);
+    await expect(numeral).toHaveAttribute('font-size','10');
+    const dimensions=await numeral.evaluate(node=>{
+      const glyph=node.getBBox();
+      const canvas=node.ownerSVGElement.viewBox.baseVal;
+      return {width:glyph.width,height:glyph.height,canvasWidth:canvas.width};
+    });
+    expect(dimensions.height).toBeGreaterThanOrEqual(9);
+    expect(dimensions.width).toBeGreaterThan(8);
+    expect(dimensions.width).toBeLessThan(dimensions.canvasWidth);
+  }
+  const audio=page.getByRole('button',{name:'Audio tracks'}).locator('svg');
+  await expect(audio.locator('path[fill="currentColor"]')).toHaveCount(1);
+  await expect(audio.locator('path[fill="none"][stroke="currentColor"]')).toHaveCount(1);
+  const settings=page.getByRole('button',{name:'Playback settings'}).locator('svg');
+  await expect(settings.locator('circle')).toHaveCount(3);
+  const bounds=await settings.locator('circle').evaluateAll(nodes=>nodes.map(n=>n.getBBox().width));
+  expect(new Set(bounds).size).toBe(1);
+});
+
 test('transport icons use vector graphics and expose accessible button labels',async({page})=>{
   await setup(page);
   const buttons=page.locator('.player-buttons .transport-icon');
