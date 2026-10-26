@@ -766,7 +766,7 @@ async function render() {
         }
       }).catch(()=>{});
       await paginated(async start=>{
-        const page=await currentApi.personMedia(route.id,start);
+        const page=await currentApi.personMedia(route.id,start,route.actor);
         if(!start&&valid()&&header.isConnected) count.textContent=
           page.total+' '+(page.total===1?'title':'titles');
         return page;
