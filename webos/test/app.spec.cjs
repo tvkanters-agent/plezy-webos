@@ -817,7 +817,7 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
- const times=[];
+ const times=[],hlsStarts=[];
  const episode={ratingKey:'episode2',type:'episode',title:'Episode In Progress',
    parentRatingKey:'season1',grandparentRatingKey:'series',duration:1200000,
    viewOffset:125000,
@@ -825,6 +825,12 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
      Part:[{id:'part2',key:'/video.mkv',Stream:[]}]}]};
  await page.route('http://plex.test/**',route=>{
    const url=new URL(route.request().url()),path=url.pathname;
+   if(path==='/video/:/transcode/universal/start.m3u8') {
+     hlsStarts.push(url.searchParams.get('offset'));
+     // Mocked JSON is deliberately not valid video: decoder may fall back.
+     return route.fulfill({status:200,contentType:'application/vnd.apple.mpegurl',
+       body:'#EXTM3U\n#EXT-X-VERSION:3\n'});
+   }
    if(path==='/:/timeline') {
      times.push(url.searchParams.get('time'));
      return route.fulfill({status:200,body:''});
@@ -839,8 +845,9 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.getByRole('button',{name:/Partially Viewed Series/}).first().click();
  await page.getByRole('button',{name:'Play',exact:true}).first().click();
  await expect(page.locator('#player')).toBeVisible();
- await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=125');
- // The server-offset playlist and Plex timeline must begin at the saved position.
+ await expect.poll(()=>hlsStarts.includes('125')).toBe(true);
+ expect(hlsStarts[0]).toBe('125');
+ // The first request and Plex progress both start from the resume point.
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });
 
