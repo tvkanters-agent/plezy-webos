@@ -316,7 +316,7 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .detail-actions button.detail-play { min-height:56px; height:56px; padding:0 22px; }
 .library-toolbar-button { min-height:54px; padding:10px 20px; border-radius:27px; }
 .library-toolbar-button svg { width:29px; height:29px; flex:0 0 29px; margin-right:10px; }
-.player-buttons .transport-icon { width:56px; height:56px; min-width:56px; border-radius:28px; }
+.player-buttons .transport-icon { width:52px; height:52px; min-width:52px; border-radius:26px; }
 .player-buttons .transport-icon svg { width:33px; height:33px; }
 .player-secondary .transport-icon { width:52px; height:52px; min-width:52px;
   border-radius:26px; padding:9px; }
