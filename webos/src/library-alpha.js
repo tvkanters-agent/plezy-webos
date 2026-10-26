@@ -93,10 +93,10 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     rail.update(helper.currentLetter(index));
     schedulePosters();
   };
-  async function jump(index) {
+  async function jump(index, forcePage = false) {
     if (!alive()) return;
     const target = Math.max(0, Math.min(total - 1, index));
-    if (target >= rangeStart && target < loadedEnd()) { position(target); return; }
+    if (!forcePage && target >= rangeStart && target < loadedEnd()) { position(target); return; }
     const id = ++generation;
     const start = alphaPageStart(target, columns, total);
     const count = Math.min(total - start, columns * Math.ceil(60 / columns));
@@ -220,7 +220,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     const index = firstVisibleIndex();
     const oldColumns = columns;
     measure();
-    if (columns !== oldColumns) jump(index);
+    if (columns !== oldColumns) jump(index, true);
     else { spacers(); rail.draw(); }
   };
   window.addEventListener('resize', resize);
