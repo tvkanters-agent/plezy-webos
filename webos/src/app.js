@@ -96,6 +96,10 @@ function focusFirst(root = main, preferred = null, fromRail = false) {
     // already moved from the page into the navigation rail. Do not steal
     // their active remote focus when an earlier render finally completes.
     const active = document.activeElement;
+    // Initial focus is deferred to the next frame; an explicit D-pad or
+    // programmatic focus into main before then must win over that default.
+    if(root===main && active && active!==document.body && active!==main &&
+       main.contains(active))return;
     // A render may finish after the user already returned to the rail;
     // never let a queued initial-focus animation override that decision.
     if (root === main && rememberedPaneFocus?.isConnected && nav.contains(active)) return;
