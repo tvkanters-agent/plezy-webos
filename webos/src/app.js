@@ -829,9 +829,11 @@ async function render() {
       } else if (currentApi instanceof Jellyfin) {
         // Native MediaBrowserAlphaBarStrategy uses a synthetic 27-letter
         // NameStartsWith filter rather than the Plex offset/scroll strategy.
-        const firstPage = await libraryLoader(0);
+        const firstPage = await libraryLoader(0).catch(error => ({error}));
         if (!valid()) return;
-        if (firstPage.total >= 80 || route.alpha) {
+        if (firstPage.error) {
+          await paginated(start => libraryLoader(start), currentRevision);
+        } else if (firstPage.total >= 80 || route.alpha) {
           main.classList.add('has-alpha-bar');
           await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
           if (!valid()) return;
