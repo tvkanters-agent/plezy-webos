@@ -320,10 +320,15 @@ async function paginated(loader, currentRevision, options = {}) {
   const sentinel = el('div', undefined, 'page-sentinel');
   const errorMessage = el('p', '', 'error');
   errorMessage.setAttribute('role', 'alert');
-  main.append(grid, sentinel, errorMessage);
+  // Keep an explicit recovery action only for failed requests. Normal
+  // pagination remains automatic, like upstream Plezy.
+  const retry = button('Retry loading', () => load(), 'library-retry');
+  retry.hidden = true;
+  main.append(grid, sentinel, errorMessage, retry);
   async function load() {
     if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
     loading = true;
+    retry.hidden = true;
     errorMessage.textContent = '';
     try {
       const page = await loader(start);
@@ -343,8 +348,10 @@ async function paginated(loader, currentRevision, options = {}) {
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
       schedulePosters();
     } catch (error) {
-      if (currentRevision === revision && grid.isConnected)
+      if (currentRevision === revision && grid.isConnected) {
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
+        retry.hidden = false;
+      }
     } finally {
       loading = false;
       if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent) {
@@ -442,7 +449,7 @@ async function render() {
       choices.forEach(choice => {
         const control = button(choice.label, () =>
           go({type: 'library', library: route.library, view: 'browse', sort: choice.id,
-            filter: selectedFilter, focus: 'sort:' + choice.id}, false),
+            filter: selectedFilter, focus: 'toolbar:sort'}, false),
           choice.id === selected ? 'active' : '');
         control.dataset.focus = 'sort:' + choice.id;
         control.setAttribute('aria-pressed', String(choice.id === selected));
@@ -454,7 +461,7 @@ async function render() {
       [{id: 'all', label: 'All titles'}, {id: 'unwatched', label: 'Unwatched'}].forEach(choice => {
         const control = button(choice.label, () =>
           go({type: 'library', library: route.library, view: 'browse', sort: selected,
-            filter: choice.id, focus: 'filter:' + choice.id}, false),
+            filter: choice.id, focus: 'toolbar:filter'}, false),
           choice.id === selectedFilter ? 'active' : '');
         control.dataset.focus = 'filter:' + choice.id;
         control.setAttribute('aria-pressed', String(choice.id === selectedFilter));
@@ -467,12 +474,14 @@ async function render() {
         watchFilters.hidden = true;
         if (open) focusWithoutJump(filters.querySelector('button'));
       }, 'more', 'library-toolbar-button');
+      sortAction.dataset.focus = 'toolbar:sort';
       const filterAction = detailButton('Filters', () => {
         const open = watchFilters.hidden;
         watchFilters.hidden = !open;
         filters.hidden = true;
         if (open) focusWithoutJump(watchFilters.querySelector('button'));
       }, 'more', 'library-toolbar-button');
+      filterAction.dataset.focus = 'toolbar:filter';
       const refreshAction = detailButton('Refresh', () => go({...route}, false), 'restart', 'library-toolbar-button');
       toolbar.append(sortAction, filterAction, refreshAction);
       filters.hidden = true; watchFilters.hidden = true;
