@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.1.1 — Artwork loading and alphabet scroll layout
+
+- Fade in asynchronously loaded album and poster artwork over 300ms, matching Plezy's OptimizedMediaImage; instantly reveal images already in memory cache.
+- Display a clean opaque surface during pending loads instead of Chromium's white broken-image border, with a subdued unavailable-artwork icon when loading fails.
+- Match the native alphabet bar's bottom alignment. Keep the grid's top inset after letter jumps, preventing a vertical shift when focus returns to a top-row card.
+- Correct the first-visible-row letter calculation, and add browser regression tests for artwork, placeholders, letter jumps and return focus.
+
+
 ## 1.1.0 — Plezy alphabetical library navigation
 
 - Port the original TV alphabet rail, overscan inset, current-letter indicator, D-pad/pointer navigation and return-to-grid focus.
