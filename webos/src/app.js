@@ -181,72 +181,107 @@ function closeDetailMenu() {
   detailMenu = null;
   if (trigger.isConnected) focusWithoutJump(trigger, false);
 }
-// RatingBottomSheet port: independent server and tracker rating rows.
-// Plex uses half-stars on a 0-5 scale; Simkl uses 1-10 units.
+// Port of Plezy RatingBottomSheet / _RatingRow / _StarRatingControl.
+// One focusable row per service; LEFT/RIGHT changes half-stars; OK saves.
+// Pointer interaction chooses a 0-10 unit value across five star glyphs.
 function showRatingSheet(item, client) {
   dialog.textContent='';
   dialog.append(el('h2','Rate '+item.title));
-  let firstButton=null;
-  function ratingRow(service,initial,simkl=false) {
-    const section=el('section',undefined,'rating-service');
-    section.append(el('h3',service));
-    const row=el('div',undefined,'rate-stars');
-    const feedback=el('p',initial>0?initial+(simkl?' / 10':' / 10 · '+(initial/2).toFixed(1)+' stars'):'Not rated',
-      'rating-selected');
-    let chosen=initial||0;
-    const buttons=[];
-    for(let score=1;score<=10;score++) {
-      const control=button(simkl?String(score):(score/2).toFixed(1),()=>{
-        chosen=score;
-        buttons.forEach((node,index)=>node.setAttribute('aria-pressed',String(index+1===score)));
-        feedback.textContent=simkl?score+' / 10':(score/2).toFixed(1)+' / 5 stars';
-      },'rate-value');
-      control.setAttribute('aria-label',simkl?'Simkl '+score+' / 10':(score/2).toFixed(1)+' stars');
-      control.setAttribute('aria-pressed',String(score===chosen));
-      buttons.push(control);row.append(control);
-    }
-    if (!firstButton) firstButton=buttons[Math.max(0,chosen-1)];
-    const save=async value=>{
-      try{
-        if(simkl)await simklTracker.rateTitle(client,item,value);
-        else await client.rate(item,value===null?-1:value);
-        feedback.textContent=value===null?'Rating cleared.':'Rating saved.';
-        if (simkl) {
-          // Preserve the dialog and refresh just this tracker row, instead
-          // of refetching the whole Plex page on a Simkl write.
-          feedback.textContent=value===null?'Simkl rating cleared.':'Simkl rating saved.';
-        } else {
-          item.raw.userRating=value===null?0:value;
+  const shell=el('div',undefined,'rating-sheet-rows');
+  dialog.append(shell);
+  let firstRow=null;
+  function row(service, initial, tracker) {
+    const control=button('','', 'rating-row');
+    // Set the callback explicitly: button() expects an action function.
+    control.onclick=()=>save();
+    control.dataset.service=service;
+    const leading=el('div',undefined,'rating-service-logo');
+    if(tracker) {
+      const logo=el('img');logo.src='assets/simkl_mark.svg';logo.alt='';
+      leading.append(logo);
+    } else leading.append(el('span','P','rating-plex-mark'));
+    const heading=el('div',undefined,'rating-service-heading');
+    heading.append(el('strong',service),el('small',tracker?'Your Simkl rating':'Your Plex rating'));
+    const stars=el('div',undefined,'rating-stars');
+    const status=el('span','','rating-service-status');
+    let chosen=Math.max(0,Math.min(10,Math.round(Number(initial)||0))),pending=false;
+    const path='M12 2.5l2.94 5.95 6.56.95-4.75 4.64 1.12 6.54L12 17.49l-5.87 3.09 1.12-6.54L2.5 9.4l6.56-.95z';
+    function renderStars() {
+      stars.textContent='';
+      for(let i=0;i<5;i++){
+        const holder=el('span',undefined,'rating-star');
+        const ns='http://www.w3.org/2000/svg';
+        const svg=document.createElementNS(ns,'svg');
+        svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');
+        const outline=document.createElementNS(ns,'path');
+        outline.setAttribute('d',path);outline.setAttribute('fill','none');
+        outline.setAttribute('stroke','currentColor');outline.setAttribute('stroke-width','1.8');
+        svg.append(outline);
+        const filledUnits=Math.max(0,Math.min(2,chosen-i*2));
+        if(filledUnits){
+          const fill=document.createElementNS(ns,'path');fill.setAttribute('d',path);
+          fill.setAttribute('fill','#ffc857');
+          if(filledUnits===1){
+            const clip=document.createElementNS(ns,'clipPath');
+            const id='rating-half-'+service.toLowerCase()+'-'+i;
+            clip.setAttribute('id',id);
+            const rect=document.createElementNS(ns,'rect');
+            rect.setAttribute('x','0');rect.setAttribute('y','0');
+            rect.setAttribute('width','12');rect.setAttribute('height','24');
+            clip.append(rect);svg.append(clip);
+            fill.setAttribute('clip-path','url(#'+id+')');
+          }
+          svg.append(fill);
         }
-      }catch(error){feedback.textContent='Could not save '+service+' rating: '+error.message;}
+        holder.append(svg);
+        holder.onclick=event=>{
+          event.preventDefault();event.stopPropagation();
+          const x=event.offsetX;
+          chosen=i*2+(x<holder.clientWidth/2?1:2);
+          renderStars();save();
+        };
+        stars.append(holder);
+      }
+      control.setAttribute('aria-label',service+' rating '+chosen+' out of 10');
+    }
+    control.ratingChange=delta=>{
+      chosen=Math.max(0,Math.min(10,chosen+delta));renderStars();
+      status.textContent=chosen?'Selected '+(chosen/2).toFixed(1)+' stars':'Not rated';
     };
-    const actions=el('div',undefined,'actions');
-    actions.append(
-      button(simkl?'Save Simkl rating':'Save rating',()=>chosen?save(chosen):(feedback.textContent='Select a rating first.'),'primary'),
-      button(simkl?'Clear Simkl rating':'Clear rating',()=>{chosen=0;buttons.forEach(b=>b.setAttribute('aria-pressed','false'));return save(null);})
-    );
-    section.append(row,feedback,actions);
-    return {section,feedback,buttons,setScore:value=>{
-      const n=Number(value)||0;chosen=n;
-      buttons.forEach((b,index)=>b.setAttribute('aria-pressed',String(index+1===n)));
-      feedback.textContent=n?(simkl?n+' / 10':(n/2).toFixed(1)+' / 5 stars'):'Not rated';
+    async function save(value=chosen) {
+      if(pending)return;
+      pending=true;status.textContent='Saving…';
+      try{
+        if(tracker)await simklTracker.rateTitle(client,item,value||null);
+        else await client.rate(item,value||-1);
+        if(!tracker)item.raw.userRating=value;
+        status.textContent='Saved';
+        // Refresh the title's source ratings and the personal Simkl badge.
+        dialog.hidden=true;render();
+      }catch(error){status.textContent='Could not save: '+error.message;}
+      finally{pending=false;}
+    }
+    control.append(leading,heading,stars,status);
+    renderStars();
+    if(!firstRow)firstRow=control;
+    shell.append(control);
+    return {control,status,setScore:value=>{
+      chosen=Number(value)||0;renderStars();status.textContent=chosen?'Your rating '+(chosen/2).toFixed(1)+' stars':'Not rated';
     }};
   }
-  const plex=ratingRow('Plex',Math.round(Number(item.raw?.userRating)||0));
-  dialog.append(plex.section);
+  row('Plex',item.raw?.userRating||0,false);
   if(validSession(state.simkl)&&['movie','show'].includes(item.type)){
-    const simkl=ratingRow('Simkl',0,true);
-    simkl.feedback.textContent='Loading your Simkl rating…';
-    dialog.append(simkl.section);
-    simklTracker.getTitleRating(client,item).then(rating=>{
-      if(simkl.section.isConnected) simkl.setScore(rating);
+    const simkl=row('Simkl',0,true);
+    simkl.status.textContent='Loading…';
+    simklTracker.getTitleRating(client,item).then(value=>{
+      if(simkl.control.isConnected)simkl.setScore(value);
     }).catch(error=>{
-      if(simkl.section.isConnected)simkl.feedback.textContent='Simkl rating unavailable: '+error.message;
+      if(simkl.control.isConnected)simkl.status.textContent='Unavailable: '+error.message;
     });
   }
   dialog.append(button('Close',()=>{dialog.hidden=true;focusFirst();}));
   dialog.hidden=false;
-  focusFirst(dialog,firstButton);
+  focusFirst(dialog,firstRow);
 }
 function detailMoreOptions(options) {
   const group = el('div', undefined, 'detail-more');
@@ -715,42 +750,71 @@ async function render() {
         resolutionLabel(media.videoResolution)].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
       if (chips.children.length) info.append(chips);
-      // InlineRatingBadges/MetadataLineRatings: a SINGLE joined pill, with
-      // source SVGs and formats from rating_utils.dart (not separate badges).
-      const ratingLine = el('div',undefined,'rating-line');
+      // Plezy _buildFittedHeroChips: branded scores are ONE tonal chip
+      // in the SAME metadata run as year/runtime/certification, not a new row.
+      const ratingLine=el('span',undefined,'ratings-chip');
       ratingLine.setAttribute('aria-label','Community ratings');
-      const pill=el('span',undefined,'ratings-chip'); ratingLine.append(pill);
-      function showRatings(all) {
-        pill.textContent='';
+      let ownRating=null,community=[],ownRatings=plexRatings(api instanceof Plex ?
+        (isSeason||isEpisode?showRaw:raw) : raw);
+      const ratingItem=isSeason||isEpisode?parentShow:item;
+      function showRatings() {
+        ratingLine.textContent='';
+        const all=mergeRatings(ownRatings,community);
         all.forEach(score=>{
           const details=ratingBadgeInfo(score.source,score.value);
           const entry=el('span',undefined,'rating-badge');
           entry.setAttribute('aria-label',details.label+' '+details.value);
           if(details.src){
-            const image=el('img');
-            image.src=details.src;image.alt='';
-            image.style.width=(16*details.aspect)+'px';
-            image.style.height='16px';
+            const image=el('img');image.src=details.src;image.alt='';
+            image.style.width=(16*details.aspect)+'px';image.style.height='16px';
             if(score.source==='simkl'||score.source==='mal')image.className='rating-monochrome';
             entry.append(image);
-          } else entry.append(el('span',score.source==='audience'?'●':'★','rating-fallback'));
+          }else entry.append(el('span',score.source==='audience'?'●':'★','rating-fallback'));
           entry.append(el('span',details.value));
-          pill.append(entry);
+          ratingLine.append(entry);
         });
+        if(ownRating!=null&&ownRating>0){
+          const entry=el('span',undefined,'rating-badge rating-personal');
+          entry.setAttribute('aria-label','Your Simkl rating '+ownRating+'/10');
+          const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+          icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');
+          const head=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          head.setAttribute('cx','12');head.setAttribute('cy','7.5');head.setAttribute('r','3.5');
+          head.setAttribute('fill','currentColor');
+          const bust=document.createElementNS('http://www.w3.org/2000/svg','path');
+          bust.setAttribute('d','M4 21v-2.5C4 14 7.5 12 12 12s8 2 8 6.5V21z');
+          bust.setAttribute('fill','currentColor');
+          icon.append(head,bust);
+          entry.append(icon,el('span',String(ownRating)));
+          ratingLine.append(entry);
+        }
+        if(ratingLine.children.length&&!ratingLine.isConnected)chips.append(ratingLine);
+        if(!ratingLine.children.length&&ratingLine.isConnected)ratingLine.remove();
       }
-      const ownRatings=plexRatings(api instanceof Plex ? (isSeason || isEpisode ? showRaw : raw) : raw);
-      showRatings(ownRatings);
-      if(ownRatings.length) info.append(ratingLine);
-      if(api instanceof Plex) {
-        const ratingItem=isSeason||isEpisode?parentShow:item;
-        if(ratingItem) {
-          const expected=currentRevision;
-          communityRatings(ratingItem.raw,ratingItem.type).then(external=>{
+      showRatings();
+      if(api instanceof Plex&&ratingItem) {
+        const expected=currentRevision;
+        // Request the complete GUID set: Plex episode/series listing rows
+        // often omit the IDs that community services need.
+        const rawIds=ratingItem.raw||{};
+        Promise.resolve().then(async()=>{
+          const resolved=Object.assign({},rawIds);
+          if(!Array.isArray(resolved.Guid)||!resolved.Guid.length) {
+            try{
+              const ids=await api.fetchExternalIds(ratingItem.id);
+              resolved.Guid=Object.keys(ids).map(k=>({id:k+'://'+ids[k]}));
+            }catch(_){}
+          }
+          return communityRatings(resolved,ratingItem.type);
+        }).then(external=>{
+          if(revision!==expected||!info.isConnected)return;
+          community=external;showRatings();
+        });
+        if(validSession(state.simkl)&&['movie','show'].includes(ratingItem.type)) {
+          simklTracker.getTitleRating(api,ratingItem).then(score=>{
             if(revision!==expected||!info.isConnected)return;
-            const all=mergeRatings(ownRatings,external);
-            if(all.length&&!ratingLine.isConnected)info.append(ratingLine);
-            showRatings(all);
-          });
+            ownRating=score;showRatings();
+          }).catch(()=>{});
         }
       }
       const genreChips = el('div', undefined, 'detail-chips detail-genres');
