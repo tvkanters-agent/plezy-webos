@@ -233,3 +233,29 @@ nav button.active:focus, .rail-library-items button.active:focus {
   background:#ededed; color:#111318; box-shadow:0 0 0 2px #9da1ac;
   outline:0;
 }
+
+/* Ported from MediaDetailScreen metadata chips and ActionButtons. */
+.detail { display:flex; position:relative; min-height:300px; margin-top:40px; }
+.detail-info { flex:1; min-width:0; max-width:980px; }
+.detail-info h1 { font-weight:800; font-size:50px; line-height:1.08; margin:0 0 22px; }
+.detail-info .detail-chips { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }
+.detail-chip { display:inline-flex; align-items:center; flex:0 0 auto; border-radius:22px;
+  padding:7px 14px; color:#e0e0e3; background:rgba(81,84,93,.62);
+  font-size:16px; font-weight:600; line-height:1.35; white-space:nowrap; }
+.detail-genres { margin-top:5px; }
+.detail-summary { max-width:850px; }
+.detail-actions { display:flex; align-items:center;flex-wrap:wrap; gap:8px; margin:25px 0 18px; }
+.detail-actions button { min-height:46px; height:46px; display:flex;align-items:center;justify-content:center;
+  gap:7px; border:none; padding:0 15px; background:rgba(72,75,85,.48);
+  border-radius:23px; font-size:17px; font-weight:700; box-shadow:none; }
+.detail-actions button svg { height:22px;width:22px; flex:0 0 22px; }
+.detail-actions button.detail-icon { width:46px; padding:0; font-size:0; }
+.detail-actions button.detail-play { background:rgba(75,78,85,.7); }
+.detail-actions button:focus { background:#ededed; color:#16171b;
+  box-shadow:none; outline:0; }
+.detail-actions .detail-version select { font-size:14px;max-width:180px;height:46px;
+  padding:7px 12px; background:rgba(72,75,85,.48);border:0;border-radius:23px; }
+.detail > .poster { flex:0 0 300px; height:450px; order:2; margin-left:auto;margin-right:0; }
+.detail-episode > .poster { flex-basis:450px; height:254px; }
+.detail-backdrop + .detail { padding-top:36px; }
+.detail-backdrop + .detail > .poster { display:none; }

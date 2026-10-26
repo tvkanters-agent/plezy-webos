@@ -90,6 +90,30 @@ function focusFirst(root = main) {
     focusWithoutJump(root.querySelector('button:not(:disabled),input,select') || root);
   });
 }
+// Translation of media_detail/action_buttons.dart FilledButton and
+// IconButton.filledTonal; use SVG so icons work without webOS font installs.
+function detailButton(label, action, symbol, className = '') {
+  const control = button(label, action, className);
+  control.setAttribute('aria-label', label);
+  control.setAttribute('title', label);
+  const paths = {
+    play:'M8 5v14l11-7z',
+    restart:'M12 5a7 7 0 1 1-7 7H2l4 4 4-4H7a5 5 0 1 0 5-5z',
+    watched:'M9 12l2 2 4-4M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z',
+    more:'M5 12a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M19 12a2 2 0 1 0 0-.01',
+    version:'M5 9l7 7 7-7',
+    next:'M5 4v16l12-8zm13 0h2v16h-2z',
+    shuffle:'M3 7h3l12 10h3M17 14l4 3-4 3M3 17h3l4-4m4-4 4-4h3m-4-3 4 3-4 3'
+  };
+  if (symbol && paths[symbol]) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox','0 0 24 24'); svg.setAttribute('aria-hidden','true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',paths[symbol]); path.setAttribute('fill','currentColor');
+    svg.appendChild(path); control.insertBefore(svg,control.firstChild);
+  }
+  return control;
+}
 function title(text, subtitle) {
   main.append(el('h1', text));
   if (subtitle) main.append(el('p', subtitle, 'intro'));
@@ -428,6 +452,7 @@ async function render() {
       const isPlexShow = api instanceof Plex && item.type === 'show';
       const raw = item.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
+      content.classList.add(item.type === 'episode' || item.type === 'Episode' ? 'detail-episode' : 'detail-media');
       if (api instanceof Plex && item.background) {
         const hero = el('div', undefined, 'detail-backdrop');
         // Server-transcoded low-resolution artwork, not a source-sized image.
@@ -437,9 +462,21 @@ async function render() {
       }
       if (raw.tagline) info.append(el('p', raw.tagline, 'detail-tagline'));
       info.append(el('h1', item.title));
-      const facts = [raw.year, raw.contentRating, raw.studio,
-        raw.duration ? time(raw.duration / 1000) : '', raw.rating ? raw.rating.toFixed(1) + '/10' : ''].filter(Boolean);
-      if (facts.length) info.append(el('p', facts.join('  ·  '), 'detail-facts'));
+      // Source: MediaDetailScreen._buildMetadataChip and hero chip rows.
+      // Keep each field as a distinct Material tonal pill, not a sentence.
+      const chips = el('div', undefined, 'detail-chips');
+      const media = raw.Media && raw.Media[0] || {};
+      const facts = [raw.year, raw.editionTitle, raw.contentRating,
+        item.duration ? time(item.duration) : '',
+        media.videoResolution ? String(media.videoResolution).toUpperCase() : '',
+        raw.rating != null ? '★ ' + Number(raw.rating).toFixed(1) : ''].filter(Boolean);
+      facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
+      if (chips.children.length) info.append(chips);
+      const genreChips = el('div', undefined, 'detail-chips detail-genres');
+      (Array.isArray(raw.Genre) ? raw.Genre : []).forEach(genre => {
+        if (genre.tag) genreChips.append(el('span', genre.tag, 'detail-chip'));
+      });
+      if (genreChips.children.length) info.append(genreChips);
       if (item.summary) info.append(el('p', item.summary, 'detail-summary'));
       if (api instanceof Plex) {
         const tags = values => (Array.isArray(values) ? values : []).map(x => x.tag || x.title).filter(Boolean);
@@ -456,62 +493,77 @@ async function render() {
           info.append(line);
         });
       }
-      const actions = el('div', undefined, 'actions');
-      if (!item.folder) {
+      const actions = el('div', undefined, 'detail-actions');
+      const chooseEpisode = async () => {
+        if (item.type === 'show' || item.type === 'Series') {
+          try {
+            const next = await api.onDeck(item.id);
+            if (next) return next;
+          } catch (_) { /* On Deck is optional */ }
+        }
+        const first = await api.children(item.id);
+        if (item.type === 'season' || item.type === 'Season')
+          return first.items.find(e => e.type === 'episode' || e.type === 'Episode') || null;
+        for (const season of first.items) {
+          const episodes = await api.children(season.id);
+          const episode = episodes.items.find(e => e.type === 'episode' || e.type === 'Episode');
+          if (episode) return episode;
+        }
+        return null;
+      };
+      if (item.folder && (isPlexShow || item.type === 'season' || item.type === 'Season')) {
+        const expectedRevision = revision, currentApi = api;
+        actions.append(detailButton('Play', async () => {
+          const episode = await chooseEpisode();
+          if (revision !== expectedRevision || api !== currentApi) return;
+          if (episode) play(episode, episode.resume || 0);
+          else notify('No playable episodes were found.');
+        }, 'play', 'detail-play'));
+      } else if (!item.folder) {
         const versions = api instanceof Plex ? item.raw.Media || [] : [];
+        if (item.resume > 0) actions.append(detailButton('Resume · ' + time(item.resume),
+          () => play(item, item.resume), 'play', 'detail-play'));
+        else actions.append(detailButton('Play', () => play(item, 0), 'play', 'detail-play'));
         if (versions.length > 1) {
-          const label = el('label', 'Version '), select = el('select');
-          select.setAttribute('aria-label', 'Media version'); select.dataset.focus = 'media-version';
+          const version = el('label', undefined, 'detail-version');
+          const select = el('select'); select.setAttribute('aria-label', 'Media version');
+          select.dataset.focus = 'media-version';
           versions.forEach((media, index) => {
-            const detail = [media.videoResolution, media.videoCodec, media.audioCodec, media.container].filter(Boolean).join(' · ');
-            const option = el('option', 'Version ' + (index + 1) + (detail ? ' · ' + detail : ''));
-            option.value = index; select.append(option);
+            const label = [media.videoResolution, media.videoCodec, media.audioCodec]
+              .filter(Boolean).join(' · ');
+            const option = el('option', 'Version ' + (index + 1) + (label ? ' · ' + label : ''));
+            option.value = String(index); select.append(option);
           });
           select.value = String(route.mediaIndex || 0);
           select.onchange = () => { route.mediaIndex = Number(select.value); };
-          label.append(select); info.append(label);
+          version.append(select); actions.append(version);
         }
-        if (item.resume > 0) actions.append(button('Resume · ' + time(item.resume), () => play(item, item.resume), 'primary'));
-        actions.append(button(item.resume > 0 ? 'Play from beginning' : 'Play', () => play(item, 0), item.resume > 0 ? '' : 'primary'));
-        actions.append(button('Compatible playback', () => play(item, item.resume, true)));
-        actions.append(button(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
+        if (item.resume > 0) actions.append(detailButton('Play from beginning',
+          () => play(item, 0), 'restart', 'detail-icon'));
+        actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           render();
-        }));
-        if (api instanceof Plex && item.type === 'episode' && item.raw.parentRatingKey) {
-          actions.append(button('Next episode', async () => {
-            const expectedRevision = revision, currentApi = api;
+        }, 'watched', 'detail-icon'));
+        if (api instanceof Plex && item.type === 'episode' && raw.parentRatingKey) {
+          actions.append(detailButton('Next episode', async () => {
+            const expected = revision, currentApi = api;
             const next = await currentApi.nextEpisode(item);
-            // A network request must not take us away from a screen that the
-            // viewer has already left with Back or a different menu action.
-            if (expectedRevision !== revision || currentApi !== api) return;
-            if (next) go({type: 'detail', id: next.id});
+            if (expected !== revision || currentApi !== api) return;
+            if (next) go({type:'detail',id:next.id,kind:next.type});
             else notify('No further episodes are available for this show.');
-          }));
+          }, 'next', 'detail-icon'));
         }
+        actions.append(detailButton('Compatible playback',
+          () => play(item, item.resume, true), 'more', 'detail-icon'));
       }
-      if (isPlexShow) {
-        actions.append(button('Play next episode', async () => {
-          const currentRevision = revision;
-          let episode = null;
-          try { episode = await api.onDeck(item.id); } catch (_) { /* empty On Deck */ }
-          if (!episode) {
-            const seasons = await api.children(item.id);
-            for (const season of seasons.items) {
-              const firstPage = await api.children(season.id);
-              episode = firstPage.items.find(e => e.type === 'episode');
-              if (episode) break;
-            }
-          }
-          if (revision !== currentRevision) return;
-          if (episode) go({type:'detail',id:episode.id});
-          else notify('No playable episodes were found.');
-        }, 'primary'));
-      }
-      actions.append(button('Back', back)); info.append(actions);
-      content.append(poster(item), info); main.append(content);
+      info.append(actions);
+      if (!item.background && item.type !== 'episode') content.append(poster(item, {detail:true}));
+      content.append(info);
+      if (item.type === 'episode' || item.type === 'Episode')
+        content.append(poster(item, {detail:true,landscape:true}));
+      main.append(content);
       if (item.folder) {
         const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
           item.type === 'season' ? 'Episodes' : 'Titles');

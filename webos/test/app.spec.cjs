@@ -534,3 +534,23 @@ test('back restores a covered library page without refetching items',async({page
  await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
  expect(calls.filter(x=>x.path.endsWith('/Items')).length).toBe(before);
 });
+
+test('detail page renders Plezy-style separate metadata chips and tonal actions',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const item={ratingKey:'movie',title:'Example movie',type:'movie',year:2025,
+   contentRating:'PG-13',rating:7.8,duration:7200000,Genre:[{tag:'Drama'}],
+   Media:[{container:'mp4',videoResolution:'1080p',Part:[{id:'part',key:'/video.mp4'}]}]};
+ await page.route('http://plex.test/**',route=>{
+   const pathname=new URL(route.request().url()).pathname;
+   if(pathname==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{
+     title:'Movies',Metadata:[item]}]}}});
+   if(pathname==='/library/metadata/movie')return route.fulfill({json:{MediaContainer:{Metadata:[item]}}});
+   return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:'Example movie'}).click();
+ await expect(page.locator('.detail-chips .detail-chip')).toContainText(['2025','PG-13']);
+ await expect(page.locator('.detail-actions .detail-play')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Mark watched'})).toBeVisible();
+});
