@@ -11,6 +11,22 @@ const BASE = 'https://api.simkl.com';
 const SCOPE = 'media:read media:write';
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 const WRITE_GAP_MS = 1000;
+const SAVED_RETRY_BASE_MS = 60000;
+const SAVED_RETRY_MAX_MS = 3600000;
+
+// Persisted stops from earlier versions may contain title/year fields, while
+// current ones are ID-only. Compare media identity, not serialized payloads.
+function stopIdentityKey(body) {
+  const identity = body?.movie || body?.show;
+  const ids = identity?.ids;
+  if (!ids || typeof ids !== 'object') return null;
+  const parts = Object.keys(ids).sort().filter(key => ids[key] != null && ids[key] !== '')
+    .map(key => key + '=' + String(ids[key]));
+  if (!parts.length) return null;
+  if (body.movie) return 'movie:' + parts.join('|');
+  if (!body.episode) return null;
+  return 'episode:' + parts.join('|') + ':' + body.episode.season + ':' + body.episode.number;
+}
 
 function endpoint(path) {
   const url = new URL(path, BASE);
@@ -183,17 +199,19 @@ export class SimklTracker {
           const payload = await context;
           if (!payload || this.epoch !== epoch) return;
           const body = {...payload, progress: percent};
-           // Persist a final stop before attempting delivery. Retry only on a
-          // subsequent user action (or explicit Retry), never a heartbeat.
+          // The live viewing always takes precedence over old queued stops.
+          // Save the final stop first so it survives an offline/error response.
           if (action === 'stop') this.saveStop(stopId, body, epoch);
-          else {
-            // A failed older title must not cancel this viewing's event.
-            // Native TrackerWriteQueue also handles failures per item.
-            try { await this.retryPendingStops(epoch, 1); }
-            catch (error) { if (epoch === this.epoch) this.onError('Saved Simkl update: ' + error.message); }
-          }
           await this.scrobble(action, body, epoch);
           if (action === 'stop') this.removeStop(stopId, epoch);
+          else {
+            // A successful new start supersedes a saved stop for the same
+            // movie/episode. Replaying the old STOP would end the new viewing.
+            if (action === 'start') this.removeStopsForIdentity(body, epoch);
+            // Stale retries are best-effort maintenance, never UI errors or a
+            // reason for a valid playback event to fail.
+            await this.retryPendingStops(epoch, 1);
+          }
         }).catch(error => this.onError(error.message));
         return this.queue;
       }
@@ -211,7 +229,9 @@ export class SimklTracker {
       if (!payload || this.epoch !== epoch) return;
       // A manual watch-state decision supersedes a queued playback stop for
       // this same title (especially Mark unwatched after a failed watched stop).
+      const key = stopIdentityKey(payload);
       this.setSession({...this.getSession(), pendingStops: this.pendingStops().filter(entry => {
+        if (key) return stopIdentityKey(entry.body) !== key;
         const {progress, ...media} = entry.body;
         return JSON.stringify(media) !== JSON.stringify(payload);
       })});
@@ -231,7 +251,9 @@ export class SimklTracker {
   }
   saveStop(stopId, body, epoch) {
     if (epoch !== this.epoch || !validSession(this.getSession())) return;
-    const pending = this.pendingStops().filter(entry => entry.id !== stopId);
+    const key = stopIdentityKey(body);
+    const pending = this.pendingStops().filter(entry => entry.id !== stopId &&
+      (!key || stopIdentityKey(entry.body) !== key));
     if (pending.length >= 50) throw new Error('Simkl has 50 unsent stops. Use Retry saved updates in settings.');
     this.setSession({...this.getSession(), pendingStops: pending.concat({id: stopId, body})});
   }
@@ -240,24 +262,57 @@ export class SimklTracker {
       this.setSession({...this.getSession(), pendingStops: this.pendingStops().filter(entry => entry.id !== stopId)});
     }
   }
-  async retryPendingStops(epoch = this.epoch, limit = 50) {
-    let failure;
-    for (const entry of this.pendingStops().slice(0, limit)) {
+  removeStopsForIdentity(body, epoch) {
+    const key = stopIdentityKey(body);
+    if (!key || epoch !== this.epoch || !validSession(this.getSession())) return;
+    const pending = this.pendingStops();
+    const remaining = pending.filter(entry => stopIdentityKey(entry.body) !== key);
+    if (remaining.length !== pending.length)
+      this.setSession({...this.getSession(), pendingStops: remaining});
+  }
+  postponeStop(entry, epoch) {
+    if (epoch !== this.epoch || !validSession(this.getSession())) return;
+    const attempts = Math.min(16, (Number(entry.attempts) || 0) + 1);
+    const delay = Math.min(SAVED_RETRY_MAX_MS, SAVED_RETRY_BASE_MS * Math.pow(2, attempts - 1));
+    this.setSession({...this.getSession(), pendingStops: this.pendingStops().map(saved =>
+      saved.id === entry.id ? {...saved, attempts, retryAfter: Date.now() + delay} : saved)});
+  }
+  async retryPendingStops(epoch = this.epoch, limit = 50, manual = false) {
+    // Rate-limit holds apply to the entire account. Don't repeatedly try
+    // saved stops during the hold, including after an app restart.
+    if (this.holdUntil > Date.now()) {
+      if (manual) throw new Error('Simkl is rate limited. Saved stops will be retried after the hold.');
+      return;
+    }
+    let failure, attempted = 0;
+    for (const entry of this.pendingStops()) {
       if (epoch !== this.epoch || !validSession(this.getSession())) return;
+      if (!manual && Number(entry.retryAfter) > Date.now()) continue;
+      if (attempted++ >= limit) break;
       try {
         await this.scrobble('stop', entry.body, epoch);
         this.removeStop(entry.id, epoch);
       } catch (error) {
+        if (epoch !== this.epoch || !validSession(this.getSession())) return;
+        if (error.simklPermanent) {
+          // id_err, not_found and item_not_found are permanent ID failures.
+          // No Plex ID is stored with this stop to repair it in-place.
+          // Discard instead of poisoning every subsequent playback.
+          this.removeStop(entry.id, epoch);
+          continue;
+        }
+        this.postponeStop(entry, epoch);
         failure = error;
-        // Account/rate failures affect all titles; ordinary item errors do not.
-        if (this.holdUntil > Date.now() || !validSession(this.getSession())) break;
+        if (this.holdUntil > Date.now()) break;
       }
     }
-    if (failure) throw failure;
+    // Automatic retries are silent maintenance. An explicit Settings retry
+    // may report an actionable transient/account failure.
+    if (manual && failure) throw failure;
   }
   retryPending() {
     const epoch = this.epoch;
-    this.queue = this.queue.catch(() => {}).then(() => this.retryPendingStops(epoch))
+    this.queue = this.queue.catch(() => {}).then(() => this.retryPendingStops(epoch, 50, true))
       .catch(error => this.onError(error.message));
     return this.queue;
   }
@@ -340,11 +395,13 @@ export class SimklTracker {
         ['id_err', 'not_found', 'item_not_found'].includes(result.data?.error)) {
       const media = body?.movie || body?.show || {};
       const idKeys = Object.keys(media.ids || {});
-      throw new Error('Simkl could not match this title (HTTP 404: ' + result.data.error +
+      const error = new Error('Simkl could not match this title (HTTP 404: ' + result.data.error +
         '). IDs: ' + (idKeys.length ? idKeys.join(', ') : 'none') +
         '; title: ' + (media.title ? 'present' : 'missing') +
         '; year: ' + (media.year ? 'present' : 'missing') +
         '. Check the title and IDs in Plex and whether Simkl has this item.');
+      error.simklPermanent = true;
+      throw error;
     }
     if (result.status < 200 || result.status >= 300) {
       const code = typeof result.data?.error === 'string' && /^[a-z_]{2,40}$/.test(result.data.error)
