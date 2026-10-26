@@ -349,6 +349,7 @@ test('TV D-pad navigation does not pin every library card to top of viewport',as
   await page.goto('/');
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('.grid .card').first()).toBeVisible();
   // Put the main scroll partway down without moving a focused element.
   await page.evaluate(()=>{
     const main=document.querySelector('main');
