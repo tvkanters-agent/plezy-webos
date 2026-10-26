@@ -527,3 +527,28 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
   scroll-padding-left:48px; scroll-padding-right:48px;
   overflow-x:auto; overflow-y:hidden;
 }
+
+
+/* lib/screens/libraries/alpha_jump_bar.dart (TV): 20px tonal rail, 24px
+   overscan inset, complete A-Z on short displays, circles for the visible
+   letter and the D-pad-highlighted letter. Never show native browser bars. */
+#shell { position:relative; }
+.alpha-jump-bar {
+  position:absolute; top:56px; right:24px; bottom:24px; width:20px;
+  z-index:4; display:flex; flex-direction:column; justify-content:space-evenly;
+  background:rgba(14,15,18,.7); border-radius:10px; cursor:pointer;
+  touch-action:none; -webkit-user-select:none; user-select:none;
+}
+.alpha-jump-bar:focus { outline:none; border:none; box-shadow:none; }
+.alpha-letter-slot { flex:1; min-height:0; display:flex; align-items:center;
+  justify-content:center; color:#ededed; font-family:Arial,sans-serif; }
+.alpha-letter-marker { display:flex; align-items:center; justify-content:center;
+  border-radius:50%; line-height:1; text-align:center; }
+.alpha-letter-slot.current .alpha-letter-marker {
+  background:rgba(237,237,237,.3); color:#ededed;
+}
+.alpha-letter-slot.highlighted .alpha-letter-marker {
+  background:#ededed; color:#111318;
+}
+.alpha-window-grid { margin-right:12px; }
+.alpha-window-spacer { width:100%; padding:0; margin:0; pointer-events:none; }
