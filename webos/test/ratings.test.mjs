@@ -37,10 +37,10 @@ test('Community ratings lookup uses Plex GUID and handles provider failures sile
 
 test('upstream branded scores preserve their asset logos, thresholds and formats',()=>{
   assert.deepEqual(ratingBadgeInfo('imdb',8.3),{
-    src:'/assets/rating_icons/imdb.svg',aspect:575/289.83,value:'8.3',label:'IMDb'});
+    src:'assets/rating_icons/imdb.svg',aspect:575/289.83,value:'8.3',label:'IMDb'});
   assert.equal(ratingBadgeInfo('tmdb',7.7).value,'77%');
-  assert.equal(ratingBadgeInfo('rottenTomatoesCritic',5.8).src,'/assets/rating_icons/rt_rotten.svg');
-  assert.equal(ratingBadgeInfo('rottenTomatoesCritic',6.5).src,'/assets/rating_icons/rt_fresh.svg');
-  assert.equal(ratingBadgeInfo('rottenTomatoesAudience',7.3).src,'/assets/rating_icons/rt_upright.svg');
-  assert.equal(ratingBadgeInfo('simkl',8.1).src,'/assets/simkl_mark.svg');
+  assert.equal(ratingBadgeInfo('rottenTomatoesCritic',5.8).src,'assets/rating_icons/rt_rotten.svg');
+  assert.equal(ratingBadgeInfo('rottenTomatoesCritic',6.5).src,'assets/rating_icons/rt_fresh.svg');
+  assert.equal(ratingBadgeInfo('rottenTomatoesAudience',7.3).src,'assets/rating_icons/rt_upright.svg');
+  assert.equal(ratingBadgeInfo('simkl',8.1).src,'assets/simkl_mark.svg');
 });
