@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Protocols ported from lib/services/{plex,jellyfin}_* and their client parts.
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
+import {trackLanguageName} from './languages.js';
 const enc = encodeURIComponent;
 const PAGE = 60;
 const FIELDS = 'Overview,MediaSources,MediaStreams,UserData,PrimaryImageAspectRatio';
@@ -27,7 +28,8 @@ function plexItem(raw) {
 // of replacing title with generic language/codec text.
 export function plexTrackLabel(stream, kind, index = 0) {
   const clean = value => typeof value === 'string' ? value.trim() : '';
-  const lang = clean(stream.language) || clean(stream.languageCode);
+  const language = clean(stream.languageCode) || clean(stream.language);
+  const lang = trackLanguageName(language);
   const title = clean(stream.title);
   const display = clean(stream.extendedDisplayTitle) || clean(stream.displayTitle);
   let primary = lang || title || display || (kind === 'subtitle' ? 'Subtitle ' : 'Audio ') + (index + 1);
@@ -37,6 +39,12 @@ export function plexTrackLabel(stream, kind, index = 0) {
   const descriptions = [];
   if (title && title.toLowerCase() !== lang.toLowerCase() && title.toLowerCase() !== primary.toLowerCase())
     descriptions.push(title);
+  // Plex often exposes SDH/commentary only in displayTitle, not title.
+  // Retain that server metadata if it adds information to the language.
+  if (display && display.toLowerCase() !== primary.toLowerCase() &&
+      (!title || display.toLowerCase() !== title.toLowerCase()) &&
+      !descriptions.some(value => value.toLowerCase() === display.toLowerCase()))
+    descriptions.push(display);
   if (kind === 'subtitle' && (stream.hearingImpaired || stream.sdh || stream.closedCaptions) &&
       !/\b(SDH|CC|hearing.impaired)\b/i.test(primary + ' ' + descriptions.join(' ')))
     descriptions.push(stream.closedCaptions ? 'CC' : 'SDH');

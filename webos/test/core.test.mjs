@@ -400,3 +400,14 @@ test('Plex subtitle labels retain language, SDH, forced and technical descriptio
  assert.match(audio.secondary,/Director commentary/);
  assert.match(audio.secondary,/2 channels/);
 });
+
+test('Plex translates upstream ISO 639 language names and keeps SDH display titles',()=>{
+ const s=plexTrackLabel({languageCode:'eng',displayTitle:'English (SDH)',
+   codec:'srt'},'subtitle');
+ assert.equal(s.primary,'English');
+ assert.match(s.secondary,/SDH/);
+ const t=plexTrackLabel({languageCode:'fra',title:'French commentary',
+   codec:'ass'},'subtitle');
+ assert.equal(t.primary,'French');
+ assert.match(t.secondary,/commentary/);
+});
