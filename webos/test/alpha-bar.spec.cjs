@@ -29,6 +29,9 @@ async function mockPlexAlphabet(page, {count = 180} = {}) {
       const start = Number(url.searchParams.get('X-Plex-Container-Start') || 0);
       const limit = Number(url.searchParams.get('X-Plex-Container-Size') || 60);
       data = {totalSize:count,Metadata:media.slice(start,start+limit)};
+    } else if (path.indexOf('/library/metadata/') === 0) {
+      const key = Number(path.split('/').pop());
+      data.Metadata = media[key] ? [media[key]] : [];
     } else if (path === '/hubs' || path === '/hubs/continueWatching') {
       data.Hub = [];
     }
