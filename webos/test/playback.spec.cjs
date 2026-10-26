@@ -262,3 +262,15 @@ test('focus is restored to playback controls when buffering finishes',async({pag
  await expect(page.locator('.player-buffering')).toBeHidden();
  await expect(page.locator('[data-action="pause"]')).toBeFocused();
 });
+
+test('spinner remains available after committing a remote seek with controls hidden',async({page})=>{
+ await setup(page);
+ await page.keyboard.press('Escape');
+ await page.keyboard.press('ArrowRight');
+ await page.keyboard.press('Enter');
+ await expect(page.locator('.controls')).toBeHidden();
+ await page.locator('video').dispatchEvent('waiting');
+ await expect(page.locator('.player-buffering')).toBeVisible();
+ await page.locator('video').dispatchEvent('playing');
+ await expect(page.locator('.player-buffering')).toBeHidden();
+});
