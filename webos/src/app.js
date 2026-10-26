@@ -839,7 +839,7 @@ async function render() {
           if (!valid()) return;
           activeAlphabet = mountMediaBrowserAlphabet({
             main, selected:route.alpha, focusWithoutJump,
-            onPrefixChange(next) => go({...route, alpha:next, alphaFocus:true}, false)
+            onPrefixChange: next => go({...route, alpha:next, alphaFocus:true}, false)
           });
         } else {
           await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
