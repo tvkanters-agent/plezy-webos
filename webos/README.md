@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.6 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, stable version 1.0.0. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Download the [0.2.6 IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.6)**, build it using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for version 0.2.6 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
+4. **Download the [1.0.0 IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v1.0.0)**, build it using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). Older pre-0.2.1 builds **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.6_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_1.0.0_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -84,7 +84,7 @@ This first target intentionally advertises a conservative profile rather than cl
 
 Not yet ported: native Flutter UI parity, music, Live TV/DVR, downloads, playlists, Plex Home user switching, Jellyfin Quick Connect, cross-server search, auto-next episode, multi-part playback, advanced filtering, localization, watch parties, additional tracker/Seerr integrations, HDR/Dolby Vision profiles, configurable HEVC/AV1 direct play, audio passthrough and mpv-specific shaders/subtitle rendering. There is no root/native Flutter embedder requirement.
 
-**Validation:** see [TESTING.md](TESTING.md). Desktop browser tests do not validate LG's decoder, native HLS support, firmware behavior, server compatibility or real account authentication. Real TV/server testing remains required before a stable release. The primary test target is webOS 4.4.3-22 / Chromium 53. This does not guarantee every webOS 4.x device's media codecs or network setup.
+**Validation:** see [TESTING.md](TESTING.md). Desktop browser tests do not validate LG's decoder, native HLS support, firmware behavior, server compatibility or real account authentication. Real TV/server compatibility still varies by device and configuration, and desktop automation cannot verify hardware-specific behavior. The primary test target is webOS 4.4.3-22 / Chromium 53. This does not guarantee every webOS 4.x device's media codecs or network setup.
 
 ## Build and test
 

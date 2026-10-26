@@ -57,6 +57,12 @@ jobs:
           notes="webos/releases/v${version}.md"
           if [ ! -f "$notes" ]; then exit 0; fi
           if gh release view "v${version}" >/dev/null 2>&1; then exit 0; fi
+          release_flags=()
+          release_suffix=""
+          if [[ "$version" == 0.* ]]; then
+            release_flags+=(--prerelease)
+            release_suffix=" alpha"
+          fi
           gh release create "v${version}" release-assets/*.ipk \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "Plezy webOS ${version} alpha" --notes-file "$notes"
+            --target "$GITHUB_SHA" "${release_flags[@]}" \
+            --title "Plezy webOS ${version}${release_suffix}" --notes-file "$notes"

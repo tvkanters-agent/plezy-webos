@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.0.0 — First stable webOS release
+
+- Promote the Plex-first LG webOS TV port from the 0.2.x alpha series to its first stable release, retaining the existing application ID and settings.
+- Include Plex browsing and playback, resume at decoder open, library/detail UI, chapters, subtitle/audio selection, cast portrait fallbacks and optional Simkl tracking/community ratings.
+- Keep the Chromium 53 / webOS 4.x compatibility target and package the native Simkl catalog service in the installable IPK.
+- The GitHub Actions release workflow now publishes 1.x versions as stable releases after successful unit, browser, compatibility and packaging checks; 0.x versions remain prereleases.
+- Feature parity with the upstream Flutter application is incomplete. Physical LG TV/decoder and live account behavior cannot be established by CI alone.
+
 ## 0.2.10 — Cast portrait fallbacks
 
 - Use Plezy's filled person placeholder in cast tiles and actor profiles.
