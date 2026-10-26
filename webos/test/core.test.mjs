@@ -358,3 +358,31 @@ test('Plex progress sync surfaces a genuine HTTP failure',async()=>{
      sessionId:'session'},'playing',7,90),/timeline returned HTTP 403/);
  }finally{restore();}
 });
+
+test('Plex partially watched shows and seasons expose remaining episode counts',async()=>{
+ const restores=mock(async()=>json({MediaContainer:{Metadata:[
+   {ratingKey:'show',title:'Series',type:'show',leafCount:10,viewedLeafCount:3,viewCount:1},
+   {ratingKey:'season',title:'Season 1',type:'season',leafCount:5,viewedLeafCount:5,viewCount:1}
+ ]}}));
+ try {
+   const plex=new Plex(server,'device');
+   const raw=await plex.children('root');
+   assert.equal(raw.items[0].unwatchedCount,7);
+   assert.equal(raw.items[0].watched,false);
+   assert.equal(raw.items[1].unwatchedCount,0);
+   assert.equal(raw.items[1].watched,true);
+ } finally{restores();}
+});
+test('Plex episode thumbnail uses landscape still and detailed art is higher resolution',()=>{
+ const plex=new Plex(server,'device');
+ const item={type:'episode',poster:'/library/metadata/show/thumb',
+   raw:{thumb:'/library/metadata/episode/thumb'}};
+ const thumb=new URL(plex.image(item,{landscape:true}));
+ assert.equal(thumb.searchParams.get('width'),'480');
+ assert.equal(thumb.searchParams.get('height'),'270');
+ assert.equal(thumb.searchParams.get('url'),'/library/metadata/episode/thumb');
+ const detail=new URL(plex.image(item,{landscape:true,detail:true}));
+ assert.equal(detail.searchParams.get('width'),'960');
+ const poster=new URL(plex.image(item,{detail:true}));
+ assert.equal(poster.searchParams.get('width'),'600');
+});

@@ -180,7 +180,10 @@ function card(item) {
   const node = button('', () => go({type: 'detail', id: item.id, kind: item.type})); node.className = 'card'; node.dataset.focus = item.id;
   node.setAttribute('aria-label', item.title + (item.subtitle ? ', ' + item.subtitle : ''));
   node.append(poster(item), el('strong', item.title), el('small', item.subtitle));
-  if (item.watched) node.append(el('span', '✓', 'badge'));
+  if (item.unwatchedCount > 0 && ['show','season','Series','Season'].includes(item.type))
+    node.append(el('span', String(item.unwatchedCount), 'badge'));
+  else if (item.watched && !(item.resume > 0 && item.duration > 0))
+    node.append(el('span', '✓', 'badge'));
   if (item.resume > 0 && item.duration > 0) { const p = el('progress'); p.max = item.duration; p.value = item.resume; node.append(p); }
   return node;
 }
@@ -217,8 +220,8 @@ function schedulePosters() {
   if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
 }
 main.addEventListener('scroll', schedulePosters, true);
-function poster(item) {
-  const node = el('div', undefined, 'poster'); const image = api.image(item);
+function poster(item, options = {}) {
+  const node = el('div', undefined, 'poster'); const image = api.image(item, options);
   if (image) {
     const img = el('img'); img.alt = ''; img.setAttribute('data-poster-src', image);
     img.onerror = () => { node.textContent = '▷'; };
@@ -229,9 +232,36 @@ function poster(item) {
 function cards(items, grid = false) {
   const node = el('div', undefined, grid ? 'grid' : 'cards'); items.forEach(item => node.append(card(item))); return node;
 }
-async function paginated(loader, currentRevision) {
+// Source: lib/widgets/episode_card.dart — 16:9 thumb, play overlay,
+// index/title, 3-line synopsis and duration/air-date/quality metadata.
+function episodeCard(item) {
+  const label = (item.raw?.index != null ? item.raw.index + '. ' : '') + item.title;
+  const node = button('', () => play(item, item.resume), 'episode-row');
+  node.dataset.focus = item.id;
+  node.setAttribute('aria-label', label);
+  const image = el('div', undefined, 'episode-thumb');
+  image.append(poster(item, {landscape:true}));
+  image.append(el('span', '▶', 'episode-play-icon'));
+  if (item.watched && !(item.resume > 0)) image.append(el('span', '✓', 'badge'));
+  if (item.resume > 0 && item.duration > 0) {
+    const progress = el('progress', undefined, 'episode-progress');
+    progress.max = item.duration; progress.value = item.resume;
+    image.append(progress);
+  }
+  const details = el('div', undefined, 'episode-row-info');
+  details.append(el('strong', label));
+  if (item.summary) details.append(el('p', item.summary, 'episode-summary'));
+  const metadata = [item.duration ? time(item.duration) : '',
+    item.raw?.originallyAvailableAt || item.raw?.originallyAvailableAt,
+    item.raw?.Media?.[0]?.videoResolution || ''].filter(Boolean);
+  if (metadata.length) details.append(el('small', metadata.join('  •  '), 'episode-row-meta'));
+  node.append(image, details);
+  return node;
+}
+async function paginated(loader, currentRevision, options = {}) {
   let start = 0;
-  const grid = cards([], true), more = button('Load more', load), errorMessage = el('p', '', 'error');
+  const grid = options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
+  const more = button('Load more', load), errorMessage = el('p', '', 'error');
   errorMessage.setAttribute('role', 'alert');
   main.append(grid, more, errorMessage);
   async function load() {
@@ -247,7 +277,8 @@ async function paginated(loader, currentRevision) {
       for (let i = 0; i < page.items.length; i += 8) {
         if (currentRevision !== revision) return;
         const fragment = document.createDocumentFragment();
-        page.items.slice(i, i + 8).forEach(item => fragment.appendChild(card(item)));
+        page.items.slice(i, i + 8).forEach(item =>
+          fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
         grid.appendChild(fragment);
         schedulePosters();
         if (i + 8 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
@@ -459,7 +490,8 @@ async function render() {
         heading.className = 'detail-children-title';
         main.append(heading);
         const currentApi = api;
-        await paginated(start => currentApi.children(item.id, start, item.type), currentRevision);
+        await paginated(start => currentApi.children(item.id, start, item.type),
+          currentRevision, {episodes: item.type === 'season' || item.type === 'Season'});
       }
     }
   } catch (error) {

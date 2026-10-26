@@ -499,3 +499,17 @@ test('remote arrows remain in their navigation zone, scroll page at boundaries',
   // from main content into the sidebar.
   await expect(page.locator('main button:focus')).toHaveCount(1);
 });
+
+test('Plex watched indicators show remaining episodes on partially watched series',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',quality:'auto',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const show={ratingKey:'s1',title:'Partly watched',type:'show',thumb:'/poster',
+   leafCount:9,viewedLeafCount:5,viewCount:1};
+ await page.route('http://plex.test/**',route=>{
+   if(new URL(route.request().url()).pathname==='/hubs')
+     return route.fulfill({json:{MediaContainer:{Hub:[{title:'TV',Metadata:[show]}]}}});
+   return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+ });
+ await page.goto('/');
+ await expect(page.locator('.card').filter({hasText:'Partly watched'}).locator('.badge')).toHaveText('4');
+});

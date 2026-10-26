@@ -5,10 +5,18 @@ const enc = encodeURIComponent;
 const PAGE = 60;
 const FIELDS = 'Overview,MediaSources,MediaStreams,UserData,PrimaryImageAspectRatio';
 function plexItem(raw) {
+  // WatchedIndicator in upstream shows remaining episodes, not a checkmark
+  // until all show/season leaves are watched.
+  const leaves = Number(raw.leafCount), viewed = Number(raw.viewedLeafCount);
+  const unwatchedCount = ['show','season'].includes(raw.type) &&
+    Number.isFinite(leaves) && Number.isFinite(viewed) && leaves >= viewed
+    ? Math.max(0, leaves - viewed) : null;
   return {id: String(raw.ratingKey), title: raw.title || 'Untitled', type: raw.type,
     subtitle: raw.grandparentTitle || raw.parentTitle || String(raw.year || ''),
     summary: raw.summary || '', year: raw.year, duration: (raw.duration || 0) / 1000,
-    resume: (raw.viewOffset || 0) / 1000, watched: !!raw.viewCount,
+    resume: (raw.viewOffset || 0) / 1000,
+    watched: unwatchedCount !== null ? unwatchedCount === 0 : !!raw.viewCount,
+    unwatchedCount,
     poster: raw.type === 'episode' ? (raw.grandparentThumb || raw.parentThumb || raw.thumb)
       : (raw.thumb || raw.parentThumb || raw.grandparentThumb),
     background: raw.art || raw.grandparentArt || '',
@@ -203,17 +211,22 @@ export class Plex {
     }
     return null;
   }
-  image(item) {
-    if (!item.poster) return '';
-    // Plex's original /library/metadata/.../thumb response can be a large
-    // full-resolution JPEG. Ask Plex to decode/resize SERVER-SIDE before an
-    // older LG TV receives it; keeps artwork and GUI decode work bounded.
-    return this.url('/photo/:/transcode', {width: 320, height: 480,
-      minSize: 1, upscale: 0, url: item.poster});
+  image(item, options = {}) {
+    // OptimizedMediaImage uses different poster/thumbnail/detail dimensions.
+    // Request the correct image path: an episode's landscape thumb is NOT
+    // its grandparent series poster used by the small poster carousel.
+    const landscape = !!options.landscape;
+    const image = landscape && item.type === 'episode' ?
+      (item.raw?.thumb || item.poster) : item.poster;
+    if (!image) return '';
+    const width = landscape ? (options.detail ? 960 : 480) : (options.detail ? 600 : 320);
+    const height = landscape ? (options.detail ? 540 : 270) : (options.detail ? 900 : 480);
+    return this.url('/photo/:/transcode', {width, height,
+      minSize: 1, upscale: 0, url: image});
   }
   backdrop(item) {
     return item.background ? this.url('/photo/:/transcode',
-      {width: 960, height: 540, minSize: 1, upscale: 0, url: item.background}) : '';
+      {width: 1280, height: 720, minSize: 1, upscale: 0, url: item.background}) : '';
   }
   async onDeck(showId) {
     const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
@@ -321,10 +334,14 @@ export class Jellyfin {
   }
   async detail(itemId) { return jellyItem(await this.call(this.userPath('/Items/') + enc(itemId))); }
   async children(itemId, start = 0) { return this.list(itemId, start); }
-  image(item) {
+  image(item, options = {}) {
     const raw = item.raw;
-    const imageId = raw.ImageTags && raw.ImageTags.Primary ? item.id : raw.SeriesId || item.id;
-    return this.url('/Items/' + enc(imageId) + '/Images/Primary', {maxWidth: 360, quality: 85});
+    const landscape = !!options.landscape;
+    const width = landscape ? (options.detail ? 960 : 480) : (options.detail ? 600 : 320);
+    const imageId = landscape && raw.ImageTags?.Primary ? item.id :
+      raw.ImageTags && raw.ImageTags.Primary ? item.id : raw.SeriesId || item.id;
+    const kind = landscape ? 'Primary' : 'Primary';
+    return this.url('/Items/' + enc(imageId) + '/Images/' + kind, {maxWidth: width, quality: 85});
   }
   async watched(item, played) {
     await this.call(this.userPath('/PlayedItems/') + enc(item.id), {}, {method: played ? 'POST' : 'DELETE'});
