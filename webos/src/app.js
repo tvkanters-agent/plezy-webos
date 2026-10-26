@@ -4,6 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
+import {plexRatings, communityRatings, mergeRatings} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
@@ -619,10 +620,37 @@ async function render() {
       const media = raw.Media && raw.Media[0] || {};
       const facts = [raw.year || showRaw.year, raw.editionTitle, raw.contentRating || showRaw.contentRating,
         item.duration ? time(item.duration) : '',
-        media.videoResolution ? String(media.videoResolution).toUpperCase() : '',
-        raw.rating != null ? '★ ' + Number(raw.rating).toFixed(1) : ''].filter(Boolean);
+        media.videoResolution ? (/^\\d+$/.test(String(media.videoResolution)) ?
+          String(media.videoResolution) + 'p' : String(media.videoResolution).toUpperCase()) : ''].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
       if (chips.children.length) info.append(chips);
+      const ratingLine = el('div', undefined, 'rating-line');
+      ratingLine.setAttribute('aria-label','Community ratings');
+      function showRatings(all) {
+        ratingLine.textContent='';
+        all.forEach(score => {
+          const chip=el('span', undefined, 'rating-badge');
+          chip.append(el('strong',score.source),document.createTextNode(' ' + score.value.toFixed(1)));
+          ratingLine.append(chip);
+        });
+      }
+      const ownRatings=plexRatings(api instanceof Plex ? (isSeason || isEpisode ? showRaw : raw) : raw);
+      showRatings(ownRatings);
+      if (ownRatings.length) info.append(ratingLine);
+      if (api instanceof Plex) {
+        const ratingItem=isSeason || isEpisode ? parentShow : item;
+        if (ratingItem) {
+          // Fetch Simkl scores independently of detail rendering. Plex metadata
+          // remains visible when Simkl is offline, slow or blocked by TV CORS.
+          const expected=currentRevision;
+          communityRatings(ratingItem.raw, ratingItem.type).then(external => {
+            if (revision!==expected || !info.isConnected) return;
+            const all=mergeRatings(ownRatings,external);
+            if (all.length && !ratingLine.isConnected) info.insertBefore(ratingLine,genreChips);
+            showRatings(all);
+          });
+        }
+      }
       const genreChips = el('div', undefined, 'detail-chips detail-genres');
       (Array.isArray(raw.Genre) && raw.Genre.length ? raw.Genre : showRaw.Genre || []).forEach(genre => {
         if (genre.tag) genreChips.append(el('span', genre.tag, 'detail-chip'));
