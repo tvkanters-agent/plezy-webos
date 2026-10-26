@@ -22,6 +22,29 @@ function plexItem(raw) {
     background: raw.art || raw.grandparentArt || '',
     folder: ['show', 'season', 'collection', 'playlist'].includes(raw.type), raw};
 }
+// JS translation of lib/utils/track_label_builder.dart's two-line subtitle
+// and audio labels. Keep stream descriptions (SDH, commentary, forced) instead
+// of replacing title with generic language/codec text.
+export function plexTrackLabel(stream, kind, index = 0) {
+  const clean = value => typeof value === 'string' ? value.trim() : '';
+  const lang = clean(stream.language) || clean(stream.languageCode);
+  const title = clean(stream.title);
+  const display = clean(stream.extendedDisplayTitle) || clean(stream.displayTitle);
+  let primary = lang || title || display || (kind === 'subtitle' ? 'Subtitle ' : 'Audio ') + (index + 1);
+  const forced = kind === 'subtitle' && (stream.forced === true || stream.forced === 1 || stream.forced === '1' ||
+    /\bforced\b/i.test(title));
+  if (forced && !/\bforced\b/i.test(primary)) primary += ' (Forced)';
+  const descriptions = [];
+  if (title && title.toLowerCase() !== lang.toLowerCase() && title.toLowerCase() !== primary.toLowerCase())
+    descriptions.push(title);
+  if (kind === 'subtitle' && (stream.hearingImpaired || stream.sdh || stream.closedCaptions) &&
+      !/\b(SDH|CC|hearing.impaired)\b/i.test(primary + ' ' + descriptions.join(' ')))
+    descriptions.push(stream.closedCaptions ? 'CC' : 'SDH');
+  if (stream.codec) descriptions.push(String(stream.codec).toUpperCase());
+  if (kind === 'audio' && stream.channels) descriptions.push(stream.channels + ' channels');
+  return {primary, secondary: descriptions.join(' · '),
+    label: primary + (descriptions.length ? ' · ' + descriptions.join(' · ') : '')};
+}
 function jellyItem(raw) {
   return {id: raw.Id, title: raw.Name || 'Untitled', type: raw.Type,
     subtitle: raw.SeriesName || String(raw.ProductionYear || ''),
@@ -256,8 +279,10 @@ export class Plex {
     }
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, item, start: options.start || 0, ...plexNavigation(item.raw),
-      audio: (part.Stream || []).filter(s => s.streamType === 2).map(s => ({id: s.id, label: s.displayTitle || s.language || s.codec})),
-      subtitles: (part.Stream || []).filter(s => s.streamType === 3).map(s => ({id: s.id, label: s.displayTitle || s.language || s.codec})),
+      audio: (part.Stream || []).filter(s => s.streamType === 2)
+        .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'audio', index)})),
+      subtitles: (part.Stream || []).filter(s => s.streamType === 3)
+        .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'subtitle', index)})),
       options};
   }
   async report(session, state, position, duration) {

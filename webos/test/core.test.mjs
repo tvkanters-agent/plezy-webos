@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {baseUrl, endpoint, time, seconds, nextFocus, readState, request, id} from '../src/core.js';
-import {Plex, Jellyfin, plexPin, plexServers, plexNavigation} from '../src/api.js';
+import {Plex, Jellyfin, plexPin, plexServers, plexNavigation} , plexTrackLabel from '../src/api.js';
 const server = {url: 'https://media.test/prefix', token: 'secret&token', userId: 'user', kind: 'jellyfin'};
 const json = value => new Response(JSON.stringify(value));
 function mock(fn) { const old = global.fetch; global.fetch = fn; return () => { global.fetch = old; }; }
@@ -385,4 +385,18 @@ test('Plex episode thumbnail uses landscape still and detailed art is higher res
  assert.equal(detail.searchParams.get('width'),'960');
  const poster=new URL(plex.image(item,{detail:true}));
  assert.equal(poster.searchParams.get('width'),'600');
+});
+
+test('Plex subtitle labels retain language, SDH, forced and technical descriptions',()=>{
+ const s=plexTrackLabel({language:'English',title:'English SDH',codec:'srt',
+   hearingImpaired:true},'subtitle');
+ assert.equal(s.primary,'English');
+ assert.match(s.secondary,/SDH/);
+ assert.match(s.secondary,/SRT/);
+ const forced=plexTrackLabel({language:'French',title:'Commentary',forced:true,codec:'ass'},'subtitle');
+ assert.match(forced.primary,/Forced/);
+ assert.match(forced.secondary,/Commentary/);
+ const audio=plexTrackLabel({language:'Japanese',title:'Director commentary',codec:'aac',channels:2},'audio');
+ assert.match(audio.secondary,/Director commentary/);
+ assert.match(audio.secondary,/2 channels/);
 });

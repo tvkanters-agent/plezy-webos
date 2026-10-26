@@ -65,7 +65,14 @@ export class Player {
       Array.from(select.options).forEach(option => {
         if (option.value === '' && kind === 'chapter') return;
         const button = document.createElement('button');
-        button.textContent = option.textContent;
+        button.setAttribute('aria-label', option.textContent);
+        const track = this.session && this.session[kind === 'audio' ? 'audio' : 'subtitles']?.find(
+          entry => String(entry.id) === option.value);
+        if (track && track.secondary) {
+          const primary = document.createElement('strong'); primary.textContent = track.primary;
+          const secondary = document.createElement('small'); secondary.textContent = track.secondary;
+          button.append(primary, secondary);
+        } else button.textContent = option.textContent;
         button.setAttribute('aria-pressed', String(select.value === option.value));
         button.onclick = () => {
           this.closeSheet();
