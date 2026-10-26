@@ -247,7 +247,9 @@ export class Player {
   resume() {
     if (this.pendingStart && this.session && this.video.readyState>=1) {
       try {
-        const target=clamp(this.pendingStart,0,Math.max(0,(this.video.duration||this.item.duration)-1));
+        const available=Math.max(Number.isFinite(this.video.duration)?this.video.duration:0,
+          Number(this.item?.duration)||0);
+        const target=clamp(this.pendingStart,0,Math.max(0,available-1));
         this.video.currentTime=target;
         this.pendingStart=0;
         if(this.initialSeekPending)this.initialSeekTarget=target;
