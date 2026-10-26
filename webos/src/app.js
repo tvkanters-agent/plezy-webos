@@ -78,7 +78,7 @@ function focusWithoutJump(target, reveal = true) {
   if (row) row.scrollLeft = Math.max(0, previousLeft + dx);
   schedulePosters();
 }
-function focusFirst(root = main) {
+function focusFirst(root = main, preferred = null) {
   const expectedRevision = revision;
   requestAnimationFrame(() => {
     if (expectedRevision !== revision || !root.isConnected) return;
@@ -88,7 +88,8 @@ function focusFirst(root = main) {
     const active = document.activeElement;
     if (root === main && active && active !== document.body &&
         active !== main && !main.contains(active)) return;
-    focusWithoutJump(root.querySelector('button:not(:disabled),input,select') || root);
+    focusWithoutJump(preferred && root.contains(preferred) ? preferred :
+      (root.querySelector('button:not(:disabled),input,select') || root));
   });
 }
 // Translation of media_detail/action_buttons.dart FilledButton and
@@ -416,6 +417,7 @@ async function paginated(loader, currentRevision, options = {}) {
 }
 async function render() {
   const currentRevision = ++revision;
+  let preferredFocus = null;
   cancelAuth(); detailMenu = null; main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
@@ -695,6 +697,9 @@ async function render() {
         actions.append(detailMoreOptions(extra));
       }
       info.append(actions);
+      // A show link appears first in episode details, but playback is the
+      // primary remote action. Start focus on Resume (or Play if unwatched).
+      if (isEpisode) preferredFocus = actions.querySelector('.detail-play');
       if (!item.background && !isEpisode) content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       content.append(info);
       if (isEpisode)
@@ -723,8 +728,8 @@ async function render() {
       // Restore the previous reading/scroll position BEFORE focusing its card.
       // Native focus scrolling must not pull a restored library back to row 1.
       main.scrollTop = route.scroll || 0;
-      if (found) focusWithoutJump(found, false); else focusFirst();
-    } else focusFirst();
+      if (found) focusWithoutJump(found, false); else focusFirst(main, preferredFocus);
+    } else focusFirst(main, preferredFocus);
   }
 }
 function play(item, start, transcode = false) { return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0, transcode: transcode || state.quality === 'transcode'}); }

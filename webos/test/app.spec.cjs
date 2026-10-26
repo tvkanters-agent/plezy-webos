@@ -622,6 +622,7 @@ test('episode overflow opens actions without launching compatible playback',asyn
  const episode={ratingKey:'ep',type:'episode',title:'Pilot',parentIndex:1,index:1,
    parentRatingKey:'season',grandparentRatingKey:'show',
    grandparentTitle:'The Parent Series',thumb:'/episode/thumb',
+   viewOffset:150000,duration:1800000,
    summary:'The first episode.',Media:[{Part:[{id:'part',key:'/video.mp4'}]}]};
  await page.route('http://plex.test/**',route=>{
    const name=new URL(route.request().url()).pathname;
@@ -632,6 +633,7 @@ test('episode overflow opens actions without launching compatible playback',asyn
  });
  await page.goto('/');
  await page.getByRole('button',{name:/Pilot/}).first().click();
+ await expect(page.getByRole('button',{name:/^Resume/})).toBeFocused();
  await expect(page.getByRole('button',{name:'The Parent Series',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'More options'}).click();
  await expect(page.getByRole('button',{name:'Compatible playback'})).toBeVisible();
