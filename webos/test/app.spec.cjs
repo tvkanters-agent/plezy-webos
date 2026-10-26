@@ -484,7 +484,12 @@ test('Settings has gear icon and Libraries heading is not focusable',async({page
 test('remote arrows remain in their navigation zone, scroll page at boundaries',async({page})=>{
   await mockServer(page);await page.goto('/');
   const library=page.locator('.rail-library-items').getByRole('button',{name:'Movies'});
-  await library.focus();await page.keyboard.press('ArrowLeft');
+  await library.focus();
+  await expect(library).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(library).toBeFocused();
+  // Background page rendering is not permitted to steal sidebar focus.
+  await page.waitForTimeout(100);
   await expect(library).toBeFocused();
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   const control=page.locator('main button').first();

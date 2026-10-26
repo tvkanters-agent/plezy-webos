@@ -81,6 +81,12 @@ function focusFirst(root = main) {
   const expectedRevision = revision;
   requestAnimationFrame(() => {
     if (expectedRevision !== revision || !root.isConnected) return;
+    // Plex/Jellyfin home content may finish asynchronously after the user
+    // already moved from the page into the navigation rail. Do not steal
+    // their active remote focus when an earlier render finally completes.
+    const active = document.activeElement;
+    if (root === main && active && active !== document.body &&
+        active !== main && !main.contains(active)) return;
     focusWithoutJump(root.querySelector('button:not(:disabled),input,select') || root);
   });
 }
