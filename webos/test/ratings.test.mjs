@@ -68,3 +68,52 @@ test('Simkl series TMDB IDs use upstream type=tv, not the unsupported show value
  assert.equal(requested.searchParams.get('type'),'tv');
  assert.deepEqual(ratings.map(x=>x.source),['simkl','imdb']);
 });
+
+test('upstream MDBList rating sources normalize all provider scales',async()=>{
+ const {parseMdblistRatings}=await import('../src/ratings.js');
+ const scores=parseMdblistRatings([
+   {source:'imdb',value:8.2,votes:3000},
+   {source:'tmdb',value:75,votes:2000},
+   {source:'tomatoes',value:89,votes:120},
+   {source:'popcorn',value:72,votes:400},
+   {source:'metacritic',value:64,votes:20},
+   {source:'letterboxd',value:3.9,votes:500},
+   {source:'trakt',value:88,votes:500},
+   {source:'myanimelist',value:7.9,votes:30},
+   {source:'tomatoesaudience',value:0,votes:40},
+   {source:'imdb',value:10.1,votes:100},
+   {source:'metacritic',value:90,votes:0}
+ ]);
+ assert.deepEqual(scores.map(x=>x.source),[
+   'imdb','tmdb','rottenTomatoesCritic','rottenTomatoesAudience',
+   'metacritic','letterboxd','trakt','mal']);
+ assert.equal(scores.find(x=>x.source==='letterboxd').value,7.8);
+});
+test('MDBList lookup uses Plex IMDb and the documented media endpoint',async()=>{
+ const {fetchMdblistRatings}=await import('../src/ratings.js');
+ let requested,headers;
+ const results=await fetchMdblistRatings({Guid:[{id:'imdb://tt9876543'}]},'movie','testkey',
+   async(url,opts)=>{
+     requested=new URL(url);headers=opts.headers;
+     return new Response(JSON.stringify({ratings:[
+       {source:'tomatoes',value:90,votes:200},
+       {source:'popcorn',value:81,votes:700}]}),{status:200});
+   });
+ assert.equal(requested.pathname,'/imdb/movie/tt9876543');
+ assert.equal(requested.searchParams.get('apikey'),'testkey');
+ assert.equal(headers.Accept,'application/json');
+ assert.deepEqual(results,[
+   {source:'rottenTomatoesCritic',value:9},
+   {source:'rottenTomatoesAudience',value:8.1}
+ ]);
+});
+test('MDBList wins aggregated IMDb but Simkl wins its own score, per Plezy',async()=>{
+ const {mergeProviderRatings}=await import('../src/ratings.js');
+ const ratings=mergeProviderRatings([
+   {origin:'simkl',ratings:[{source:'imdb',value:7.2},{source:'simkl',value:8.4}]},
+   {origin:'mdblist',ratings:[{source:'imdb',value:8.7},{source:'simkl',value:7.1},
+     {source:'metacritic',value:6.7}]}
+ ]);
+ assert.deepEqual(ratings,[{source:'imdb',value:8.7},
+   {source:'metacritic',value:6.7},{source:'simkl',value:8.4}]);
+});

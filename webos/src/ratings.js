@@ -127,3 +127,68 @@ export async function communityRatings(raw,kind,fetchImpl=fetch){
  if(confirmed) cache.set(cacheKey,{at:Date.now(),ratings:result});
  return result;
 }
+
+
+// Literal port of MdblistCatalogSource.fetchCommunityRatings and
+// CommunityRatings.mergeCommunityRatings from upstream Plezy. Only one
+// MDBList account lookup is made per title; failed requests are not cached.
+const mdblistSources={
+ imdb:['imdb',10],tmdb:['tmdb',100],tomatoes:['rottenTomatoesCritic',100],
+ popcorn:['rottenTomatoesAudience',100],
+ tomatoesaudience:['rottenTomatoesAudience',100],
+ metacritic:['metacritic',100],letterboxd:['letterboxd',5],
+ trakt:['trakt',100],myanimelist:['mal',10]
+};
+const mdblistCache=new Map(),MDBLIST_TTL=12*60*60*1000;
+export function parseMdblistRatings(data) {
+ const result=[];
+ for(const row of Array.isArray(data)?data:[]) {
+   const source=mdblistSources[row?.source];
+   if(!source)continue;
+   const amount=Number(row.value),votes=row.votes==null?null:Number(row.votes);
+   if(!Number.isFinite(amount)||amount<=0||amount>source[1]||
+      (votes!==null&&(!Number.isFinite(votes)||votes<=0)))continue;
+   result.push({source:source[0],value:amount*10/source[1]});
+ }
+ return result;
+}
+export async function fetchMdblistRatings(raw,kind,apiKey,fetchImpl=fetch) {
+ if(!apiKey||!['movie','show'].includes(kind))return [];
+ const ids=plexExternalIds(raw||{});
+ // Upstream prefers IMDb, then TMDB, TVDB for series, then MAL.
+ const chosen=ids.imdb?['imdb',kind,ids.imdb]:
+   ids.tmdb?['tmdb',kind,String(ids.tmdb)]:
+   kind==='show'&&ids.tvdb?['tvdb','show',String(ids.tvdb)]:
+   ids.mal?['mal','any',String(ids.mal)]:null;
+ if(!chosen)return [];
+ const key=chosen.join('/')+'|'+apiKey;
+ const cached=mdblistCache.get(key);
+ if(cached&&Date.now()-cached.at<MDBLIST_TTL)return cached.ratings;
+ const url=new URL('https://api.mdblist.com/'+chosen.map(encodeURIComponent).join('/'));
+ url.searchParams.set('apikey',apiKey);
+ try {
+   const response=await fetchImpl(url.href,{headers:{Accept:'application/json'}});
+   if(response.status===404){
+     mdblistCache.set(key,{ratings:[],at:Date.now()});return [];
+   }
+   if(!response.ok)return []; // Error, not an empty answer: retry on next visit.
+   const data=await response.json();
+   const ratings=parseMdblistRatings(data?.ratings);
+   mdblistCache.set(key,{ratings,at:Date.now()});
+   return ratings;
+ }catch(_){return [];}
+}
+export function mergeProviderRatings(answers) {
+ const best=new Map();
+ for(const answer of answers)for(const rating of answer.ratings||[]) {
+   const priority=rating.source===answer.origin?0:
+     answer.origin==='mdblist'?1:answer.origin==='simkl'?2:3;
+   const previous=best.get(rating.source);
+   if(!previous||priority<previous.priority)
+     best.set(rating.source,{priority,rating});
+ }
+ return Array.from(best.values()).map(x=>x.rating).sort((a,b)=>{
+   const rank=v=>{const n=displayOrder.indexOf(v.source);return n<0?displayOrder.length:n;};
+   return rank(a)-rank(b);
+ });
+}
