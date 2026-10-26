@@ -78,9 +78,11 @@ test('Simkl scrobbles only real play/pause/stop events, paced and without heartb
     await play.event('pause',55,100);
     await play.event('stop',96,100,true);
     await play.event('stop',96,100,true);
-    assert.deepEqual(calls.map(c=>c.url.pathname),['/scrobble/start','/scrobble/pause','/scrobble/stop']);
-    assert.deepEqual(calls.map(c=>JSON.parse(c.opts.body).progress),[10,55,100]);
-    assert.ok(calls.every(c=>c.opts.headers.Authorization==='Bearer '+session.accessToken));
+    // Upstream-style Fribb ID lookup is a separate request, not a Simkl write.
+    const scrobbles = calls.filter(c=>c.url.hostname==='api.simkl.com');
+    assert.deepEqual(scrobbles.map(c=>c.url.pathname),['/scrobble/start','/scrobble/pause','/scrobble/stop']);
+    assert.deepEqual(scrobbles.map(c=>JSON.parse(c.opts.body).progress),[10,55,100]);
+    assert.ok(scrobbles.every(c=>c.opts.headers.Authorization==='Bearer '+session.accessToken));
     assert.equal(tracker.createPlayback({server:{kind:'jellyfin'}},movie),null);
   }finally{restore();}
 });

@@ -558,15 +558,15 @@ test('detail page renders Plezy-style separate metadata chips and tonal actions'
 test('D-pad Right from every sidebar destination crosses directly into the main pane', async ({page}) => {
   await mockServer(page);
   await page.goto('/');
-  await expect(page.getByRole('button', {name:'The Test Film',exact:true})).toBeVisible();
+  await expect(page.locator('main').getByRole('button', {name:'The Test Film',exact:true}).first()).toBeVisible();
 
-  await page.getByRole('button', {name:'Home',exact:true}).focus();
+  await page.locator('#nav').getByRole('button', {name:'Home',exact:true}).focus();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('button', {name:'The Test Film',exact:true})).toBeFocused();
+  await expect(page.locator('main').getByRole('button', {name:'The Test Film',exact:true}).first()).toBeFocused();
 
-  await page.getByRole('button', {name:'Search',exact:true}).click();
+  await page.locator('#nav').getByRole('button', {name:'Search',exact:true}).click();
   await expect(page.getByLabel('Title', {exact:true})).toBeVisible();
-  await page.getByRole('button', {name:'Search',exact:true}).focus();
+  await page.locator('#nav').getByRole('button', {name:'Search',exact:true}).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByLabel('Title', {exact:true})).toBeFocused();
 
