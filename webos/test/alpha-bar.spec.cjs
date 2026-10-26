@@ -130,7 +130,10 @@ test('MediaBrowser alphabet filters by NameStartsWith and reselect toggles it of
   await expect(bar.locator('.alpha-letter-slot.highlighted')).toContainText('B');
   await bar.getByRole('button',{name:'B',exact:true}).click();
   await expect.poll(()=>calls.filter(c=>!c.NameStartsWith).length).toBeGreaterThan(1);
-  await expect(bar.locator('.alpha-letter-slot.highlighted')).toContainText('B');
+  // Reselect clears the prefix; Plezy then has no active letter, and
+  // entering the unfiltered rail starts from its first navigable slot.
+  await expect(bar.locator('.alpha-letter-slot.current')).toHaveCount(0);
+  await expect(bar.locator('.alpha-letter-slot.highlighted')).toContainText('#');
   await page.keyboard.press('Escape');
   await expect(page.locator('.grid .card:focus')).toHaveCount(1);
 });
