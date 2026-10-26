@@ -386,3 +386,18 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .cast-picture { width:132px; height:132px; }
 .cast-strip:focus .cast-member.cast-selected { border-color:#fff; background:#30333c; }
 .cast-strip:focus .cast-member.cast-selected .cast-picture { box-shadow:0 0 0 2px #fff; }
+
+/* Upstream InlineRatingBadges: ONE pill and branded inline SVG score pairs. */
+.detail .rating-line { margin:3px 0 14px; display:flex; flex-wrap:wrap; }
+.detail .ratings-chip { display:inline-flex; flex-wrap:wrap; align-items:center;
+  background:#292c33; border:1px solid #474a53; padding:5px 10px;
+  border-radius:100px; }
+.detail .rating-badge { display:inline-flex; align-items:center; margin:0 10px 0 0;
+  background:none; border:none; padding:0; border-radius:0; font-weight:700;
+  font-size:16px; line-height:22px; white-space:nowrap; }
+.detail .rating-badge:last-child { margin-right:0; }
+.detail .rating-badge img { display:inline-block; object-fit:contain; flex:0 0 auto; margin-right:4px; }
+.detail .rating-badge .rating-monochrome { filter:brightness(0) invert(1); }
+.rating-service { margin:14px 0 20px; }
+.rating-service h3 { font-size:21px; margin:0 0 8px; }
+.rating-service .rate-stars { margin:5px 0 10px; }
