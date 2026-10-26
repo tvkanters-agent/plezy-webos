@@ -62,7 +62,7 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
   let displayed = [], current = helper.letters[0] || '#', highlighted = 0;
   let focused = false, pressed = false, debounce = null;
   const nearest = letter => {
-    if (!displayed.length) return '';
+    if (!letter || !displayed.length) return '';
     if (displayed.indexOf(letter) >= 0) return letter;
     const pos = helper.letters.indexOf(letter);
     if (pos < 0) return displayed[0];
