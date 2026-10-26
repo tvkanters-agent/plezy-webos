@@ -4,7 +4,8 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
-import {plexRatings, communityRatings, mergeRatings, ratingBadgeInfo} from './ratings.js';
+import {plexRatings, communityRatings, fetchMdblistRatings, mergeProviderRatings,
+  mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
@@ -895,7 +896,16 @@ async function render() {
                 resolved.Guid.push({id:key+'://'+value});
             }
           }catch(error){console.warn('Could not enrich Plex rating IDs',error);}
-          return communityRatings(resolved,ratingItem.type);
+          // Port CommunityRatingsLoader: each connected catalog provider
+          // replies independently, with source-owned ratings taking priority.
+          const [simkl,mdblist]=await Promise.all([
+            communityRatings(resolved,ratingItem.type),
+            fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)
+          ]);
+          return mergeProviderRatings([
+            {origin:'simkl',ratings:simkl},
+            {origin:'mdblist',ratings:mdblist}
+          ]);
         }).then(external=>{
           if(revision!==expected||!info.isConnected)return;
           community=external;showRatings();
@@ -1183,6 +1193,46 @@ function settings() {
     simklPanel.append(button('Connect Simkl', () => go({type: 'simkl'}), 'primary'));
   }
   main.append(simklPanel);
+  // Upstream Plezy's MDBList catalog source contributes IMDB, RT critic/
+  // audience, TMDB, Metacritic, Letterboxd, Trakt, and MAL ratings. The
+  // remote is used only after the account owner opts in with an API key.
+  const ratingsPanel=el('section',undefined,'panel');
+  ratingsPanel.append(el('h2','MDBList community ratings'));
+  ratingsPanel.append(el('p','Optional: provide an MDBList API key to show additional source ratings in the same Plezy score pill. Ratings require a connected account; Plex and Simkl ratings work independently.','muted'));
+  if(state.mdblistApiKey){
+    ratingsPanel.append(el('p','MDBList connected. Scores are fetched with your own account quota.','muted'));
+    ratingsPanel.append(button('Disconnect MDBList',()=>{
+      state.mdblistApiKey='';persist();render();
+    }));
+  }else{
+    const form=el('form');
+    const keyInput=el('input');
+    keyInput.type='password';keyInput.required=true;
+    keyInput.placeholder='MDBList API key';
+    keyInput.setAttribute('aria-label','MDBList API key');
+    keyInput.autocomplete='off';
+    const submit=el('button','Connect MDBList');submit.type='submit';
+    const message=el('p','','muted');message.setAttribute('role','status');
+    form.append(keyInput,submit,message);
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      const key=keyInput.value.trim(),expected=revision;
+      if(!key)return;
+      submit.disabled=true;message.textContent='Checking MDBList key…';
+      try{
+        const url=new URL('https://api.mdblist.com/user');
+        url.searchParams.set('apikey',key);
+        const response=await fetch(url.href,{headers:{Accept:'application/json'}});
+        if(!response.ok)throw new Error('MDBList verification failed (HTTP '+response.status+').');
+        if(expected!==revision)return;
+        state.mdblistApiKey=key;persist();keyInput.value='';render();
+      }catch(error){
+        if(expected===revision)message.textContent=error.message;
+      }finally{submit.disabled=false;}
+    };
+    ratingsPanel.append(form);
+  }
+  main.append(ratingsPanel);
   if (api && libraryCacheFor === api && libraryCache) {
     const manager = el('section', undefined, 'panel');
     manager.append(el('h2', 'Library visibility'),
