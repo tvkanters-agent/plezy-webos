@@ -54,11 +54,12 @@ test('Simkl device flow treats pending and slow down as nonterminal but rejects 
 });
 test('Simkl normalizes Plex external GUIDs and builds series-level episode IDs',()=>{
   assert.deepEqual(simklMovieIds(movie.raw),{imdb:'tt1234567',tmdb:9988});
-  assert.deepEqual(scrobblePayload(movie),{movie:{ids:{imdb:'tt1234567',tmdb:9988}}});
+  assert.deepEqual(scrobblePayload(movie),{movie:{ids:{imdb:'tt1234567',tmdb:9988},
+    title:'Test film',year:2024}});
   const episode={type:'episode',raw:{index:3,parentIndex:2,grandparentTitle:'Series Name',
     Guid:[{id:'tmdb://9999'}]}};
   const show={raw:{title:'Series Name',year:2020,Guid:[{id:'tvdb://321'}]}};
-  assert.deepEqual(scrobblePayload(episode,show),{show:{ids:{tvdb:321}},
+  assert.deepEqual(scrobblePayload(episode,show),{show:{ids:{tvdb:321},title:'Series Name',year:2020},
     episode:{season:2,number:3}});
   assert.equal(scrobblePayload({type:'show',raw:{}}),null);
   assert.equal(scrobblePayload({type:'episode',raw:{index:2,parentIndex:null}}),null);
@@ -260,10 +261,12 @@ test('Simkl fetches full Plex movie GUIDs when home hub omits external identifie
       {type:'movie',id:'movie1',title:'Film',raw:{title:'Film',guid:'plex://movie/xyz'}});
     assert.equal(detailCalls,1);
     assert.equal(payload.movie.ids.imdb,'tt7654321');
+    assert.equal(payload.movie.title,'Film');
+    assert.equal(payload.movie.year,2025);
   }finally{restore();}
 });
 
-test('Simkl matches upstream ID-only movie and episode requests',async()=>{
+test('Simkl includes external IDs and title/year for server-side match fallback',async()=>{
   const calls=[],session=saved();
   const restore=mock(async(url,options)=>{
     calls.push({path:new URL(url).pathname,body:JSON.parse(options.body)});
@@ -277,12 +280,13 @@ test('Simkl matches upstream ID-only movie and episode requests',async()=>{
       raw:{title:'My Show',Guid:[{id:'tvdb://321'}]}})},episode);
     await tracker.scrobble('stop',{...context,progress:80});
     assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop']);
-    assert.deepEqual(calls[0].body,{progress:20.5,movie:{ids:{imdb:'tt1234567',tmdb:9988}}});
-    assert.deepEqual(calls[1].body,{progress:80,show:{ids:{tvdb:321}},
+    assert.deepEqual(calls[0].body,{progress:20.5,movie:{ids:{imdb:'tt1234567',tmdb:9988},
+      title:'Test film',year:2024}});
+    assert.deepEqual(calls[1].body,{progress:80,show:{ids:{tvdb:321},title:'My Show'},
       episode:{season:1,number:3}});
   } finally{restore();}
 });
-test('Simkl skips unknown Plex IDs rather than inventing a title match',async()=>{
+test('Simkl reports titles lacking external Plex IDs without an extra search request',async()=>{
   const calls=[];
   const restore=mock(async(url)=>{calls.push(new URL(url).pathname);return respond({});});
   try {
@@ -292,7 +296,7 @@ test('Simkl skips unknown Plex IDs rather than inventing a title match',async()=
     const play=tracker.createPlayback(api,{id:'unknown',type:'movie',raw:{title:'Unresolved movie'}});
     await play.event('start',10,100);
     await play.event('stop',30,100);
-    assert.deepEqual(calls,[]);
+    assert.deepEqual(calls,['/scrobble/start','/scrobble/stop']);
   }finally{restore();}
 });
 test('Simkl does not invent a title-search fallback after an upstream API 404',async()=>{
@@ -338,4 +342,13 @@ test('Fribb Simkl resolution prefers mapped show IDs and disambiguates seasons',
   assert.equal(findFribbSimklId(rows,{tmdb:9988},{movie:true}),123);
   assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:true}),null);
   assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:false,season:1}),444);
+});
+
+test('Simkl identity fallback preserves movie and series coordinates without guessing IDs',()=>{
+  const onlyTitle = {type:'movie',raw:{title:'Unindexed Film',year:2025,guid:'plex://movie/id'}};
+  assert.deepEqual(scrobblePayload(onlyTitle),{movie:{ids:{},title:'Unindexed Film',year:2025}});
+  const ep = {type:'episode',raw:{parentIndex:4,index:8,grandparentTitle:'Show Without GUIDs'}};
+  assert.deepEqual(scrobblePayload(ep),{show:{ids:{},title:'Show Without GUIDs'},
+    episode:{season:4,number:8}});
+  assert.equal(scrobblePayload({type:'movie',raw:{}}),null);
 });

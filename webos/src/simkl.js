@@ -195,22 +195,34 @@ async function fribbSimklId(ids, context) {
   }
   return findFribbSimklId(await fribbRowsTask, ids, context);
 }
+// Simkl now recommends supplying title/year *alongside* external IDs: its
+// server-side identity resolution falls back to title when an external ID
+// isn't indexed (otherwise the endpoint returns 404 id_err). We do not make
+// an unverified second API search or manufacture a Simkl ID.
+function scrobbleIdentity(raw, ids, title) {
+  const identity = {ids};
+  const name = (typeof raw?.title === 'string' && raw.title.trim()) ||
+    (typeof title === 'string' && title.trim()) || '';
+  if (name) identity.title = name;
+  const year = Number(raw?.year);
+  if (Number.isInteger(year) && year >= 1870 && year <= 2200) identity.year = year;
+  return Object.keys(ids).length || name ? identity : null;
+}
 export function scrobblePayload(item, show) {
-  // Same _scrobbleBody shape as SimklTracker._scrobbleBody in upstream Plezy.
-  // Never send a title/year to Simkl as substitute identifiers.
   const raw = item?.raw;
   if (!raw) return null;
   if (item.type === 'movie') {
-    const ids = simklMovieIds(raw);
-    return Object.keys(ids).length ? {movie: {ids}} : null;
+    const movie = scrobbleIdentity(raw, simklMovieIds(raw), item.title);
+    return movie ? {movie} : null;
   }
   if (item.type !== 'episode' || raw.parentIndex == null || raw.index == null ||
       !Number.isInteger(Number(raw.parentIndex)) || !Number.isInteger(Number(raw.index)) ||
       Number(raw.parentIndex) < 0 || Number(raw.index) < 1) return null;
   const series = show?.raw || show || {};
-  const ids = simklMovieIds(series);
-  return Object.keys(ids).length
-    ? {show: {ids}, episode: {season: Number(raw.parentIndex), number: Number(raw.index)}} : null;
+  const identity = scrobbleIdentity(series, simklMovieIds(series),
+    show?.title || raw.grandparentTitle);
+  return identity ? {show: identity,
+    episode: {season: Number(raw.parentIndex), number: Number(raw.index)}} : null;
 }
 export function progressPercent(position, duration, ended = false) {
   if (ended) return 100;
@@ -416,7 +428,13 @@ export class SimklTracker {
     }
     if (result.status === 404 && path.indexOf('/scrobble/') === 0 &&
         ['id_err', 'not_found', 'item_not_found'].includes(result.data?.error)) {
-      throw new Error('Simkl scrobble rejected the supplied Plex IDs (HTTP 404: ' + result.data.error + ').');
+      const media = body?.movie || body?.show || {};
+      const idKeys = Object.keys(media.ids || {});
+      throw new Error('Simkl could not match this title (HTTP 404: ' + result.data.error +
+        '). IDs: ' + (idKeys.length ? idKeys.join(', ') : 'none') +
+        '; title: ' + (media.title ? 'present' : 'missing') +
+        '; year: ' + (media.year ? 'present' : 'missing') +
+        '. Check the title and IDs in Plex and whether Simkl has this item.');
     }
     if (result.status < 200 || result.status >= 300) {
       const code = typeof result.data?.error === 'string' && /^[a-z_]{2,40}$/.test(result.data.error)
