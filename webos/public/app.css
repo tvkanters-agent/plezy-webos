@@ -491,3 +491,25 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .actor-biography-text.collapsed { display:-webkit-box;-webkit-line-clamp:4;
   -webkit-box-orient:vertical;overflow:hidden; }
 .actor-biography-toggle { display:block;margin-top:8px; border-radius:20px; }
+
+/* CastMemberStrip port: focus border belongs to the complete item wrapper,
+   never its portrait. Let the row scroll all the way to the main pane's edges
+   while keeping the initial text/card alignment with the main content. */
+.cast-strip:focus .cast-member.cast-selected .cast-picture,
+.cast-strip:focus .cast-member.cast-selected .cast-picture img {
+  outline:none !important; border-color:transparent !important; box-shadow:none !important;
+}
+.cast-strip:focus .cast-member.cast-selected {
+  border-color:#ededed; background:rgba(237,237,237,.08);
+  box-shadow:none; outline:0;
+}
+.cast-section {
+  margin-left:-48px; margin-right:-48px;
+  width:calc(100% + 96px);
+}
+.cast-section h2 { margin-left:48px; }
+.cast-section .cast-strip {
+  width:100%; padding:5px 48px 15px; margin:0; box-sizing:border-box;
+  scroll-padding-left:48px; scroll-padding-right:48px;
+  overflow-x:auto; overflow-y:hidden;
+}
