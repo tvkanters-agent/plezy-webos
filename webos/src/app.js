@@ -15,6 +15,13 @@ const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
 const player = new Player(document.querySelector('#player'), notify, () => render(), simklTracker);
+let rememberedPaneFocus = null;
+let enterPaneAfterNavigation = false;
+function preferredPaneControl() {
+  // Enter media before the toolbar when coming from the remote's side rail.
+  return main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
+    main.querySelector('button:not(:disabled),input,select');
+}
 function el(tag, text, className) {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text;
   if (className) node.className = className; return node;
@@ -78,7 +85,7 @@ function focusWithoutJump(target, reveal = true) {
   if (row) row.scrollLeft = Math.max(0, previousLeft + dx);
   schedulePosters();
 }
-function focusFirst(root = main, preferred = null) {
+function focusFirst(root = main, preferred = null, fromRail = false) {
   const expectedRevision = revision;
   requestAnimationFrame(() => {
     if (expectedRevision !== revision || !root.isConnected) return;
@@ -86,7 +93,7 @@ function focusFirst(root = main, preferred = null) {
     // already moved from the page into the navigation rail. Do not steal
     // their active remote focus when an earlier render finally completes.
     const active = document.activeElement;
-    if (root === main && active && active !== document.body &&
+    if (root === main && !fromRail && active && active !== document.body &&
         active !== main && !main.contains(active)) return;
     focusWithoutJump(preferred && root.contains(preferred) ? preferred :
       (root.querySelector('button:not(:disabled),input,select') || root));
@@ -261,6 +268,9 @@ function navigation() {
   }
 }
 function go(next, remember = true) {
+  const fromRail = nav.contains(document.activeElement);
+  enterPaneAfterNavigation = fromRail;
+  rememberedPaneFocus = null;
   if (remember) {
     // Flutter retains the covered route's subtree. Preserve this rendered
     // page and its scroll/focus state instead of refetching and repainting it
@@ -456,6 +466,8 @@ async function paginated(loader, currentRevision, options = {}) {
 }
 async function render() {
   const currentRevision = ++revision;
+  const focusFromRail = enterPaneAfterNavigation;
+  enterPaneAfterNavigation = false;
   let preferredFocus = null;
   cancelAuth(); detailMenu = null; main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
@@ -767,8 +779,9 @@ async function render() {
       // Restore the previous reading/scroll position BEFORE focusing its card.
       // Native focus scrolling must not pull a restored library back to row 1.
       main.scrollTop = route.scroll || 0;
-      if (found) focusWithoutJump(found, false); else focusFirst(main, preferredFocus);
-    } else focusFirst(main, preferredFocus);
+      if (found) focusWithoutJump(found, false);
+      else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
+    } else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
   }
 }
 function play(item, start, transcode = false) { return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0, transcode: transcode || state.quality === 'transcode'}); }
@@ -993,8 +1006,10 @@ window.addEventListener('keydown', event => {
   // The rail is one focus zone. RIGHT must leave it even if another rail
   // item happens to be geometrically to the right (indented libraries).
   if (dialog.hidden && !player.active && inRail && direction === 'right') {
-    const first = main.querySelector('button:not(:disabled),input,select');
-    if (first) focusWithoutJump(first);
+    const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
+      main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
+    const target = restored || preferredPaneControl();
+    if (target) focusWithoutJump(target);
     else { main.tabIndex = -1; focusWithoutJump(main); }
     return;
   }
@@ -1019,7 +1034,10 @@ window.addEventListener('keydown', event => {
       if (adjacent) { focusWithoutJump(adjacent); return; }
       const selected = nav.querySelector('button.active') ||
         nav.querySelector('button:not(:disabled)');
-      if (selected) focusWithoutJump(selected);
+      if (selected) {
+        rememberedPaneFocus = current;
+        focusWithoutJump(selected);
+      }
       return;
     }
     const local = choose(validControls(source), direction);
