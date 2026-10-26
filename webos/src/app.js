@@ -172,6 +172,40 @@ function closeDetailMenu() {
   detailMenu = null;
   if (trigger.isConnected) focusWithoutJump(trigger, false);
 }
+function showRatingSheet(item, client) {
+  dialog.textContent='';
+  dialog.append(el('h2','Rate '+item.title));
+  const row=el('div',undefined,'rate-stars');
+  const initial=Number(item.raw?.userRating) || 0;
+  const feedback=el('p',initial ? (initial/2).toFixed(1)+' / 5 stars' : 'Not rated','rating-selected');
+  let chosen=initial > 0 ? Math.round(initial) : 0;
+  const buttons=[];
+  for(let score=1;score<=10;score++) {
+    const action=button((score/2).toFixed(1),()=>{
+      chosen=score;
+      buttons.forEach((node,index)=>node.setAttribute('aria-pressed',String(index+1===score)));
+      feedback.textContent=(score/2).toFixed(1)+' / 5 stars';
+    },'rate-value');
+    action.setAttribute('aria-label',(score/2).toFixed(1)+' stars');
+    action.setAttribute('aria-pressed',String(score===chosen));
+    buttons.push(action);row.append(action);
+  }
+  const save=async rating=>{
+    try {
+      await client.rate(item,rating);
+      dialog.hidden=true;
+      notify(rating<0?'Rating cleared.':'Plex rating saved.');
+      render();
+    } catch(error) { feedback.textContent='Could not save rating: '+error.message; }
+  };
+  const actions=el('div',undefined,'actions');
+  actions.append(button('Save rating',()=>chosen?save(chosen):(feedback.textContent='Choose a rating.'),'primary'),
+    button('Clear rating',()=>save(-1)),
+    button('Cancel',()=>{dialog.hidden=true;focusFirst();}));
+  dialog.append(el('p','Your Plex rating (0–5 stars)','muted'),row,feedback,actions);
+  dialog.hidden=false;
+  focusFirst(dialog,buttons[Math.max(0,chosen-1)]);
+}
 function detailMoreOptions(options) {
   const group = el('div', undefined, 'detail-more');
   const menu = el('div', undefined, 'detail-more-menu');
@@ -725,7 +759,8 @@ async function render() {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
           render();
-        }, 'watched', 'detail-icon'));
+        }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
+        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api),'rating','detail-icon'));
         const extra = [];
         if (parentShow) extra.push({label:'View series', action:() =>
           go({type:'detail',id:parentShow.id,kind:'show'})});
@@ -756,7 +791,8 @@ async function render() {
           await currentApi.watched(item, watched);
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           render();
-        }, 'watched', 'detail-icon'));
+        }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
+        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api),'rating','detail-icon'));
         if (api instanceof Plex && item.type === 'episode' && raw.parentRatingKey) {
           actions.append(detailButton('Next episode', async () => {
             const expected = revision, currentApi = api;
@@ -786,6 +822,27 @@ async function render() {
       else if (isSeason && item.background)
         content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       main.append(content);
+      const cast=Array.isArray(raw.Role) && raw.Role.length ? raw.Role :
+        (Array.isArray(showRaw.Role) ? showRaw.Role : []);
+      if (cast.length && api instanceof Plex) {
+        const section=el('section',undefined,'cast-section');
+        section.append(el('h2','Cast'));
+        const members=el('div',undefined,'cast-strip');
+        cast.slice(0,20).forEach(actor=>{
+          const tile=el('div',undefined,'cast-member');
+          const picture=el('div',undefined,'cast-picture');
+          if(actor.thumb){
+            const image=el('img');
+            image.alt=actor.tag || '';
+            image.setAttribute('data-poster-src',api.image({poster:actor.thumb}));
+            picture.append(image);
+          }else picture.textContent='?';
+          tile.append(picture,el('strong',actor.tag||actor.title||'Unknown'));
+          if(actor.role) tile.append(el('small',actor.role));
+          members.append(tile);
+        });
+        section.append(members);main.append(section);
+      }
       if (item.folder) {
         const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
           item.type === 'season' ? 'Episodes' : 'Titles');

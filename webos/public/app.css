@@ -355,3 +355,22 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 #player .player-status { top:auto; bottom:155px; left:22%; right:22%; padding:12px 16px;
   background:rgba(12,12,14,.88); font-size:17px; pointer-events:none; }
 #player .player-status:empty { display:none; }
+
+.rating-line { display:flex; flex-wrap:wrap; margin:4px 0 16px; }
+.rating-badge { border-radius:18px; background:#292c33; border:1px solid #474a53;
+ font-size:16px; line-height:1.3; padding:7px 12px; margin:0 9px 9px 0; }
+.rating-badge strong { font-size:14px; margin-right:5px; color:#d8dbe1; }
+.rate-stars { display:flex; flex-wrap:wrap; margin:22px 0 16px; }
+.rate-value { min-width:60px; height:54px; margin:0 8px 8px 0; padding:5px;
+ font-size:19px; border-radius:12px; }
+.rate-value[aria-pressed="true"] { background:#eee; color:#111; }
+.rating-selected { margin:12px 0; min-height:28px; }
+.cast-section { margin:32px 0; position:relative; }
+.cast-section h2 { font-size:26px; margin:0 0 18px; }
+.cast-strip { display:flex; overflow-x:auto; }
+.cast-member { flex:0 0 128px; width:128px; margin:0 17px 10px 0; }
+.cast-picture { height:148px; width:114px; border-radius:10px; background:#242730;
+ overflow:hidden; display:flex; justify-content:center; align-items:center; }
+.cast-picture img { width:100%; height:100%; object-fit:cover; }
+.cast-member strong { display:block; font-size:16px; line-height:1.22; margin-top:8px; }
+.cast-member small { display:block; font-size:14px; color:#aeb3bc; margin-top:4px; }
