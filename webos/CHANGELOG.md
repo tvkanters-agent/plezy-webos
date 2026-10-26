@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.1.0 — Plezy alphabetical library navigation
+
+- Port the original TV alphabet rail, overscan inset, current-letter indicator, D-pad/pointer navigation and return-to-grid focus.
+- Fetch native Plex first-character buckets; navigate by cumulative media offsets with a bounded sparse grid, including unloaded titles.
+- Port Jellyfin/Emby's A–Z/# prefix filtering through NameStartsWith/NameLessThan; selecting the same letter again clears its filter.
+- Preserve the library alphabet bar, items, scroll position and focus across detail navigation.
+- Add upstream-derived unit tests, browser regressions and Chromium 53 adaptation notes. LG hardware validation remains outstanding.
+
+
 ## 1.0.0 — First stable webOS release
 
 - Promote the Plex-first LG webOS TV port from the 0.2.x alpha series to its first stable release, retaining the existing application ID and settings.
