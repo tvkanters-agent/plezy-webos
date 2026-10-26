@@ -661,7 +661,7 @@ async function render() {
       const media = raw.Media && raw.Media[0] || {};
       const facts = [raw.year || showRaw.year, raw.editionTitle, raw.contentRating || showRaw.contentRating,
         item.duration ? time(item.duration) : '',
-        media.videoResolution ? (/^\\d+$/.test(String(media.videoResolution)) ?
+        media.videoResolution ? (/^[0-9]+$/.test(String(media.videoResolution)) ?
           String(media.videoResolution) + 'p' : String(media.videoResolution).toUpperCase()) : ''].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
       if (chips.children.length) info.append(chips);
@@ -687,7 +687,8 @@ async function render() {
           communityRatings(ratingItem.raw, ratingItem.type).then(external => {
             if (revision!==expected || !info.isConnected) return;
             const all=mergeRatings(ownRatings,external);
-            if (all.length && !ratingLine.isConnected) info.insertBefore(ratingLine,genreChips);
+            if (all.length && !ratingLine.isConnected)
+              info.insertBefore(ratingLine,genreChips.isConnected ? genreChips : null);
             showRatings(all);
           });
         }
