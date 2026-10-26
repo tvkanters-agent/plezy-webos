@@ -182,14 +182,15 @@ test('Plex alphabet jumps align the requested row and focus that row on the firs
     const target=main.querySelector('.alpha-window-grid .card[data-focus="150"]');
     const top=target.getBoundingClientRect().top;
     const paneTop=main.getBoundingClientRect().top;
-    const previous=cards.filter(card=>Number(card.dataset.focus)<150);
+    // A letter may start mid-row, so preceding titles in THAT row are valid.
+    // Only an earlier row protruding into the viewport is a regression.
+    const previousRows=cards.filter(card=>card.getBoundingClientRect().top<top-3);
     return {scroll:main.scrollTop, top:top-paneTop,
-      precedingVisible:previous.some(card=>card.getBoundingClientRect().bottom>paneTop)};
+      precedingRowVisible:previousRows.some(card=>card.getBoundingClientRect().bottom>paneTop)};
   });
-  // A letter jump should never leave an earlier-letter row peeking above it.
   expect(before.top).toBeGreaterThanOrEqual(-2);
   expect(before.top).toBeLessThan(10);
-  expect(before.precedingVisible).toBe(false);
+  expect(before.precedingRowVisible).toBe(false);
   await page.keyboard.press('ArrowLeft');
   const focused=page.locator('.alpha-window-grid .card:focus');
   await expect(focused).toHaveCount(1);
