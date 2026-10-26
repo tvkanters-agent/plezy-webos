@@ -10,7 +10,6 @@ button:hover { background: #30343d; }
 button:focus, input:focus, select:focus { outline: none; border-color: #ededed; box-shadow: inset 0 0 0 1px #ededed; }
 .card:focus { outline: none; box-shadow: none; }
 .card:focus .poster { border-color: transparent; box-shadow: none; }
-.card:focus .poster img.artwork-loaded, .card:focus .poster img.artwork-ready { opacity: .94; }
 nav button:focus { outline: none; border-color: transparent; box-shadow: none; background: rgba(237,237,237,.12); }
 
 button:disabled { opacity: .45; cursor: default; }
