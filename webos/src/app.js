@@ -3,6 +3,8 @@ import './compat.js';
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
+import {showPlexAlphaBar} from './alpha-bar.js';
+import {mountAlphabetLibrary} from './library-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
@@ -13,6 +15,7 @@ function tvStorage() {
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
 let detailMenu = null, ratingDialogReturnFocus = null;
+let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
@@ -620,7 +623,8 @@ async function paginated(loader, currentRevision, options = {}) {
     retry.hidden = true;
     errorMessage.textContent = '';
     try {
-      const page = await loader(start);
+      const page = options.initialPage && start === 0 ? options.initialPage : await loader(start);
+      options.initialPage = null;
       if (currentRevision !== revision || !grid.isConnected) return;
       for (let i = 0; i < page.items.length; i += 8) {
         if (currentRevision !== revision || !grid.isConnected) return;
@@ -676,7 +680,9 @@ async function render() {
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
   let preferredFocus = null;
-  cancelAuth(); detailMenu = null; main.textContent = ''; main.scrollTop = 0; navigation();
+  cancelAuth(); detailMenu = null;
+  if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
+  main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
     if (!api && !['settings', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
@@ -781,7 +787,30 @@ async function render() {
       toolbar.append(sortAction, filterAction, refreshAction);
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
-      await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
+      const libraryLoader = (start, count) =>
+        currentApi.list(route.library.id, start, selected, selectedFilter, count);
+      if (currentApi instanceof Plex && selected === 'title') {
+        // Flutter LibraryBrowseTab starts the first page and firstCharacter
+        // fetch together; hide the rail on an unsupported server/failed index.
+        const [pageResult, characters] = await Promise.all([
+          libraryLoader(0).catch(error => ({error})),
+          currentApi.firstCharacters(route.library.id, selectedFilter).catch(() => [])
+        ]);
+        if (!valid()) return;
+        if (pageResult.error) {
+          await paginated(start => libraryLoader(start), currentRevision);
+        } else if (showPlexAlphaBar(pageResult.total, characters, selected)) {
+          activeAlphabet = mountAlphabetLibrary({
+            main, firstPage: pageResult, characters,
+            loader: (start, count) => libraryLoader(start, count),
+            card, schedulePosters, focusWithoutJump, isActive: valid
+          });
+        } else {
+          await paginated(start => libraryLoader(start), currentRevision, {initialPage: pageResult});
+        }
+      } else {
+        await paginated(start => libraryLoader(start), currentRevision);
+      }
       if (valid() && pendingRailEntryRevision===currentRevision) {
         pendingRailEntryRevision=null;
         focusFirst(main, preferredPaneControl(), true);
@@ -1475,6 +1504,11 @@ async function simklSignIn() {
 }
 window.addEventListener('keydown', event => {
   if (player.active && player.key(event)) return;
+  // AlphaJumpBar's FocusNode consumes remote arrows/OK/Back before the
+  // application-wide back handler. Left and Back return to the visible grid.
+  if (activeAlphabet && activeAlphabet.handleKey(event.keyCode)) {
+    event.preventDefault(); return;
+  }
   if ([461, 27].includes(event.keyCode)) { event.preventDefault(); back(); return; }
   const direction = {37: 'left', 38: 'up', 39: 'right', 40: 'down'}[event.keyCode];
   const ratingControl=document.activeElement;
@@ -1505,6 +1539,15 @@ window.addEventListener('keydown', event => {
   const root = !dialog.hidden ? dialog : player.active ? player.root : document.querySelector('#shell');
   const inRail = nav.contains(current);
   const inMain = main.contains(current);
+  if (activeAlphabet && inMain && direction === 'right' &&
+      current.matches('.alpha-window-grid .card')) {
+    const rect = current.getBoundingClientRect();
+    const later = Array.from(main.querySelectorAll('.alpha-window-grid .card')).some(node => {
+      const other = node.getBoundingClientRect();
+      return other.left > rect.left + 5 && Math.abs(other.top - rect.top) < 4;
+    });
+    if (!later) { activeAlphabet.focus(); return; }
+  }
   // D-pad navigation follows the original Flutter navigation zones:
   // Up/Down stay in the current rail or page. A left press in the sidebar
   // never jumps diagonally to a different item in the sidebar.
