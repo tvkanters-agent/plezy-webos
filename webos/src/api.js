@@ -179,11 +179,22 @@ export class Plex {
     }
     return rows;
   }
-  async list(library, start = 0, sort = 'title', filter = 'all') {
+  // PlexAlphaBarStrategy.loadCharacters: native per-letter buckets, with
+  // includeCollections=1 and the same watched filter as the browse page.
+  async firstCharacters(library, filter = 'all') {
+    const params = {includeCollections: '1'};
+    if (filter === 'unwatched') params.unwatched = '1';
+    const data = (await this.get('/library/sections/' + enc(library) + '/firstCharacter', params)).MediaContainer;
+    return (data.Directory || []).map(entry => ({
+      key: String(entry.key || ''), title: String(entry.title || ''),
+      size: Number(entry.size) || 0
+    }));
+  }
+  async list(library, start = 0, sort = 'title', filter = 'all', limit = PAGE) {
     const order = {title: 'titleSort', recent: 'addedAt:desc', release: 'originallyAvailableAt:desc'}[sort] || 'titleSort';
     const section = filter === 'unwatched' ? 'unwatched' : 'all';
     const data = (await this.get('/library/sections/' + enc(library) + '/' + section, {
-      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': PAGE, sort: order})).MediaContainer;
+      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': limit, sort: order})).MediaContainer;
     return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
   }
   async search(query) {
