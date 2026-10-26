@@ -1600,13 +1600,20 @@ window.addEventListener('keydown', event => {
   if (current.tagName === 'INPUT' && ['left', 'right'].includes(direction)) return;
   event.preventDefault();
   const root = !dialog.hidden ? dialog : player.active ? player.root : document.querySelector('#shell');
+  // Reuse geometry only during this synchronous focus decision. A new key
+  // gets fresh bounds after scrolling, resize, animation or page changes.
+  const bounds = new Map();
+  const rectFor = node => {
+    if (!bounds.has(node)) bounds.set(node, node.getBoundingClientRect());
+    return bounds.get(node);
+  };
   const inRail = nav.contains(current);
   const inMain = main.contains(current);
   if (activeAlphabet && route.type === 'library' && (route.view||'browse') === 'browse' &&
       inMain && direction === 'right' && current.matches('.grid .card')) {
-    const rect = current.getBoundingClientRect();
+    const rect = rectFor(current);
     const later = Array.from(main.querySelectorAll('.grid .card')).some(node => {
-      const other = node.getBoundingClientRect();
+      const other = rectFor(node);
       return other.left > rect.left + 5 && Math.abs(other.top - rect.top) < 4;
     });
     if (!later) { activeAlphabet.focus(); return; }
@@ -1645,17 +1652,17 @@ window.addEventListener('keydown', event => {
   const validControls = scope => Array.from(scope.querySelectorAll(
     'button:not(:disabled),input,select,.cast-strip[tabindex]')).filter(node =>
       node !== current && node.getClientRects().length && !node.hidden);
-  const choose = (candidates, axis) => nextFocus(current.getBoundingClientRect(),
-    candidates.map(value => ({value, rect: value.getBoundingClientRect()})), axis);
+  const choose = (candidates, axis) => nextFocus(rectFor(current),
+    candidates.map(value => ({value, rect: rectFor(value)})), axis);
   if (dialog.hidden && !player.active && (inRail || inMain)) {
     // Match upstream CastMemberStrip's onNavigateDown/onNavigateUp: the
     // last season/episode row leads into Cast, not off to a distant action.
     if (inMain && direction==='down' && current.matches('.grid .card,.episode-list .episode-row')) {
       const cast=main.querySelector('.cast-strip[tabindex]');
       if(cast){
-        const currentRect=current.getBoundingClientRect();
+        const currentRect=rectFor(current);
         const later=Array.from(main.querySelectorAll('.grid .card,.episode-list .episode-row'))
-          .some(node=>node!==current && node.getBoundingClientRect().top>currentRect.top+8);
+          .some(node=>node!==current && rectFor(node).top>currentRect.top+8);
         if(!later){focusWithoutJump(cast);return;}
       }
     }
@@ -1669,12 +1676,6 @@ window.addEventListener('keydown', event => {
     // a filter button somewhere up the screen. Flutter's D-pad focus boundary
     // transfers to the active rail destination when the current row ends.
     if (inMain && direction === 'left') {
-      const rect = current.getBoundingClientRect();
-      const rowCandidates = validControls(main).filter(node => {
-        const box = node.getBoundingClientRect();
-        return box.right <= rect.left + 8 &&
-          box.top < rect.bottom - 4 && box.bottom > rect.top + 4;
-      });
       // The first poster in a media row has no left-hand peer. Never
       // diagonally select a toolbar/tab from the row above it.
       const card = current.closest('.grid .card, .cards .card');
@@ -1688,6 +1689,12 @@ window.addEventListener('keydown', event => {
         }
         return;
       }
+      const rect = rectFor(current);
+      const rowCandidates = validControls(main).filter(node => {
+        const box = rectFor(node);
+        return box.right <= rect.left + 8 &&
+          box.top < rect.bottom - 4 && box.bottom > rect.top + 4;
+      });
       const adjacent = choose(rowCandidates, 'left');
       if (adjacent) { focusWithoutJump(adjacent); return; }
       const selected = nav.querySelector('button.active') ||

@@ -210,3 +210,37 @@ for (const layout of ['grid', 'flex']) {
     });
   }
 }
+
+// Count synchronous geometry calls, independent of machine speed. The chosen
+// card gets one extra read when revealing focus; decisions reuse all others.
+test('D-pad reuses bounds per decision and refreshes them on the next key', async ({page}) => {
+  await mockPlexAlphabet(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button', {name:'Movies'}).click();
+  await expect(page.locator('.alpha-window-grid .card')).toHaveCount(60);
+  await page.locator('.card[data-focus="2"]').focus();
+  const move = keyCode => page.evaluate(keyCode => {
+    const original = Element.prototype.getBoundingClientRect;
+    const counts = new Map();
+    Element.prototype.getBoundingClientRect = function () {
+      counts.set(this, (counts.get(this) || 0) + 1);
+      return original.call(this);
+    };
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', {keyCode, bubbles:true}));
+      const focused = document.activeElement;
+      return {id:focused.dataset.focus, reads:Array.from(counts.entries())
+        .filter(([node]) => node.matches('.card'))
+        .map(([node, count]) => ({id:node.dataset.focus, count, selected:node===focused}))};
+    } finally { Element.prototype.getBoundingClientRect = original; }
+  }, keyCode);
+  for (const [key, expected] of [[37,'1'], [39,'2'], [37,'1'], [37,'0']]) {
+    const result = await move(key);
+    expect(result.id).toBe(expected);
+    expect(result.reads.length).toBeGreaterThan(0);
+    for (const row of result.reads) expect(row.count).toBeLessThanOrEqual(row.selected ? 2 : 1);
+  }
+  const exit = await move(37);
+  expect(exit.reads).toHaveLength(0);
+  await expect(page.locator('#nav button.active')).toBeFocused();
+});

@@ -147,3 +147,12 @@ that same inset (read from the grid), never the outer main padding. This
 small browser geometry adaptation leaves the preceding row outside the pane
 and prevents a second scroll when focus enters or crosses the target row.
 Regression coverage exercises both CSS Grid and Chromium 53's flex fallback.
+
+### Browser layout work during browsing
+
+Flutter's `FocusableMediaCard` and `LibraryBrowseTab` retain focus zones and
+layout geometry through the framework. Chromium 53 uses DOM geometry instead.
+D-pad decisions reuse each element's bounds only within one synchronous key
+handler; reveal still measures independently, and every new key measures afresh.
+The first poster's explicit sidebar exit needs no candidate geometry. This
+preserves spatial scoring and avoids caches becoming stale after scroll/resize.
