@@ -766,7 +766,7 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  // Chromium may not implement scrollbar-width, but the webOS CSS must hide it.
  expect(hidden || await cast.evaluate(el=>getComputedStyle(el).overflowX==='auto')).toBe(true);
  await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{name:'Person 10'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Person 17'})).toBeVisible();
 });
 
 test('connected Simkl movie and series rating rows read existing user score and write to Simkl',async({page})=>{
