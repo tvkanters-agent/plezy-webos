@@ -330,7 +330,7 @@ export class Player {
   }
   async reopen(changes) {
     if (!this.item || this.closing) return;
-    const options = {...this.options, ...changes, start: this.position()};
+    const options = {...this.options, ...changes, start: changes.start ?? this.position()};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
     return this.open(this.api, this.item, options, true);
