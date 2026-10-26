@@ -199,7 +199,10 @@ function showRatingSheet(item, client) {
     if(tracker) {
       const logo=el('img');logo.src='assets/simkl_mark.svg';logo.alt='';
       leading.append(logo);
-    } else leading.append(el('span','P','rating-plex-mark'));
+    } else {
+      const logo=el('img');logo.src='assets/plex_chevron.svg';logo.alt='';
+      leading.append(logo);
+    }
     const heading=el('div',undefined,'rating-service-heading');
     heading.append(el('strong',service),el('small',tracker?'Your Simkl rating':'Your Plex rating'));
     const stars=el('div',undefined,'rating-stars');
