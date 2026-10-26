@@ -32,7 +32,11 @@ export class Player {
     });
     this.video.addEventListener('timeupdate', () => this.update());
     this.video.addEventListener('playing', () => {
-      this.status.textContent = ''; this.showBuffering(false); this.report('playing');
+      this.status.textContent = '';
+      this.resume();
+      this.startAfterInitialSeek();
+      if(!this.initialSeekPending) this.showBuffering(false);
+      this.report('playing');
       this.track('start');
       if (this.hideAfterSeek) {this.hideControls();return;}
       this.reveal();
@@ -186,8 +190,9 @@ export class Player {
       this.session = session;
       this.pendingStart = session.start;
       this.initialSeekTarget = Number(session.start) || 0;
-      // Do not decode/play the opening frame before seeking to resume.
-      this.initialSeekPending = this.initialSeekTarget > 0 && !session.transcode;
+      // Keep the player obscured by the spinner until the resume seek has
+      // decoded a frame. Starting play is necessary to initialize LG HLS.
+      this.initialSeekPending = this.initialSeekTarget > 0;
       this.root.querySelector('.play-method').textContent = session.transcode ? 'HLS · H.264 / AAC' : 'Direct play';
       for (const kind of ['audio', 'subtitle']) {
         const select = this.root.querySelector('[data-track="' + kind + '"]');
@@ -215,7 +220,10 @@ export class Player {
       this.startTimeout = setTimeout(() => {
         if (generation === this.generation && this.video.readyState < 2) this.failed();
       }, 30000);
-      if (!this.initialSeekPending) await this.beginVideoPlayback(generation);
+      // On webOS a non-started video often never reaches canplay/seeked.
+      // Initialize the decoder, but do not show its frame until the resume
+      // seek is ready.
+      await this.beginVideoPlayback(generation);
     } catch (error) {
       if (generation === this.generation) { this.showBuffering(false);this.status.textContent = error.message; this.reveal(); }
     }
@@ -242,15 +250,16 @@ export class Player {
         if(this.initialSeekPending)this.initialSeekTarget=target;
       } catch (_) { /* Retry once the source is seekable. */ }
     }
-    if (!this.pendingStart) clearTimeout(this.startTimeout);
+    if (!this.pendingStart && !this.initialSeekPending)
+      clearTimeout(this.startTimeout);
   }
   startAfterInitialSeek() {
     if(!this.initialSeekPending || this.pendingStart || !this.session)return;
     if(this.video.seeking || this.video.readyState<2 ||
        Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
     this.initialSeekPending=false;
+    clearTimeout(this.startTimeout);
     this.showBuffering(false);
-    this.beginVideoPlayback();
   }
   position() {
     return this.pendingStart || ((this.video.currentTime || 0) + (this.session?.timelineOffset || 0));
