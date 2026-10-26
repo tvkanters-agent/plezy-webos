@@ -816,13 +816,18 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
+ const times=[];
  const episode={ratingKey:'episode2',type:'episode',title:'Episode In Progress',
    parentRatingKey:'season1',grandparentRatingKey:'series',duration:1200000,
    viewOffset:125000,
    Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'ac3',
      Part:[{id:'part2',key:'/video.mkv',Stream:[]}]}]};
  await page.route('http://plex.test/**',route=>{
-   const path=new URL(route.request().url()).pathname;
+   const url=new URL(route.request().url()),path=url.pathname;
+   if(path==='/:/timeline') {
+     times.push(url.searchParams.get('time'));
+     return route.fulfill({status:200,body:''});
+   }
    const rows=path==='/hubs'?[show]:path==='/library/metadata/series'?[show]:
      path==='/library/metadata/series/onDeck'?[{ratingKey:'episode2',type:'episode',title:'Episode In Progress'}]:
      path==='/library/metadata/episode2'?[episode]:[];
@@ -836,7 +841,7 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=0');
  // The original resume point is preserved for timeline syncing, even though
  // Plex's older HLS decoder cannot open its stream with a nonzero offset.
- await expect.poll(()=>page.locator('#player .player-spinner').isVisible()).toBe(true);
+ await expect.poll(()=>times.includes('125000')).toBe(true);
 });
 
 test('Plezy actor page displays compact portrait, character, biography and filmography',async({page})=>{
