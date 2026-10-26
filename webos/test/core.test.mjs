@@ -68,7 +68,6 @@ test('Plex direct play and explicit compatible playback use distinct URLs',async
   assert.equal(direct.transcode,false);assert.match(direct.url,/file.mp4/);
   assert.equal(hls.transcode,true);const url=new URL(hls.url);assert.match(url.pathname,/start.m3u8/);
   assert.equal(url.searchParams.get('directStream'),'0');assert.equal(url.searchParams.get('audioCodec'),'aac');assert.equal(url.searchParams.get('offset'),'12');assert.equal(hls.start,0);assert.equal(hls.timelineOffset,12);
-  assert.equal(hls.timelineOffset,0);
 });
 test('Plex rejects unsupported direct play and selects HLS for HEVC/MKV',async()=>{
   const item=structuredClone(plexItem);item.raw.Media[0].container='mkv';item.raw.Media[0].videoCodec='hevc';
