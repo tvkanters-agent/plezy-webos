@@ -116,9 +116,17 @@ const iconShapes = {
       stroke:'currentColor','stroke-width':'2','stroke-linecap':'round'}]
   ],
   watched: [
-    ['circle', {cx:'12',cy:'12',r:'9',fill:'none',stroke:'currentColor','stroke-width':'2'}],
-    ['path', {d:'M8 12l2.8 2.8 5.3-5.5',fill:'none',stroke:'currentColor',
-      'stroke-width':'2.2','stroke-linecap':'round','stroke-linejoin':'round'}]
+    ['path',{d:'M4 12l5 5L20 6',fill:'none',stroke:'currentColor',
+      'stroke-width':'2.8','stroke-linecap':'round','stroke-linejoin':'round'}]
+  ],
+  unwatched: [
+    ['path',{d:'M3 12l4 4 6-6 M11 17l2 2 8-8 M4 4l16 16',fill:'none',
+      stroke:'currentColor','stroke-width':'2.4','stroke-linecap':'round',
+      'stroke-linejoin':'round'}]
+  ],
+  rating: [
+    ['path',{d:'M12 2l3.1 6.4 7.1 1-5.1 5 .9 7-6-3.3-6 3.3.9-7-5.1-5 7.1-1z',
+      fill:'none',stroke:'currentColor','stroke-width':'2','stroke-linejoin':'round'}]
   ],
   more: [
     ['circle', {cx:'5',cy:'12',r:'2',fill:'currentColor'}],
@@ -139,10 +147,7 @@ const iconShapes = {
     ['path', {d:'M5 4v16l12-8zm13 0h2v16h-2z',fill:'currentColor'}]
   ],
   shuffle: [
-    ['path', {d:'M3 6h2c6 0 7 12 13 12h3 M17 15l4 3-4 3',
-      fill:'none',stroke:'currentColor','stroke-width':'2',
-      'stroke-linecap':'round','stroke-linejoin':'round'}],
-    ['path', {d:'M3 18h2c2.5 0 3.8-2.3 5-4.5 M14 10.5C15.3 8 16.7 6 19 6h2 M17 3l4 3-4 3',
+    ['path',{d:'M18 2l4 4-4 4 M18 14l4 4-4 4 M2 18h2.5c6 0 6-12 12-12H22 M2 6h2.5c2.8 0 4.3 2.6 5.8 5.4 M14.3 14.2c1.3 2.4 2.7 3.8 6.2 3.8H22',
       fill:'none',stroke:'currentColor','stroke-width':'2',
       'stroke-linecap':'round','stroke-linejoin':'round'}]
   ]

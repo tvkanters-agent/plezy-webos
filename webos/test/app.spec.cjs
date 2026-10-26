@@ -545,13 +545,10 @@ test('compound detail icons use independent correctly sized strokes and shapes',
   await page.goto('/');
   await page.getByRole('button',{name:'The Test Film',exact:false}).first().click();
   const check=page.getByRole('button',{name:'Mark watched'}).locator('svg');
-  await expect(check.locator('circle')).toHaveCount(1);
   await expect(check.locator('path[fill="none"][stroke="currentColor"]')).toHaveCount(1);
-  const circle=await check.locator('circle').evaluate(el=>({width:el.getBBox().width}));
   const tick=await check.locator('path').evaluate(el=>({width:el.getBBox().width}));
-  expect(circle.width).toBeGreaterThan(15);
-  expect(tick.width).toBeGreaterThan(6);
-  expect(tick.width).toBeLessThan(circle.width);
+  expect(tick.width).toBeGreaterThan(13);
+  expect(tick.width).toBeLessThan(22);
   const dots=page.getByRole('button',{name:'More options'}).locator('svg circle');
   await expect(dots).toHaveCount(3);
   const widths=await dots.evaluateAll(nodes=>nodes.map(node=>node.getBBox().width));
