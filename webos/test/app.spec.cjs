@@ -967,7 +967,8 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
  await page.locator('.cast-strip').focus();
  await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'Movie Actor'})).toBeVisible();
- await expect(page.locator('.actor-avatar img')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar img')).toHaveCount(0);
  await expect(page.getByText('The Lead')).toBeVisible();
  await expect(page.getByText('Rotterdam, Netherlands')).toBeVisible();
  await expect(page.getByText('Biography about the actor.')).toBeVisible();
