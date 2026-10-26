@@ -554,6 +554,9 @@ function loadVisiblePosters() {
     img.addEventListener('load', finish);
     img.addEventListener('error', finish);
     img.src = url;
+    // Flutter's OptimizedMediaImage shows synchronously cached frames without
+    // fading; only artwork arriving asynchronously transitions over 300ms.
+    if (img.complete && img.naturalWidth > 0) img.classList.add('artwork-ready');
   }
 }
 function schedulePosters() {
@@ -581,13 +584,32 @@ function personPortrait(imageUrl, className) {
   }
   return node;
 }
+// Plezy's OptimizedMediaImage uses an opaque surface while waiting and a
+// subdued image-not-supported icon only when no artwork can be displayed.
+function unavailablePoster(node) {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('class', 'poster-fallback');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('fill', 'currentColor');
+  path.setAttribute('d', 'M21 5v12.17l-2-2V5H6.83l-2-2H19c1.1 0 2 .9 2 2zM2.1 2.1.69 3.51 2 4.83V19c0 1.1.9 2 2 2h14.17l1.32 1.32 1.41-1.41L2.1 2.1zM4 19V6.83l5.59 5.59L6 17h11.17l2 2H4z');
+  icon.append(path);
+  node.textContent = '';
+  node.append(icon);
+}
 function poster(item, options = {}) {
   const node = el('div', undefined, 'poster'); const image = api.image(item, options);
   if (image) {
     const img = el('img'); img.alt = ''; img.setAttribute('data-poster-src', image);
-    img.onerror = () => { node.textContent = '▷'; };
+    // A src-less <img> draws Chromium's white broken-image box even while
+    // queued for lazy loading. Reveal only a successfully decoded image.
+    img.onload = () => {
+      if (!img.classList.contains('artwork-ready')) img.classList.add('artwork-loaded');
+    };
+    img.onerror = () => { img.remove(); unavailablePoster(node); };
     node.append(img);
-  } else node.textContent = '▷';
+  } else unavailablePoster(node);
   return node;
 }
 function cards(items, grid = false) {

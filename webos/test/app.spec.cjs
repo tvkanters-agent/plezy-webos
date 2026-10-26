@@ -1070,3 +1070,31 @@ test('rating chip waits for personal and community ratings before showing scores
  await expect(bubble.locator('.rating-personal')).toHaveAttribute(
    'aria-label','Your Simkl rating 9/10');
 });
+
+test('poster images stay invisible while pending, then fade in without a broken-image border',async({page})=>{
+  await mockServer(page);
+  const waiting=[];
+  await page.route('http://media.test/Items/movie/Images/Primary**',route=>{
+    waiting.push(route);
+  });
+  await page.goto('/');
+  const poster=page.locator('main .card .poster').first();
+  const image=poster.locator('img');
+  await expect.poll(()=>waiting.length).toBeGreaterThan(0);
+  expect(await image.evaluate(node=>getComputedStyle(node).opacity)).toBe('0');
+  expect(await image.evaluate(node=>node.classList.contains('artwork-loaded'))).toBe(false);
+  await waiting[0].fulfill({contentType:'image/svg+xml',
+    body:'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#777"/></svg>'});
+  await expect(image).toHaveClass(/artwork-loaded/);
+  await expect.poll(()=>image.evaluate(node=>Number(getComputedStyle(node).opacity))).toBe(1);
+  await expect(poster.locator('.poster-fallback')).toHaveCount(0);
+});
+
+test('missing artwork uses the native-style subdued fallback instead of a browser image error',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('main .card .poster .poster-fallback').first()).toBeVisible();
+  const poster=page.locator('main .card .poster').first();
+  await expect(poster.locator('img')).toHaveCount(0);
+  await expect(poster).not.toContainText('▷');
+});
