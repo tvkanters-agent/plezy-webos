@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 0.2.6 alpha — Simkl queue and upstream ID parity (2026-10-26)
+
+- Fix a reproduced port bug where a saved title-only stop returned `404 id_err` and prevented valid current playback from sending start/pause.
+- Skip/remove unusable legacy stops; isolate failures for older identified titles from current playback, while retaining account and quota protections.
+- Fetch Plex movie or parent-show IDs using native Plezy's dedicated `includeGuids=1` query and preserve legacy GUID support.
+- Restore upstream ID-only payloads and skip unmatched items. Remove title/year guesses and the unnecessary Fribb download/remapping (`needsFribb=false` in native Simkl).
+- No Simkl reconnect or Plex metadata edits are needed for the queue repair. Old ID-less history cannot be recovered from records that lack a Plex rating key.
+- Validated 67 unit tests and 53 browser tests, plus Chromium 53 bundle and IPK checks. Real TV/account verification remains outstanding.
+
 ## 0.2.5 alpha — upstream WatchedIndicator, EpisodeCard and detail actions
 
 - Port show/season unwatched counts; episode lists now show 16:9 episode stills, synopsis and metadata.

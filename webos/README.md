@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.5 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, version 0.2.6 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Build the 0.2.5 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.5 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
+4. **Download the [0.2.6 IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.6)**, build it using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for version 0.2.6 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.5_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.6_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -176,3 +176,7 @@ To reduce artwork stalls on webOS 4.4 / Chromium 53, Plezy asks Plex for pre-siz
 - Back restores the covered library/home DOM, focus and scroll position without a fresh server fetch. Left from the first artwork column returns focus to the sidebar. Scrollbars are visually hidden on TV as in Flutter's immersive browsing UI, while wheel and remote scrolling remain functional.
 
 **Fidelity still incomplete:** this is a focused translation of the affected components, not the Flutter widget tree running on webOS. Full navigation, detail-screen geometry, action menus and TV-level performance require additional source-by-source porting and physical-device verification.
+
+### 0.2.6 Simkl syncing repair
+
+Install the [0.2.6 release](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v0.2.6). No account relinking is required. Old saved stops with empty IDs are removed automatically on the next playback action or explicit retry; those old records cannot be recovered because they did not save a Plex rating key. A rejected older ID-bearing stop remains retryable but no longer cancels a new viewing's start/pause. Current titles use the same dedicated movie/show ID fetch and ID-only bodies as native Plezy, without Fribb remapping. Local automated validation passes; live TV/Simkl verification remains required.
