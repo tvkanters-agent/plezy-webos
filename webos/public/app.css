@@ -425,6 +425,17 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .detail-info .ratings-chip .rating-badge img { object-fit:contain; margin-right:4px; }
 .detail-info .ratings-chip .rating-badge svg { height:16px;width:16px;margin-right:4px; }
 .detail-info .ratings-chip .rating-monochrome { filter:brightness(0) invert(1); }
+/* Keep the one Plezy-style score pill visible while all enabled rating
+   providers settle. No scores are inserted until the spinner disappears. */
+.detail-info .ratings-chip.rating-loading { min-width:50px; min-height:32px;
+  justify-content:center; }
+.rating-spinner { display:inline-block; width:17px; height:17px; flex:0 0 17px;
+  border:2px solid rgba(237,237,237,.25); border-top-color:#ededed;
+  border-radius:50%; -webkit-animation:player-spin .85s linear infinite;
+  animation:player-spin .85s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .rating-spinner { -webkit-animation:none; animation:none; }
+}
 .rating-sheet-rows { margin:12px 0 18px; }
 .rating-sheet-rows .rating-row { display:flex; align-items:center; width:100%;
   border-radius:12px; min-height:70px; padding:7px 10px; margin:0 0 8px;

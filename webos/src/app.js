@@ -838,12 +838,25 @@ async function render() {
       // Plezy _buildFittedHeroChips: branded scores are ONE tonal chip
       // in the SAME metadata run as year/runtime/certification, not a new row.
       const ratingLine=el('span',undefined,'ratings-chip');
-      ratingLine.setAttribute('aria-label','Community ratings');
-      let ownRating=null,community=[],ownRatings=plexRatings(api instanceof Plex ?
-        (isSeason||isEpisode?showRaw:raw) : raw);
       const ratingItem=isSeason||isEpisode?parentShow:item;
+      const simklReady=validSession(state.simkl),mdblistReady=!!state.mdblistApiKey;
+      // Don't block Plex-only scores when no external rating source is active.
+      let ratingsLoading=!!(api instanceof Plex&&ratingItem&&
+        ['movie','show'].includes(ratingItem.type)&&(simklReady||mdblistReady));
+      let ownRating=null,ownRatingChanged=false,community=[],ownRatings=plexRatings(api instanceof Plex ?
+        (isSeason||isEpisode?showRaw:raw) : raw);
       function showRatings() {
         ratingLine.textContent='';
+        ratingLine.classList.toggle('rating-loading',ratingsLoading);
+        ratingLine.setAttribute('aria-busy',String(ratingsLoading));
+        ratingLine.setAttribute('aria-label',ratingsLoading?'Loading community ratings':'Community ratings');
+        if(ratingsLoading){
+          const spinner=el('span',undefined,'rating-spinner');
+          spinner.setAttribute('aria-hidden','true');
+          ratingLine.append(spinner);
+          if(!ratingLine.isConnected)chips.append(ratingLine);
+          return;
+        }
         const all=mergeRatings(ownRatings,community);
         all.forEach(score=>{
           const details=ratingBadgeInfo(score.source,score.value);
@@ -877,16 +890,17 @@ async function render() {
         if(!ratingLine.children.length&&ratingLine.isConnected)ratingLine.remove();
       }
       showRatings();
-      if(api instanceof Plex&&ratingItem) {
+      if(ratingsLoading) {
         const expected=currentRevision;
-        // Request the complete GUID set: Plex episode/series listing rows
-        // often omit the IDs that community services need.
-        const rawIds=ratingItem.raw||{};
-        Promise.resolve().then(async()=>{
-          const resolved=Object.assign({},rawIds);
-          // Plezy asks the actual media metadata for all catalog IDs; a
-          // headline Plex GUID on a show is not necessarily the one Simkl can
-          // match. Merge every available IMDb, TMDB and TVDB ID from detail.
+        const stillCurrent=()=>revision===expected&&info.isConnected;
+        // All active sources start independently. Keep the loader inside
+        // the pill, then publish their combined result in a single render.
+        const personalTask=simklReady?simklTracker.getTitleRating(api,ratingItem)
+          .then(score=>{if(stillCurrent()&&!ownRatingChanged)ownRating=score;})
+          .catch(error=>console.warn('Personal Simkl rating unavailable',error)):Promise.resolve();
+        const communityTask=(async()=>{
+          const resolved=Object.assign({},ratingItem.raw||{});
+          // Plex listing rows can omit GUIDs required by Simkl / MDBList.
           try {
             const ids=await api.fetchExternalIds(ratingItem.id);
             const old=Array.isArray(resolved.Guid)?resolved.Guid:[];
@@ -896,30 +910,33 @@ async function render() {
                 resolved.Guid.push({id:key+'://'+value});
             }
           }catch(error){console.warn('Could not enrich Plex rating IDs',error);}
-          // Port CommunityRatingsLoader.load: emit updated scores as EACH
-          // provider answers. Slow/blocked Simkl must not hold MDBList's
-          // scores hostage (or vice versa).
-          const answers=[];
-          const received=(origin,ratings)=>{
-            if(revision!==expected||!info.isConnected)return;
-            if(!ratings?.length)return;
-            answers.push({origin,ratings});
-            community=mergeProviderRatings(answers);
-            showRatings();
-          };
-          simklTracker.getCommunityRatings(resolved,ratingItem.type)
-            .then(ratings=>received('simkl',ratings))
-            .catch(error=>console.warn('Simkl ratings unavailable',error));
-          if(state.mdblistApiKey)fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)
-            .then(ratings=>received('mdblist',ratings))
-            .catch(error=>console.warn('MDBList ratings unavailable',error));
-        }).catch(error=>console.warn('Rating IDs unavailable',error));
-        if(validSession(state.simkl)&&['movie','show'].includes(ratingItem.type)) {
-          simklTracker.getTitleRating(api,ratingItem).then(score=>{
-            if(revision!==expected||!info.isConnected)return;
-            ownRating=score;showRatings();
-          }).catch(()=>{});
-        }
+          if(!stillCurrent())return;
+          const requests=[];
+          if(simklReady)requests.push({origin:'simkl',
+            promise:simklTracker.getCommunityRatings(resolved,ratingItem.type)});
+          if(mdblistReady)requests.push({origin:'mdblist',
+            promise:fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)});
+          // Promise.allSettled is unavailable in older webOS Chromium. Handle
+          // each provider independently so one failure never hides the rest.
+          const answers=await Promise.all(requests.map(async request=>{
+            try{return {origin:request.origin,ratings:await request.promise};}
+            catch(error){
+              console.warn(request.origin+' ratings unavailable',error);
+              return {origin:request.origin,ratings:[]};
+            }
+          }));
+          if(stillCurrent())community=mergeProviderRatings(answers);
+        })();
+        Promise.all([communityTask,personalTask]).then(()=>{
+          if(!stillCurrent())return;
+          ratingsLoading=false;
+          showRatings();
+        }).catch(error=>{
+          console.warn('Rating loading failed',error);
+          if(!stillCurrent())return;
+          ratingsLoading=false;
+          showRatings();
+        });
       }
       const genreChips = el('div', undefined, 'detail-chips detail-genres');
       (Array.isArray(raw.Genre) && raw.Genre.length ? raw.Genre : showRaw.Genre || []).forEach(genre => {
@@ -1007,7 +1024,7 @@ async function render() {
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
-            if(tracker && ratingItem?.id===item.id){ownRating=value;showRatings();}
+            if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
           }),'rating','detail-icon'));
         const extra = [];
         if (parentShow) extra.push({label:'View series', action:() =>
@@ -1042,7 +1059,7 @@ async function render() {
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
-            if(tracker && ratingItem?.id===item.id){ownRating=value;showRatings();}
+            if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
           }),'rating','detail-icon'));
         if (api instanceof Plex && item.type === 'episode' && raw.parentRatingKey) {
           actions.append(detailButton('Next episode', async () => {

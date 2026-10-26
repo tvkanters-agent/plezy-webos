@@ -948,10 +948,60 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  expect(called[0].searchParams.get('apikey')).toBe('example-key');
  const bubble=page.locator('.detail-chips > .ratings-chip');
  await expect(bubble).toHaveCount(1);
+ await expect(bubble).toHaveAttribute('aria-busy','true');
+ await expect(bubble.locator('.rating-spinner')).toHaveCount(1);
+ await expect(bubble.locator('.rating-badge')).toHaveCount(0);
+ // Even though MDBList has returned, the pill must not grow in stages.
+ await page.evaluate(()=>window.releaseCatalog());
+ await expect(bubble).toHaveAttribute('aria-busy','false');
+ await expect(bubble.locator('.rating-spinner')).toHaveCount(0);
  for(const provider of ['IMDb','Rotten Tomatoes critics','Rotten Tomatoes audience','metacritic','letterboxd','trakt']){
    await expect(bubble.locator('.rating-badge[aria-label^="'+provider+'"]')).toHaveCount(1);
  }
  await expect(bubble.locator('img[src="assets/rating_icons/rt_fresh.svg"]')).toHaveCount(1);
  await expect(bubble.locator('img[src="assets/trakt_circlemark.svg"]')).toHaveCount(1);
- await page.evaluate(()=>window.releaseCatalog());
+});
+
+
+test('rating chip waits for personal and community ratings before showing scores',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',
+     scope:'media:read media:write',expiresAt:Date.now()+3600000},
+   deviceId:'dev',active:'plex',
+   servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const film={ratingKey:'loading-film',type:'movie',title:'Ratings Loading Film',
+   rating:7.4,ratingImage:'imdb://rating',Guid:[{id:'imdb://tt11223344'}]};
+ await mockCatalogBridge(page,{simkl:{rating:8.1,votes:100},imdb:{rating:8.7,votes:9000}});
+ let releasePersonal;
+ await page.route('https://api.simkl.com/**',async route=>{
+   if(new URL(route.request().url()).pathname==='/sync/ratings/movies'){
+     await new Promise(resolve=>{releasePersonal=resolve;});
+     return route.fulfill({json:[{movie:{ids:{imdb:'tt11223344'}},user_rating:9}]});
+   }
+   return route.fulfill({json:[]});
+ });
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   const rows=path==='/hubs'||path==='/library/metadata/loading-film'?[film]:[];
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?
+     {Hub:[{title:'Movies',Metadata:rows}]}:{Metadata:rows,totalSize:rows.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Ratings Loading Film/}).first().click();
+ const bubble=page.locator('.detail-chips > .ratings-chip');
+ await expect(bubble).toHaveAttribute('aria-busy','true');
+ await expect(bubble.locator('.rating-spinner')).toHaveCount(1);
+ await expect.poll(()=>typeof releasePersonal).toBe('function');
+ await expect.poll(()=>page.evaluate(()=>window.catalogCalls.some(call=>
+   call.path.startsWith('/movies/123')))).toBe(true);
+ // Both the Plex score and completed community scores stay hidden until
+ // the last enabled request (here: the personal rating) completes.
+ await expect(bubble.locator('.rating-badge')).toHaveCount(0);
+ releasePersonal();
+ await expect(bubble).toHaveAttribute('aria-busy','false');
+ await expect(bubble.locator('.rating-spinner')).toHaveCount(0);
+ await expect(bubble.locator('.rating-badge[aria-label^="IMDb"]')).toHaveCount(1);
+ await expect(bubble.locator('.rating-badge[aria-label^="Simkl"]')).toHaveCount(1);
+ await expect(bubble.locator('.rating-personal')).toHaveAttribute(
+   'aria-label','Your Simkl rating 9/10');
 });
