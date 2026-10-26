@@ -313,23 +313,23 @@ function episodeCard(item) {
   return node;
 }
 async function paginated(loader, currentRevision, options = {}) {
-  let start = 0;
+  // Plezy loads sparse pages automatically as the grid approaches the viewport.
+  // There is no manually activated "Load more" button.
+  let start = 0, loading = false, completed = false;
   const grid = options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
-  const more = button('Load more', load), errorMessage = el('p', '', 'error');
+  const sentinel = el('div', undefined, 'page-sentinel');
+  const errorMessage = el('p', '', 'error');
   errorMessage.setAttribute('role', 'alert');
-  main.append(grid, more, errorMessage);
+  main.append(grid, sentinel, errorMessage);
   async function load() {
-    const hadFocus = document.activeElement === more;
-    const previousCount = grid.children.length;
-    more.disabled = true;
+    if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
+    loading = true;
     errorMessage.textContent = '';
     try {
       const page = await loader(start);
-      if (!grid.isConnected) return;
-      // Populate in short batches: rendering 60 DOM cards in one task blocks
-      // Chromium 53's input thread just as badly as decoding their images.
+      if (currentRevision !== revision || !grid.isConnected) return;
       for (let i = 0; i < page.items.length; i += 8) {
-        if (!grid.isConnected) return;
+        if (currentRevision !== revision || !grid.isConnected) return;
         const fragment = document.createDocumentFragment();
         page.items.slice(i, i + 8).forEach(item =>
           fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
@@ -338,26 +338,41 @@ async function paginated(loader, currentRevision, options = {}) {
         if (i + 8 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
       }
       start += page.items.length;
-      schedulePosters();
-      more.hidden = !page.items.length || start >= page.total;
-      more.textContent = 'Load more';
+      completed = !page.items.length || start >= page.total;
+      if (completed) cleanup();
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
-      // The Load more button disappears on the final page. Move remote focus
-      // to newly loaded content instead of leaving it on a hidden control.
-      if (hadFocus && document.activeElement === more) {
-        const target = grid.children[previousCount] || grid.lastElementChild;
-        if (target && typeof target.focus === 'function') target.focus();
-        else main.focus();
-      }
+      schedulePosters();
     } catch (error) {
-      if (grid.isConnected) {
+      if (currentRevision === revision && grid.isConnected)
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
-        more.textContent = 'Retry loading';
-        more.hidden = false;
+    } finally {
+      loading = false;
+      if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent) {
+        // Let the DOM paint before measuring, and keep filling short libraries.
+        requestAnimationFrame(check);
       }
-    } finally { more.disabled = false; }
+    }
   }
+  function check() {
+    if (currentRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
+    if (loading) return;
+    const rect = sentinel.getBoundingClientRect();
+    const pane = main.getBoundingClientRect();
+    if (rect.top <= pane.bottom + pane.height * 0.8) load();
+  }
+  const onScroll = () => check();
+  main.addEventListener('scroll', onScroll);
+  const observer = typeof IntersectionObserver !== 'undefined'
+    ? new IntersectionObserver(check, {root: main, rootMargin: '700px'}) : null;
+  if (observer) observer.observe(sentinel);
+  const cleanup = () => {
+    main.removeEventListener('scroll', onScroll);
+    if (observer) observer.disconnect();
+  };
+  // Destroy the observer once a different page replaces the grid.
   await load();
+  if (completed) cleanup();
+  else requestAnimationFrame(check);
 }
 async function render() {
   const currentRevision = ++revision;
