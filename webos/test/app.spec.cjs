@@ -693,7 +693,7 @@ test('library rail enters first poster, restores poster on return, and moves to 
   await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
   await expect(page.getByLabel('Title',{exact:true})).toBeFocused();
 });
-test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and allow rating',async({page})=>{
+test('Plex details show attributed IMDb/Simkl scores, 1080p, cast fallback and allow rating',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',scope:'media:read media:write',expiresAt:Date.now()+3600000},
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
@@ -702,13 +702,17 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
   Rating:[{image:'imdb://image.rating',type:'audience',value:8.3}],
   Role:[{tag:'Actor Example',role:'Detective',thumb:'/cast/actor.jpg'}],
   Media:[{videoResolution:'1080',Part:[{id:'part',key:'/movie.mp4'}]}]};
- const put=[];
+ const put=[], castPhotos=[];
  await mockCatalogBridge(page,{simkl:{rating:8.1,votes:120},imdb:{rating:8.6,votes:9000}});
  await page.route('https://api.simkl.com/**',route=>route.fulfill({json:[]}));
  await page.route('http://plex.test/**',route=>{
    const url=new URL(route.request().url()),path=url.pathname;
    if(path==='/:/rate') {put.push({method:route.request().method(),key:url.searchParams.get('key'),
      rating:url.searchParams.get('rating')});return route.fulfill({status:200,body:''});}
+   if(path==='/photo/:/transcode') {
+     castPhotos.push(url.searchParams.get('url'));
+     return route.fulfill({status:404,body:''});
+   }
    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'Movies',Metadata:[film]}]}}});
    if(path==='/library/metadata/film')return route.fulfill({json:{MediaContainer:{Metadata:[{...film,
      Guid:[{id:'imdb://tt1234567'}]}]}}});
@@ -726,7 +730,9 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await expect(page.getByRole('heading',{name:'Cast'})).toBeVisible();
  await expect(page.getByText('Actor Example')).toBeVisible();
  await expect(page.getByText('Detective')).toBeVisible();
- await expect(page.locator('.cast-picture img')).toHaveAttribute('src',/cast%2Factor/);
+ await expect.poll(()=>castPhotos).toContain('/cast/actor.jpg');
+ await expect(page.locator('.cast-picture .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.cast-picture img')).toHaveCount(0);
  await page.getByRole('button',{name:'Rate',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Rate The Great Film'})).toBeVisible();
  const plex=page.locator('.rating-row[data-service="Plex"]');
