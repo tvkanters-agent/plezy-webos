@@ -26,7 +26,8 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   let generation = 0, pending = null, scrollTimer = null, pinnedIndex = null;
   let previousScrollTop = main.scrollTop;
   const helper = alphaIndex(characters);
-  const alive = () => !destroyed && isActive() && grid.isConnected;
+  let activeCheck = isActive;
+  const alive = () => !destroyed && activeCheck() && grid.isConnected;
   const loadedEnd = () => rangeStart + items.length;
   const allCards = () => Array.from(grid.querySelectorAll('.card'));
   const paint = (data, mode) => {
@@ -183,7 +184,10 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
       }
     }
   }
-  retry.addEventListener('click', () => { if (pending) pending(); });
+  retry.addEventListener('click', () => {
+    error.textContent = '';
+    if (pending) pending();
+  });
   const updateLetter = () => {
     if (!alive()) return;
     // Ignore our programmatic jump scroll, as in _hasJumpPin.
@@ -195,7 +199,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     rail.update(helper.currentLetter(firstVisibleIndex()));
   };
   const check = () => {
-    if (!alive() || loading) return;
+    if (!alive() || loading || error.textContent) return;
     const pane = main.getBoundingClientRect(), content = grid.getBoundingClientRect();
     if (content.bottom < pane.bottom + pane.height * .8 && loadedEnd() < total)
       loadAdjacent('append');
@@ -223,6 +227,17 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   requestAnimationFrame(check);
   return {
     element: rail.element, handleKey: rail.handleKey, focus: rail.focus,
+    suspend() {
+      clearTimeout(scrollTimer);
+      rail.element.hidden = true;
+    },
+    resume(nextIsActive) {
+      activeCheck = nextIsActive;
+      rail.element.hidden = false;
+      rail.draw();
+      updateLetter();
+      requestAnimationFrame(check);
+    },
     destroy() {
       destroyed = true;
       ++generation;
