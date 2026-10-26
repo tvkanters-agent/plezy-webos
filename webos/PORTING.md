@@ -161,3 +161,8 @@ Alphabet-grid measurement reads the first row and the first card of row two,
 matching upstream's shared column/row metrics. Later rows need no measurements.
 The single-row height fallback and resize-triggered page realignment remain;
 browser tests cover the measurement bound and jump placement in grid and flex.
+
+The artwork queue batches viewport reads before assigning image sources, avoiding
+read/write/read layout work in Chromium. It retains the two-request limit,
+prefetch margins, document order, error handling and OptimizedMediaImage fade.
+Tests verify read-before-write ordering, deferred artwork and concurrency.

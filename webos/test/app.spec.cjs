@@ -442,6 +442,23 @@ test('libraries are navigable in the rail and can be hidden and restored',async(
 
 test('poster loading caps initial concurrent artwork requests',async({page})=>{
   const pending=[];
+  await page.addInitScript(() => {
+    window.artworkOperations = [];
+    const measured = new Set();
+    const bounds = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.matches('img[data-poster-src]')) {
+        measured.add(this);
+        window.artworkOperations.push('read');
+      }
+      return bounds.call(this);
+    };
+    const src = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {...src, set(value) {
+      if (measured.has(this)) window.artworkOperations.push('write');
+      src.set.call(this, value);
+    }});
+  });
   await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
     deviceId:'device',active:'plex',quality:'auto',
     servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
@@ -459,6 +476,7 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
   await expect.poll(()=>pending.length).toBe(2);
   await page.waitForTimeout(75);
   expect(pending).toHaveLength(2);
+  expect(await page.evaluate(() => window.artworkOperations)).toEqual(['read','read','write','write']);
   for(const request of pending.splice(0))await request.fulfill({status:404});
 });
 

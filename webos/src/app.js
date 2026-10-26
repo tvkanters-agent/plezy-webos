@@ -540,11 +540,17 @@ function loadVisiblePosters() {
   if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) return;
   const view = main.getBoundingClientRect();
   const images = main.querySelectorAll('img[data-poster-src]');
-  for (let i = 0; i < images.length && artworkInFlight < MAX_ARTWORK_IN_FLIGHT; i++) {
+  const ready = [], capacity = MAX_ARTWORK_IN_FLIGHT - artworkInFlight;
+  // Finish geometry reads before changing src/classes. Cached artwork may
+  // invalidate style/layout immediately; interleaving forces another layout.
+  for (let i = 0; i < images.length && ready.length < capacity; i++) {
     const img = images[i], rect = img.getBoundingClientRect();
     // One row of prefetch, not a full extra TV screen of full-size posters.
     if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
         rect.right < view.left - 180 || rect.left > view.right + 180) continue;
+    ready.push(img);
+  }
+  for (const img of ready) {
     const url = img.getAttribute('data-poster-src');
     img.removeAttribute('data-poster-src');
     ++artworkInFlight;
