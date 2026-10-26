@@ -235,6 +235,11 @@ function detailMoreOptions(options) {
   group.append(trigger, menu);
   return group;
 }
+function resolutionLabel(value) {
+  if (value == null || value === '') return '';
+  const label=String(value);
+  return /^[0-9]+$/.test(label) ? label + 'p' : label.toUpperCase();
+}
 function title(text, subtitle) {
   main.append(el('h1', text));
   if (subtitle) main.append(el('p', subtitle, 'intro'));
@@ -433,7 +438,7 @@ function episodeCard(item) {
   if (item.summary) details.append(el('p', item.summary, 'episode-summary'));
   const metadata = [item.duration ? time(item.duration) : '',
     item.raw?.originallyAvailableAt || item.raw?.originallyAvailableAt,
-    item.raw?.Media?.[0]?.videoResolution || ''].filter(Boolean);
+    resolutionLabel(item.raw?.Media?.[0]?.videoResolution)].filter(Boolean);
   if (metadata.length) details.append(el('small', metadata.join('  •  '), 'episode-row-meta'));
   node.append(image, details);
   return node;
@@ -664,8 +669,7 @@ async function render() {
       const media = raw.Media && raw.Media[0] || {};
       const facts = [raw.year || showRaw.year, raw.editionTitle, raw.contentRating || showRaw.contentRating,
         item.duration ? time(item.duration) : '',
-        media.videoResolution ? (/^[0-9]+$/.test(String(media.videoResolution)) ?
-          String(media.videoResolution) + 'p' : String(media.videoResolution).toUpperCase()) : ''].filter(Boolean);
+        resolutionLabel(media.videoResolution)].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
       if (chips.children.length) info.append(chips);
       const ratingLine = el('div', undefined, 'rating-line');
@@ -785,7 +789,7 @@ async function render() {
           const select = el('select'); select.setAttribute('aria-label', 'Media version');
           select.dataset.focus = 'media-version';
           versions.forEach((media, index) => {
-            const label = [media.videoResolution, media.videoCodec, media.audioCodec]
+            const label = [resolutionLabel(media.videoResolution), media.videoCodec, media.audioCodec]
               .filter(Boolean).join(' · ');
             const option = el('option', 'Version ' + (index + 1) + (label ? ' · ' + label : ''));
             option.value = String(index); select.append(option);
