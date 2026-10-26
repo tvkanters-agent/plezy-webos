@@ -176,7 +176,9 @@ function navigation() {
         if (route.type === 'settings') render();
       }).catch(() => { if (currentApi === api) libraryLoading = false; });
     }
-    nav.append(railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search'));
+    const searchLink = railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search');
+    searchLink.dataset.navId = 'search';
+    nav.append(searchLink);
   }
   const settingsLink = railButton('Settings', () => go({type:'settings'}), route.type === 'settings' ? 'active' : '', 'settings');
   settingsLink.dataset.navId = 'settings';
@@ -808,6 +810,14 @@ window.addEventListener('keydown', event => {
   // Up/Down stay in the current rail or page. A left press in the sidebar
   // never jumps diagonally to a different item in the sidebar.
   if (dialog.hidden && !player.active && inRail && direction === 'left') return;
+  // The rail is one focus zone. RIGHT must leave it even if another rail
+  // item happens to be geometrically to the right (indented libraries).
+  if (dialog.hidden && !player.active && inRail && direction === 'right') {
+    const first = main.querySelector('button:not(:disabled),input,select');
+    if (first) focusWithoutJump(first);
+    else { main.tabIndex = -1; focusWithoutJump(main); }
+    return;
+  }
   const validControls = scope => Array.from(scope.querySelectorAll(
     'button:not(:disabled),input,select')).filter(node =>
       node !== current && node.getClientRects().length && !node.hidden);
@@ -839,12 +849,6 @@ window.addEventListener('keydown', event => {
         : Math.max(120, main.clientHeight * .65);
       main.scrollTop = Math.max(0, main.scrollTop + delta);
       schedulePosters();
-      return;
-    }
-    if (inRail && direction === 'right') {
-      const first = main.querySelector('button:not(:disabled),input,select');
-      if (first) focusWithoutJump(first);
-      else { main.focus(); main.scrollTop = 0; }
       return;
     }
     return;
