@@ -136,3 +136,14 @@ The browser-level letter rail and title DOM snapshot are preserved during
 navigation to a media detail and back. TV-only actual remote and real Plex/Jellyfin
 library geometry still require hardware verification; desktop Playwright tests
 cover server requests, navigation, focus and fallbacks.
+
+### Alphabet jump and focus clearance
+
+`LibraryBrowseTab._gridTopPadding` reserves decoration clearance separately
+from page chrome; `_navigateToGridNearScroll` selects the last column of the
+jumped row. The HTML port retains its existing 10px grid decoration padding
+at the viewport edge when jumping. Both index lookup and D-pad reveal use
+that same inset (read from the grid), never the outer main padding. This
+small browser geometry adaptation leaves the preceding row outside the pane
+and prevents a second scroll when focus enters or crosses the target row.
+Regression coverage exercises both CSS Grid and Chromium 53's flex fallback.

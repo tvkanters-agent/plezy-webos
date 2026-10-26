@@ -4,6 +4,12 @@
 // cumulative offset without loading all titles before it.
 import {alphaIndex, alphaPageStart, createAlphaJumpBar} from './alpha-bar.js';
 
+// Use the grid's decoration clearance, not the outer page/header padding.
+// Shared by jump placement and D-pad reveal so focusing cannot move the row.
+export function alphabetTopInset(grid) {
+  return parseFloat(window.getComputedStyle(grid).paddingTop) || 0;
+}
+
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
   card, schedulePosters, focusWithoutJump, isActive}) {
   const shell = document.querySelector('#shell');
@@ -57,10 +63,11 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     bottomSpace.style.height = (Math.max(0, totalRows - endRows) * rowHeight) + 'px';
   };
   const firstVisibleIndex = () => {
-    const gridTop = grid.offsetTop + 10;
+    const inset = alphabetTopInset(grid);
+    const gridTop = grid.offsetTop + inset;
     // A small epsilon avoids rounding a correctly aligned first row into the
     // preceding row if the browser's pixel snapping loses a fraction of a px.
-    const row = Math.floor(Math.max(0, main.scrollTop - gridTop + 1) / rowHeight);
+    const row = Math.floor(Math.max(0, main.scrollTop + inset - gridTop + 1) / rowHeight);
     return Math.max(0, Math.min(total - 1, rangeStart + row * columns));
   };
   const focusGrid = () => {
@@ -97,9 +104,9 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   rail.update(helper.currentLetter(0));
   const position = index => {
     const row = Math.floor((index - rangeStart) / columns);
-    // Position the selected row flush with the viewport, like Plezy's
-    // scrollOffsetForItemIndex. Extra top padding exposes the preceding row.
-    main.scrollTop = Math.max(0, grid.offsetTop + 10 + row * rowHeight);
+    // Keep only the grid's focus-decoration clearance above the target row.
+    // Page padding includes header spacing and would expose the previous row.
+    main.scrollTop = Math.max(0, grid.offsetTop + row * rowHeight);
     previousScrollTop = main.scrollTop;
     pinnedIndex = index; // Plezy pins a jump until the next user scroll.
     rail.update(helper.currentLetter(index));

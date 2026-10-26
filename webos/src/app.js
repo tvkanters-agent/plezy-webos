@@ -4,7 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
-import {mountAlphabetLibrary} from './library-alpha.js';
+import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
@@ -110,10 +110,8 @@ function focusWithoutJump(target, reveal = true) {
     const item = target.getBoundingClientRect();
     if (vertical) {
       const view = vertical.getBoundingClientRect();
-      // Alphabet jumps deliberately align the first grid row to the top.
-      // Applying the normal 32px focus margin here drags the previous row
-      // back into view on the next D-pad press.
-      const topPad = target.closest && target.closest('.alpha-window-grid') ? 0 : 32;
+      const alphaGrid = target.closest && target.closest('.alpha-window-grid');
+      const topPad = alphaGrid ? alphabetTopInset(alphaGrid) : 32;
       const bottomPad = 32;
       if (item.top < view.top + topPad) dy = item.top - view.top - topPad;
       else if (item.bottom > view.bottom - bottomPad) dy = item.bottom - view.bottom + bottomPad;

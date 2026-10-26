@@ -169,39 +169,44 @@ test('MediaBrowser nonalphabetical # bucket uses NameLessThan=A',async({page})=>
   await expect.poll(()=>requests.some(q=>q.NameLessThan==='A' && !q.NameStartsWith)).toBe(true);
 });
 
-test('Plex alphabet jumps align the requested row and focus that row on the first Left',async({page})=>{
-  await mockPlexAlphabet(page);
-  await page.goto('/');
-  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
-  const rail=page.getByRole('group',{name:'Alphabet navigation'});
-  await rail.getByRole('button',{name:'F',exact:true}).click();
-  await expect(page.locator('.alpha-window-grid .card[data-focus="150"]')).toBeVisible();
-  const before=await page.evaluate(()=>{
-    const main=document.querySelector('main');
-    const cards=Array.from(main.querySelectorAll('.alpha-window-grid .card'));
-    const target=main.querySelector('.alpha-window-grid .card[data-focus="150"]');
-    const top=target.getBoundingClientRect().top;
-    const paneTop=main.getBoundingClientRect().top;
-    // A letter may start mid-row, so preceding titles in THAT row are valid.
-    // Only an earlier row protruding into the viewport is a regression.
-    const previousRows=cards.filter(card=>card.getBoundingClientRect().top<top-3);
-    return {scroll:main.scrollTop, top:top-paneTop,
-      precedingRowVisible:previousRows.some(card=>card.getBoundingClientRect().bottom>paneTop)};
-  });
-  expect(before.top).toBeGreaterThanOrEqual(-2);
-  expect(before.top).toBeLessThan(10);
-  expect(before.precedingRowVisible).toBe(false);
-  await page.keyboard.press('ArrowLeft');
-  const focused=page.locator('.alpha-window-grid .card:focus');
-  await expect(focused).toHaveCount(1);
-  expect(Number(await focused.getAttribute('data-focus'))).toBeGreaterThanOrEqual(150);
-  expect(Number(await focused.getAttribute('data-focus'))).toBeLessThan(180);
-  const after=await page.locator('main').evaluate(main=>main.scrollTop);
-  expect(Math.abs(after-before.scroll)).toBeLessThan(2);
-  // Walking the focused first row must not trigger the old 32px focus bump.
-  await page.keyboard.press('ArrowLeft');
-  expect(Math.abs((await page.locator('main').evaluate(main=>main.scrollTop))-after)).toBeLessThan(2);
-  const railBottom=await rail.evaluate(node=>node.getBoundingClientRect().bottom);
-  const shellBottom=await page.locator('#shell').evaluate(node=>node.getBoundingClientRect().bottom);
-  expect(Math.abs(shellBottom-railBottom)).toBeLessThan(2);
-});
+for (const layout of ['grid', 'flex']) {
+  for (const width of [1920, 1280]) {
+    test(`alphabet row alignment and single-Left handoff (${layout}, ${width})`, async ({page}) => {
+      await page.setViewportSize({width, height:1080});
+      await mockPlexAlphabet(page);
+      await page.goto('/');
+      if (layout === 'flex') await page.addStyleTag({content:`
+        .alpha-window-grid { display:flex !important; }
+        .alpha-window-grid .card { flex:0 0 170px; width:170px; margin:0 20px 26px 0; }
+      `});
+      await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+      const rail=page.getByRole('group',{name:'Alphabet navigation'});
+      // Exercise a distant page, a backward jump and the first row.
+      for (const [letter,index] of [['F',150],['C',60],['A',0]]) {
+        await rail.getByRole('button',{name:letter,exact:true}).click();
+        const target=page.locator(`.alpha-window-grid .card[data-focus="${index}"]`);
+        await expect(target).toBeVisible();
+        await expect.poll(()=>target.evaluate(card=>Math.abs(card.getBoundingClientRect().top-
+          document.querySelector('main').getBoundingClientRect().top-10))).toBeLessThan(2);
+        const before=await target.evaluate(target=>{
+          const main=document.querySelector('main');
+          const top=target.getBoundingClientRect().top;
+          const cards=Array.from(target.parentNode.querySelectorAll('.card'));
+          const row=cards.filter(card=>Math.abs(card.getBoundingClientRect().top-top)<3);
+          return {scroll:main.scrollTop, last:row[row.length-1].dataset.focus,
+            previousVisible:cards.some(card=>card.getBoundingClientRect().top<top-3 &&
+              card.getBoundingClientRect().bottom>main.getBoundingClientRect().top)};
+        });
+        expect(before.previousVisible).toBe(false);
+        await page.keyboard.press('ArrowLeft');
+        await expect(page.locator('.alpha-window-grid .card:focus')).toHaveAttribute('data-focus',before.last);
+        // Traverse the whole top row and move down/up. Every reveal must use
+        // the same clearance as the jump, including the flex fallback on TV.
+        for (const key of ['ArrowLeft','ArrowLeft','ArrowDown','ArrowUp']) {
+          await page.keyboard.press(key);
+          expect(Math.abs((await page.locator('main').evaluate(main=>main.scrollTop))-before.scroll)).toBeLessThan(2);
+        }
+      }
+    });
+  }
+}

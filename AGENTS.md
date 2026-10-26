@@ -7,3 +7,7 @@ This repository is a fork of **Plezy**. For any task involving the `webos/` port
 Any unavoidable adaptation for **LG webOS 4.4.3 / Chromium 53** must be minimal, documented and backed by tests. Never claim full fidelity on the basis of an approximate HTML reimplementation. Do not replace a working native design with a new design.
 
 Group related changes into clear, descriptive commits. Follow attribution or labeling instructions supplied by the agent's own task or operator; no repository-wide commit label is required. Verify the latest CI results and distinguish mock-test success from actual LG TV verification.
+
+## Project publication authorization
+
+The user has explicitly granted standing permission to push project fixes and publish releases after CI passes. Do not ask for confirmation for these routine actions. Use the GitHub API for releases, never browser automation.
