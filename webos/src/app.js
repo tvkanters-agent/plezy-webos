@@ -218,7 +218,7 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
     heading.append(el('strong',service),el('small',tracker?'Your Simkl rating':'Your Plex rating'));
     const stars=el('div',undefined,'rating-stars');
     const status=el('span','','rating-service-status');
-    let chosen=Math.max(0,Math.min(10,Math.round(Number(initial)||0))),pending=false;
+    let chosen=Math.max(0,Math.min(10,Math.round(Number(initial)||0))),pending=false,dirty=false;
     const path='M12 2.5l2.94 5.95 6.56.95-4.75 4.64 1.12 6.54L12 17.49l-5.87 3.09 1.12-6.54L2.5 9.4l6.56-.95z';
     function renderStars() {
       stars.textContent='';
@@ -252,6 +252,7 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
           event.preventDefault();event.stopPropagation();
           const x=event.offsetX;
           chosen=i*2+(x<holder.clientWidth/2?1:2);
+          dirty=true;
           renderStars();save();
         };
         stars.append(holder);
@@ -259,6 +260,7 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
       control.setAttribute('aria-label',service+' rating '+chosen+' out of 10');
     }
     control.ratingChange=delta=>{
+      dirty=true;
       chosen=Math.max(0,Math.min(10,chosen+delta));renderStars();
       status.textContent=chosen?'Selected '+(chosen/2).toFixed(1)+' stars':'Not rated';
     };
@@ -280,6 +282,9 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
     if(!firstRow)firstRow=control;
     shell.append(control);
     return {control,status,setScore:value=>{
+      // An in-flight Simkl read must not replace a user's selection or save
+      // result after they have begun editing this service.
+      if(dirty||pending)return;
       chosen=Number(value)||0;renderStars();status.textContent=chosen?'Your rating '+(chosen/2).toFixed(1)+' stars':'Not rated';
     }};
   }
@@ -295,7 +300,9 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
   }
   dialog.append(button('Close',closeRatingSheet));
   dialog.hidden=false;
-  focusFirst(dialog,firstRow);
+  // Dialog focus must be synchronous: a queued rAF to Plex's first row
+  // otherwise steals focus after the user selects the Simkl row.
+  focusWithoutJump(firstRow,false);
 }
 function detailMoreOptions(options) {
   const group = el('div', undefined, 'detail-more');
