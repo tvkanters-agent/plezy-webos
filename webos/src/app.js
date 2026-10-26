@@ -896,20 +896,24 @@ async function render() {
                 resolved.Guid.push({id:key+'://'+value});
             }
           }catch(error){console.warn('Could not enrich Plex rating IDs',error);}
-          // Port CommunityRatingsLoader: each connected catalog provider
-          // replies independently, with source-owned ratings taking priority.
-          const [simkl,mdblist]=await Promise.all([
-            communityRatings(resolved,ratingItem.type),
-            fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)
-          ]);
-          return mergeProviderRatings([
-            {origin:'simkl',ratings:simkl},
-            {origin:'mdblist',ratings:mdblist}
-          ]);
-        }).then(external=>{
-          if(revision!==expected||!info.isConnected)return;
-          community=external;showRatings();
-        });
+          // Port CommunityRatingsLoader.load: emit updated scores as EACH
+          // provider answers. Slow/blocked Simkl must not hold MDBList's
+          // scores hostage (or vice versa).
+          const answers=[];
+          const received=(origin,ratings)=>{
+            if(revision!==expected||!info.isConnected)return;
+            if(!ratings?.length)return;
+            answers.push({origin,ratings});
+            community=mergeProviderRatings(answers);
+            showRatings();
+          };
+          communityRatings(resolved,ratingItem.type)
+            .then(ratings=>received('simkl',ratings))
+            .catch(error=>console.warn('Simkl ratings unavailable',error));
+          if(state.mdblistApiKey)fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)
+            .then(ratings=>received('mdblist',ratings))
+            .catch(error=>console.warn('MDBList ratings unavailable',error));
+        }).catch(error=>console.warn('Rating IDs unavailable',error));
         if(validSession(state.simkl)&&['movie','show'].includes(ratingItem.type)) {
           simklTracker.getTitleRating(api,ratingItem).then(score=>{
             if(revision!==expected||!info.isConnected)return;
