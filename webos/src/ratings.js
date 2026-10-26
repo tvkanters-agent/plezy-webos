@@ -14,7 +14,8 @@ const assets={
  rottenTomatoesAudienceFresh:['rating_icons/rt_upright.svg',106.25/140],
  rottenTomatoesAudienceRotten:['rating_icons/rt_spilled.svg',143.75/108.75],
  metacritic:['rating_icons/metacritic.svg',1],letterboxd:['rating_icons/letterboxd.svg',262/97],
- simkl:['simkl_mark.svg',1],mal:['mal_mark.svg',1]
+ simkl:['simkl_mark.svg',1],mal:['mal_mark.svg',1],
+ trakt:['trakt_circlemark.svg',1],anilist:['anilist_mark.svg',1]
 };
 export function ratingBadgeInfo(source,value) {
  const key=source==='rottenTomatoes'?'rottenTomatoesCritic':source;
