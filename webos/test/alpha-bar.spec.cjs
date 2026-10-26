@@ -76,7 +76,14 @@ test('alphabet rail is reachable with right arrow, and up/down request letter ju
   const rail=page.locator('.alpha-jump-bar');
   await expect(rail).toBeVisible();
   // Last card has no right-hand grid neighbor, matching the Flutter grid.
-  await page.locator('.alpha-window-grid .card').last().focus();
+  // Choose the *last column of the first row*, not the last loaded card:
+  // background pagination may append a new row while we press RIGHT.
+  await page.locator('.alpha-window-grid .card').first().evaluate(first=>{
+    const y=first.getBoundingClientRect().top;
+    const row=Array.from(first.parentNode.querySelectorAll('.card')).filter(card=>
+      Math.abs(card.getBoundingClientRect().top-y)<4);
+    row[row.length-1].focus();
+  });
   await page.keyboard.press('ArrowRight');
   await expect(rail).toBeFocused();
   const before=await rail.locator('.alpha-letter-slot.highlighted').getAttribute('aria-label');
