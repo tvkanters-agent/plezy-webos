@@ -116,12 +116,13 @@ test('library sort controls request server-side ordering and preserve selection'
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await page.getByRole('button',{name:'Sort',exact:true}).click();
   await page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Sort',exact:true}).click();
+  await expect(page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
   await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
     new URLSearchParams(call.query).get('SortBy')==='DateCreated')).toBe(true);
   await page.getByRole('button',{name:'The Test Film',exact:true}).click();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added'})).toHaveAttribute('aria-pressed','true');
   await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
 });
 
@@ -171,13 +172,14 @@ test('unwatched filter and sort can be combined without client-side slicing',asy
   await page.getByRole('group',{name:'Filter watched status'}).getByRole('button',{name:'Unwatched',exact:true}).click();
   await page.getByRole('button',{name:'Sort',exact:true}).click();
   await page.getByRole('group',{name:'Sort library'}).getByRole('button',{name:'Recently added',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Filters',exact:true}).click();
+  await expect(page.getByRole('group',{name:'Filter watched status'}).getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
   await expect.poll(()=>calls.some(call=>call.path==='/Users/user/Items'&&
     new URLSearchParams(call.query).get('SortBy')==='DateCreated'&&
     new URLSearchParams(call.query).get('IsPlayed')==='false')).toBe(true);
   await page.getByRole('button',{name:'The Test Film',exact:true}).click();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('group',{name:'Filter watched status'}).getByRole('button',{name:'Unwatched',exact:true})).toHaveAttribute('aria-pressed','true');
 });
 
 test('Plex Next episode navigates to the next episode across seasons',async({page})=>{
