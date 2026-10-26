@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {beginSimklLink, pollSimklLink, parseSession, validSession, scrobblePayload,
-  simklMovieIds, progressPercent, SimklTracker, SIMKL_CLIENT_ID} from '../src/simkl.js';
+  simklMovieIds, findFribbSimklId, progressPercent, SimklTracker, SIMKL_CLIENT_ID} from '../src/simkl.js';
 
 const token = (value='simkl_at_example') => ({
   access_token:value,refresh_token:'simkl_rt_test',expires_in:3600,scope:'media:read media:write'
@@ -322,4 +322,18 @@ test('Simkl inherits upstream ExternalIds legacy Plex agent GUID matching',()=>{
  assert.deepEqual(simklMovieIds({Guid:[{id:'tvdb://1'}],
    guid:'com.plexapp.agents.thetvdb://2'}),{tvdb:1},
    'modern Plex Guid takes precedence over legacy scalar');
+});
+
+test('Fribb Simkl resolution prefers mapped show IDs and disambiguates seasons', () => {
+  const rows = [
+    {tvdb_id:321,simkl_id:444,season:{tvdb:1},themoviedb_id:{tv:654}},
+    {tvdb_id:321,simkl_id:555,season:{tvdb:2},themoviedb_id:{tv:654}},
+    {imdb_id:['tt1234567'],simkl_id:123,themoviedb_id:{movie:[9988]}}
+  ];
+  assert.equal(findFribbSimklId(rows,{tvdb:321},{season:1}),444);
+  assert.equal(findFribbSimklId(rows,{tvdb:321},{season:2}),555);
+  assert.equal(findFribbSimklId(rows,{tvdb:321}),null);
+  assert.equal(findFribbSimklId(rows,{tmdb:9988},{movie:true}),123);
+  assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:true}),null);
+  assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:false,season:1}),444);
 });
