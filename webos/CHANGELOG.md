@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 0.2.8 — Native resume at load
+
+- Pass the saved playback position to LG mediaOption before loading direct or HLS media, avoiding the initial load-then-seek buffering cycle.
+- Remove the Plex transcoder offset workaround; preserve the full-title timeline as upstream Plezy does.
+- Remove stale native sources on stop/reopen and retain the resume position in startup progress reports.
+- Validated with 88 unit tests, 69 browser tests, Chromium 53 bundle checks and IPK packaging. Native LG buffering still requires device verification.
+
 ## 0.2.7 — Authenticated community ratings
 
 - Port Plezy's Simkl redirect → title-detail lookup with the connected account's
