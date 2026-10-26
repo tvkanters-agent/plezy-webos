@@ -101,7 +101,7 @@ function focusFirst(root = main, preferred = null, fromRail = false) {
     if (root === main && !fromRail && active && active !== document.body &&
         active !== main && !main.contains(active)) return;
     focusWithoutJump(preferred && root.contains(preferred) ? preferred :
-      (root.querySelector('button:not(:disabled),input,select') || root));
+      (root.querySelector('button:not(:disabled),input,select,.cast-strip[tabindex]') || root));
   });
 }
 // Translation of media_detail/action_buttons.dart FilledButton and
@@ -1214,7 +1214,7 @@ window.addEventListener('keydown', event => {
     return;
   }
   const validControls = scope => Array.from(scope.querySelectorAll(
-    'button:not(:disabled),input,select')).filter(node =>
+    'button:not(:disabled),input,select,.cast-strip[tabindex]')).filter(node =>
       node !== current && node.getClientRects().length && !node.hidden);
   const choose = (candidates, axis) => nextFocus(current.getBoundingClientRect(),
     candidates.map(value => ({value, rect: value.getBoundingClientRect()})), axis);
