@@ -67,7 +67,7 @@ async function send(path, {form, body, token, signal, timeout = 15000} = {}) {
       headers: {
         Accept: 'application/json',
         ...((form || body) ? {'Content-Type': 'application/json'} : {}),
-        ...(body ? {'simkl-api-key': SIMKL_CLIENT_ID} : {}),
+        ...((body || token) ? {'simkl-api-key': SIMKL_CLIENT_ID} : {}),
         ...(token ? {Authorization: 'Bearer ' + token} : {})
       },
       // webOS-specific OAuth adaptation: native Plezy uses form bodyFields,
@@ -315,6 +315,52 @@ export class SimklTracker {
     this.queue = this.queue.catch(() => {}).then(() => this.retryPendingStops(epoch, 50, true))
       .catch(error => this.onError(error.message));
     return this.queue;
+  }
+  // TrackerRatingSource from upstream SimklTracker: only movies/shows,
+  // /sync/ratings/{movies,shows,anime} for reads, matching external IDs.
+  async ratingIds(api,item) {
+    if (!api || !item) return {};
+    const raw=item.raw||{};
+    let ids=simklMovieIds(raw);
+    if (!Object.keys(ids).length && api.fetchExternalIds)
+      ids=await api.fetchExternalIds(item.id);
+    return ids;
+  }
+  async getTitleRating(api,item) {
+    if (!['movie','show'].includes(item?.type)) return null;
+    let session=this.getSession();
+    if (!validSession(session)) return null;
+    const ids=await this.ratingIds(api,item);
+    if (!Object.keys(ids).length) return null;
+    if (session.expiresAt < Date.now()+60000) session=await this.refresh();
+    const buckets=item.type==='movie'?['movies']:['shows','anime'];
+    for(const bucket of buckets){
+      const response=await send('/sync/ratings/'+bucket,{token:session.accessToken});
+      if(response.status!==200)throw new Error('Simkl rating lookup failed (HTTP '+response.status+').');
+      const entries=Array.isArray(response.data)?response.data:
+        (Array.isArray(response.data?.[bucket])?response.data[bucket]:[]);
+      for(const entry of entries){
+        const remote=(item.type==='movie'?entry.movie:entry.show)?.ids || entry.ids || {};
+        if(!Object.keys(ids).some(key=>remote[key]!=null && String(remote[key])===String(ids[key])))continue;
+        const score=Number(entry.user_rating??entry.rating);
+        return Number.isFinite(score)&&score>0?Math.min(10,Math.round(score)):null;
+      }
+    }
+    return null;
+  }
+  async rateTitle(api,item,score) {
+    if(!['movie','show'].includes(item?.type))throw Error('Simkl only rates movies and series.');
+    if(!validSession(this.getSession()))throw Error('Connect Simkl to rate a title.');
+    const ids=await this.ratingIds(api,item);
+    if(!Object.keys(ids).length)throw Error('Plex has no external IDs for this Simkl rating.');
+    if(score!==null&&(!Number.isInteger(score)||score<1||score>10))
+      throw Error('Invalid Simkl rating.');
+    const bucket=item.type==='movie'?'movies':'shows',payload={[bucket]:[{ids,...(score===null?{}:{rating:score})}]};
+    const epoch=this.epoch;
+    const task=this.queue.catch(()=>{}).then(()=>this.post(
+      score===null?'/sync/ratings/remove':'/sync/ratings',payload,false,epoch));
+    this.queue=task;
+    return task;
   }
   async refresh() {
     if (!this.refreshTask) {
