@@ -90,11 +90,18 @@ export async function communityRatings(raw,kind,fetchImpl=fetch){
  const base='https://api.simkl.com';
  q.set('client_id',SIMKL_CLIENT_ID);
  q.set('fields','simkl,ext');
- let result=[];
+ let result=[],confirmed=false;
  try {
    const response=await fetchImpl(base+'/ratings?'+q.toString(),{headers});
-   if(response.ok) result=simklRatings(await response.json());
- }catch(_){/* Optional scores must not obscure Plex's original ratings. */}
+   if(response.ok) {
+     confirmed=true;
+     result=simklRatings(await response.json());
+   }
+ }catch(error){
+   // Mirrors CommunityRatingsLoader._answer: failed requests never enter the
+   // cache, otherwise one transient CORS/server failure hides ratings for hours.
+   console.warn('Simkl community ratings temporarily unavailable',error);
+ }
  if(!result.length){
    // Native Plezy's /redirect -> detail flow, as a fallback only when the
    // public ratings endpoint has no matching result.
@@ -109,10 +116,14 @@ export async function communityRatings(raw,kind,fetchImpl=fetch){
      if(match){
        const detail=await fetchImpl(base+'/'+match[1]+'/'+match[2]+
          '?client_id='+SIMKL_CLIENT_ID,{headers});
-       if(detail.ok)result=simklRatings((await detail.json())?.ratings);
+       if(detail.ok) {
+         confirmed=true;
+         result=simklRatings((await detail.json())?.ratings);
+       }
      }
    }catch(_){/* An opaque redirect cannot expose Location in some webOS. */}
  }
- cache.set(cacheKey,{at:Date.now(),ratings:result});
+ // Plezy caches real provider replies, but not offline/error results.
+ if(confirmed) cache.set(cacheKey,{at:Date.now(),ratings:result});
  return result;
 }
