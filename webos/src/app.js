@@ -819,7 +819,10 @@ async function render() {
         item.duration ? time(item.duration) : '',
         resolutionLabel(media.videoResolution)].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
-      if (chips.children.length) info.append(chips);
+      // Community scores load asynchronously. The chip row MUST exist even
+      // for a show lacking year, duration and quality metadata; otherwise
+      // external provider badges are appended to a detached element.
+      info.append(chips);
       // Plezy _buildFittedHeroChips: branded scores are ONE tonal chip
       // in the SAME metadata run as year/runtime/certification, not a new row.
       const ratingLine=el('span',undefined,'ratings-chip');
