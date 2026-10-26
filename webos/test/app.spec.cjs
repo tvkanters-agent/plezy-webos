@@ -888,3 +888,43 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
  await expect(page.locator('main .grid .card')).toHaveCount(3);
  await expect(page.getByRole('button',{name:/TV Series with Actor/})).toBeVisible();
 });
+
+test('Plezy MDBList provider adds multiple branded ratings to one metadata pill',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',mdblistApiKey:'example-key',
+   servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const film={ratingKey:'mdb-film',type:'movie',title:'The Rated Film',year:2024,
+   Guid:[{id:'imdb://tt5522344'}],rating:7.1,ratingImage:'imdb://rating'};
+ const called=[];
+ await page.route('https://api.simkl.com/**',route=>
+   route.fulfill({status:404,json:{}}));
+ await page.route('https://api.mdblist.com/**',route=>{
+   const url=new URL(route.request().url());
+   called.push(url);
+   return route.fulfill({json:{ratings:[
+     {source:'imdb',value:8.8,votes:20000},
+     {source:'tomatoes',value:91,votes:200},
+     {source:'popcorn',value:85,votes:200},
+     {source:'metacritic',value:73,votes:300},
+     {source:'letterboxd',value:4.0,votes:5000},
+     {source:'trakt',value:89,votes:650}] }});
+ });
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   const rows=path==='/hubs'||path==='/library/metadata/mdb-film'?[film]:[];
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?
+     {Hub:[{title:'Movies',Metadata:rows}]}:{Metadata:rows,totalSize:rows.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/The Rated Film/}).first().click();
+ await expect.poll(()=>called.length).toBe(1);
+ expect(called[0].pathname).toBe('/imdb/movie/tt5522344');
+ expect(called[0].searchParams.get('apikey')).toBe('example-key');
+ const bubble=page.locator('.detail-chips > .ratings-chip');
+ await expect(bubble).toHaveCount(1);
+ for(const provider of ['IMDb','Rotten Tomatoes critics','Rotten Tomatoes audience','metacritic','letterboxd','trakt']){
+   await expect(bubble.locator('.rating-badge[aria-label^="'+provider+'"]')).toHaveCount(1);
+ }
+ await expect(bubble.locator('img[src="assets/rating_icons/rt_fresh.svg"]')).toHaveCount(1);
+ await expect(bubble.locator('img[src="assets/trakt_circlemark.svg"]')).toHaveCount(1);
+});
