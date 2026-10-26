@@ -546,7 +546,7 @@ async function render() {
       main.append(tabs);
       if (currentApi instanceof Plex && view === 'collections') {
         await paginated(start => currentApi.collections(route.library.id, start), currentRevision);
-        if (valid()) focusFirst();
+        if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
@@ -560,7 +560,9 @@ async function render() {
         if (!shelves.length) main.append(el('p','No recommendations for this library.', 'muted'));
         shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
           section.append(el('h2', shelf.title), cards(shelf.items)); main.append(section); });
-        schedulePosters(); if (valid()) focusFirst(); return;
+        schedulePosters();
+        if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
+        return;
       }
       if (view !== 'browse') {
         main.append(el('p','This library view is currently available for Plex libraries.', 'muted'));
@@ -708,8 +710,7 @@ async function render() {
         const metaRows = [
           // Genres are already displayed as Flutter-style hero chips.
           ['Directors', tags(raw.Director)],
-          ['Writers', tags(raw.Writer)],
-          ['Cast', tags(raw.Role).slice(0, 12)]
+          ['Writers', tags(raw.Writer)]
         ];
         metaRows.forEach(row => {
           if (!row[1].length) return;
@@ -1120,7 +1121,12 @@ window.addEventListener('keydown', event => {
         return box.right <= rect.left + 8 &&
           box.top < rect.bottom - 4 && box.bottom > rect.top + 4;
       });
-      const adjacent = choose(rowCandidates, 'left');
+      // The first poster in a media row has no left-hand peer. Never
+      // diagonally select a toolbar/tab from the row above it.
+      const card = current.closest('.grid .card, .cards .card');
+      const firstPoster = card && card.parentNode && card ===
+        card.parentNode.querySelector('.card');
+      const adjacent = firstPoster ? null : choose(rowCandidates, 'left');
       if (adjacent) { focusWithoutJump(adjacent); return; }
       const selected = nav.querySelector('button.active') ||
         nav.querySelector('button:not(:disabled)');

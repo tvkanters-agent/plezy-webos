@@ -10,13 +10,16 @@ export class Player {
     this.buffering = root.querySelector('.player-buffering');
     this.seeking = false;
     this.seekPreview = 0;
+    this.hideAfterSeek = false;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
     this.video.addEventListener('loadedmetadata', () => this.resume());
     this.video.addEventListener('canplay', () => { this.status.textContent = ''; this.resume(); });
     this.video.addEventListener('timeupdate', () => this.update());
     this.video.addEventListener('playing', () => {
       this.status.textContent = ''; this.showBuffering(false); this.report('playing');
-      this.track('start'); this.reveal();
+      this.track('start');
+      if (this.hideAfterSeek) {this.hideControls();return;}
+      this.reveal();
       // Video.load() and decoder buffering may move focus to <body>.
       // Restore the active transport control, but not over user choices.
       if (this.controls.contains(document.activeElement)) return;
@@ -26,7 +29,10 @@ export class Player {
         this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
-      if (this.session && !this.closing) { this.report('paused'); this.track('pause'); this.reveal(); }
+      if (this.session && !this.closing) {
+        this.report('paused'); this.track('pause');
+        if (!this.hideAfterSeek) this.reveal();
+      }
     });
     this.video.addEventListener('waiting', () => { if (this.session) this.showBuffering(true); });
     this.video.addEventListener('seeking', () => { if (this.session) this.showBuffering(true); });
@@ -139,6 +145,7 @@ export class Player {
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = '';
     this.showBuffering(true); this.seeking = false; this.remoteSeeking = false;
+    this.hideAfterSeek = false;
     this.scrubbing = false;
     this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
@@ -247,6 +254,7 @@ export class Player {
     if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
     this.session = null; this.pendingStart = 0;
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
+    this.hideAfterSeek = false;
     this.scrubbing = false;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
@@ -301,6 +309,7 @@ export class Player {
     this.video.focus();
   }
   adjustSeek(delta) {
+    this.hideAfterSeek = false;
     const total = this.timelineDuration();
     if (!this.session || total <= 0) return;
     const original = this.seeking ? this.seekPreview : (this.pendingStart || this.video.currentTime || 0);
@@ -319,6 +328,7 @@ export class Player {
     if (!this.seeking) return false;
     const point = this.seekPreview;
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
+    this.hideAfterSeek = true;
     this.seekTo(point);
     if (this.video.paused) this.video.play().catch(() => this.failed());
     this.hideControls();
@@ -386,6 +396,7 @@ export class Player {
       if (code === 13) this.toggle();
       this.reveal(); this.root.querySelector('[data-action="pause"]').focus(); return true;
     }
+    this.hideAfterSeek = false;
     this.reveal(); return false;
   }
 }
