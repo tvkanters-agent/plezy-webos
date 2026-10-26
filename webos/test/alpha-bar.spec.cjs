@@ -46,7 +46,7 @@ test('Plex TV alphabet rail jumps to unloaded letters with firstCharacter counts
   await expect(rail.locator('.alpha-letter-slot')).toHaveCount(6);
   await expect(rail.locator('.alpha-letter-slot.current').first()).toContainText('A');
   await rail.getByRole('button',{name:'F',exact:true}).click();
-  await expect(page.locator('.alpha-window-grid .card').first()).toContainText('F Film');
+  await expect(page.locator('.alpha-window-grid .card[data-focus="150"]')).toBeVisible();
   await expect.poll(()=>calls.some(call=>call.path.endsWith('/all')&&
     Number(call.params['X-Plex-Container-Start'])>=100)).toBe(true);
   // Jump must not fetch every intervening page or create thousands of nodes.
@@ -55,6 +55,13 @@ test('Plex TV alphabet rail jumps to unloaded letters with firstCharacter counts
   await page.keyboard.press('Escape');
   await expect(page.locator('.alpha-window-grid .card:focus')).toHaveCount(1);
   await expect(rail).not.toBeFocused();
+  // Native LibraryBrowseTab retains its scroll and alpha state when returning
+  // from an item. The webOS snapshot must retain both the rail and the cards.
+  await page.locator('.alpha-window-grid .card[data-focus="150"]').click();
+  await expect(page.getByRole('heading',{name:'F Film 150'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(rail).toBeVisible();
+  await expect(page.locator('.alpha-window-grid .card[data-focus="150"]')).toBeVisible();
   const query=calls.find(call=>call.path.endsWith('/firstCharacter'));
   expect(query.params.includeCollections).toBe('1');
 });
