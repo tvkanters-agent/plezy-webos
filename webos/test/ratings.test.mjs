@@ -30,7 +30,7 @@ test('Community ratings lookup uses Plex GUID and handles provider failures sile
  assert.equal(url.searchParams.get('imdb'),'tt1234567');
  assert.equal(url.searchParams.get('fields'),'simkl,ext');
  await communityRatings(item,'movie',call);
- assert.equal(requestCount,2,'Simkl redirect then documented direct ratings fallback');
+ assert.equal(requestCount,1,'Ratings by ID should avoid redirect preflight');
  const fallback=await communityRatings({Guid:[{id:'tvdb://456789'}]},'show',async()=>{throw Error('offline');});
  assert.deepEqual(fallback,[]);
 });
@@ -43,4 +43,17 @@ test('upstream branded scores preserve their asset logos, thresholds and formats
   assert.equal(ratingBadgeInfo('rottenTomatoesCritic',6.5).src,'assets/rating_icons/rt_fresh.svg');
   assert.equal(ratingBadgeInfo('rottenTomatoesAudience',7.3).src,'assets/rating_icons/rt_upright.svg');
   assert.equal(ratingBadgeInfo('simkl',8.1).src,'assets/simkl_mark.svg');
+});
+
+test('public Simkl ratings are a simple ID request and return multiple providers',async()=>{
+ let requested;
+ const result=await communityRatings({Guid:[{id:'tvdb://151113'}]},'show',async(url,options)=>{
+   requested={url,options};
+   return new Response(JSON.stringify({simkl:{rating:8.2,votes:980},
+     IMDB:{rating:8.7,votes:12000}}),{status:200});
+ });
+ assert.deepEqual(result,[{source:'simkl',value:8.2},{source:'imdb',value:8.7}]);
+ assert.match(requested.url,/\/ratings\?/);
+ assert.equal(new URL(requested.url).searchParams.get('tvdb'),'151113');
+ assert.equal(requested.options.headers['simkl-api-key'],undefined);
 });

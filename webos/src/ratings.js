@@ -84,31 +84,34 @@ export async function communityRatings(raw,kind,fetchImpl=fetch){
  const q=paramsForIds(raw,kind);if(!Array.from(q.keys()).length)return [];
  const cacheKey=kind+':'+q.toString(),old=cache.get(cacheKey);
  if(old&&Date.now()-old.at<TTL)return old.ratings;
- const headers={Accept:'application/json','simkl-api-key':SIMKL_CLIENT_ID};
+ // Simkl's documented /ratings API accepts native IMDb, TVDB, TMDB IDs.
+ // A custom API-key header would force CORS preflight on old LG Chromium.
+ const headers={Accept:'application/json'};
  const base='https://api.simkl.com';
  q.set('client_id',SIMKL_CLIENT_ID);
+ q.set('fields','simkl,ext');
  let result=[];
- // Upstream Plezy resolves Plex IDs via /redirect, then reads the
- // corresponding Simkl detail /movies|tv|anime/<id> with its ratings object.
- try{
-  const redirect=new URLSearchParams(q);redirect.set('to','simkl');redirect.delete('client_id');
-  redirect.set('client_id',SIMKL_CLIENT_ID);
-  const response=await fetchImpl(base+'/redirect?'+redirect.toString(),{headers,redirect:'manual'});
-  const location=response.headers?.get('Location');
-  const match=location&&/\/(movies|tv|anime)\/(\d+)(?:\/|$)/.exec(location);
-  if(match){
-   const detail=await fetchImpl(base+'/'+match[1]+'/'+match[2]+'?client_id='+SIMKL_CLIENT_ID,{headers});
-   if(detail.ok) result=simklRatings((await detail.json())?.ratings);
-  }
- }catch(_){/* On old webOS browsers redirect Location may be unreadable. */}
+ try {
+   const response=await fetchImpl(base+'/ratings?'+q.toString(),{headers});
+   if(response.ok) result=simklRatings(await response.json());
+ }catch(_){/* Optional scores must not obscure Plex's original ratings. */}
  if(!result.length){
-  // Documented Simkl Ratings by ID fallback supports TVDB/IMDb/TMDB directly
-  // without parsing a cross-origin redirect Location (Chromium 53).
-  try{
-   const query=new URLSearchParams(q);query.set('fields','simkl,ext');
-   const response=await fetchImpl(base+'/ratings?'+query.toString(),{headers});
-   if(response.ok)result=simklRatings(await response.json());
-  }catch(_){/* Optional community scores never prevent a detail page. */}
+   // Native Plezy's /redirect -> detail flow, as a fallback only when the
+   // public ratings endpoint has no matching result.
+   try {
+     const redirect=new URLSearchParams(q);
+     redirect.delete('fields');
+     redirect.set('to','simkl');
+     const response=await fetchImpl(base+'/redirect?'+redirect.toString(),
+       {headers,redirect:'manual'});
+     const location=response.headers?.get('Location');
+     const match=location && /\/(movies|tv|anime)\/(\d+)(?:\/|$)/.exec(location);
+     if(match){
+       const detail=await fetchImpl(base+'/'+match[1]+'/'+match[2]+
+         '?client_id='+SIMKL_CLIENT_ID,{headers});
+       if(detail.ok)result=simklRatings((await detail.json())?.ratings);
+     }
+   }catch(_){/* An opaque redirect cannot expose Location in some webOS. */}
  }
  cache.set(cacheKey,{at:Date.now(),ratings:result});
  return result;
