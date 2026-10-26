@@ -150,6 +150,51 @@ export function simklMovieIds(raw) {
   }
   return ids;
 }
+// Upstream FribbMappingStore/TrackerIdResolver: map anime to the exact Simkl
+// catalog ID where the Plex external IDs may address a different entry.
+// Cache one database fetch per app session, not one per playback event.
+const FRIBB_URL = 'https://cdn.jsdelivr.net/gh/Fribb/anime-lists@master/anime-list-mini.json';
+let fribbRowsTask = null;
+function numeric(value) {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+export function findFribbSimklId(rows, ids, {movie = false, season = null} = {}) {
+  if (!Array.isArray(rows) || !ids) return null;
+  const matching = rows.filter(row => {
+    if (!row || !numeric(row.simkl_id)) return false;
+    if (!movie && ids.tvdb && numeric(row.tvdb_id) === ids.tvdb) return true;
+    const tmdb = row.themoviedb_id;
+    if (ids.tmdb) {
+      if (movie && (Array.isArray(tmdb?.movie) ? tmdb.movie : [tmdb?.movie]).some(x => numeric(x) === ids.tmdb)) return true;
+      if (!movie && numeric(tmdb?.tv) === ids.tmdb) return true;
+    }
+    const imdb = row.imdb_id;
+    return !!(ids.imdb && (Array.isArray(imdb) ? imdb : [imdb]).includes(ids.imdb));
+  });
+  if (!matching.length) return null;
+  if (season != null && Number.isInteger(Number(season))) {
+    const bySeason = matching.filter(row => row.season &&
+      (Number(row.season.tvdb) === Number(season) || Number(row.season.tmdb) === Number(season)));
+    if (bySeason.length === 1) return numeric(bySeason[0].simkl_id);
+    if (bySeason.length > 1) return null;
+  }
+  // A split-cour series can have multiple Simkl entries under one Plex show.
+  // Never assign one of those IDs to every episode by guesswork.
+  const values = Array.from(new Set(matching.map(row => numeric(row.simkl_id))));
+  return values.length === 1 ? values[0] : null;
+}
+async function fribbSimklId(ids, context) {
+  if (!Object.keys(ids).length) return null;
+  if (!fribbRowsTask) {
+    fribbRowsTask = fetch(FRIBB_URL, {headers:{Accept:'application/json'}})
+      .then(response => {
+        if (!response.ok) throw new Error('Fribb mapping unavailable');
+        return response.json();
+      }).catch(() => null);
+  }
+  return findFribbSimklId(await fribbRowsTask, ids, context);
+}
 export function scrobblePayload(item, show) {
   // Same _scrobbleBody shape as SimklTracker._scrobbleBody in upstream Plezy.
   // Never send a title/year to Simkl as substitute identifiers.
@@ -202,7 +247,17 @@ export class SimklTracker {
       // metadata exactly as TrackerIdResolver.resolveForMovie does.
       media = await api.detail(item.id);
     }
-    return scrobblePayload(media, show);
+    const payload = scrobblePayload(media, show);
+    if (!payload) return null;
+    const ids = payload.movie ? payload.movie.ids : payload.show.ids;
+    const mapped = await fribbSimklId(ids, {
+      movie: item.type === 'movie',
+      season: item.type === 'episode' ? item.raw?.parentIndex : null
+    });
+    // Upstream SimklTracker._buildIds prefers Fribb's precise simkl_id,
+    // but keeps catalog IDs as fallback for unmapped titles.
+    if (mapped) ids.simkl = mapped;
+    return payload;
   }
   createPlayback(api, item) {
     if (api?.server?.kind !== 'plex' || !validSession(this.getSession())) return null;
