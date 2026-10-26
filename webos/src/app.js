@@ -464,9 +464,14 @@ function go(next, remember = true) {
     const scroll = main.scrollTop;
     const focused = main.contains(document.activeElement) ?
       document.activeElement.dataset.focus : null;
+    const alphabet = activeAlphabet;
+    if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
     while (main.firstChild) snapshot.appendChild(main.firstChild);
-    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api});
-    if (history.length > 8) history.shift();
+    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet});
+    if (history.length > 8) {
+      const discarded = history.shift();
+      if (discarded.alphabet) discarded.alphabet.destroy();
+    }
   }
   route = next; render();
 }
@@ -488,12 +493,20 @@ function back() {
       main.appendChild(previous.snapshot);
       navigation();
       main.scrollTop = route.scroll || 0;
+      if (previous.alphabet) {
+        const restoredRevision = revision;
+        activeAlphabet = previous.alphabet;
+        activeAlphabet.resume(() => revision === restoredRevision);
+      }
       const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
         node => node.dataset.focus === route.focus);
       if (focused) focusWithoutJump(focused, false);
       else focusFirst();
       schedulePosters();
-    } else render();
+    } else {
+      if (previous.alphabet) previous.alphabet.destroy();
+      render();
+    }
     return;
   }
   dialog.textContent = ''; dialog.append(el('h2', 'Close Plezy?'));
