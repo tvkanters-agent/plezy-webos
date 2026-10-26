@@ -711,7 +711,7 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await expect(page.getByRole('heading',{name:'Rate The Great Film'})).toBeVisible();
  const plex=page.locator('.rating-row[data-service="Plex"]');
  await plex.focus();
- for(let i=0;i<16;i++)await page.keyboard.press('ArrowRight');
+ for(let i=0;i<9;i++)await page.keyboard.press('ArrowRight');
  await expect(plex).toHaveAttribute('aria-label','Plex rating 9 out of 10');
  await page.keyboard.press('Enter');
  await expect.poll(()=>put.length).toBe(1);
@@ -760,7 +760,7 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  await expect(cast).toHaveAttribute('aria-label',/Person 1/);
  // Moving among already visible actors must not snap each actor left.
  await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBe(0);
- for(let i=0;i<9;i++)await page.keyboard.press('ArrowRight');
+ for(let i=0;i<16;i++)await page.keyboard.press('ArrowRight');
  await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBeGreaterThan(0);
  const hidden=await cast.evaluate(el=>getComputedStyle(el).scrollbarWidth==='none');
  // Chromium may not implement scrollbar-width, but the webOS CSS must hide it.
