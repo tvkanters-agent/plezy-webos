@@ -448,7 +448,6 @@ async function render() {
         control.setAttribute('aria-pressed', String(choice.id === selected));
         filters.append(control);
       });
-      main.append(filters);
       const watchFilters = el('div', undefined, 'sort-actions');
       watchFilters.setAttribute('role', 'group');
       watchFilters.setAttribute('aria-label', 'Filter watched status');
@@ -461,7 +460,23 @@ async function render() {
         control.setAttribute('aria-pressed', String(choice.id === selectedFilter));
         watchFilters.append(control);
       });
-      main.append(watchFilters);
+      const toolbar = el('div', undefined, 'library-toolbar');
+      const sortAction = detailButton('Sort', () => {
+        const open = filters.hidden;
+        filters.hidden = !open;
+        watchFilters.hidden = true;
+        if (open) focusWithoutJump(filters.querySelector('button'));
+      }, 'more', 'library-toolbar-button');
+      const filterAction = detailButton('Filters', () => {
+        const open = watchFilters.hidden;
+        watchFilters.hidden = !open;
+        filters.hidden = true;
+        if (open) focusWithoutJump(watchFilters.querySelector('button'));
+      }, 'more', 'library-toolbar-button');
+      const refreshAction = detailButton('Refresh', () => go({...route}, false), 'restart', 'library-toolbar-button');
+      toolbar.append(sortAction, filterAction, refreshAction);
+      filters.hidden = true; watchFilters.hidden = true;
+      main.append(toolbar, filters, watchFilters);
       await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {

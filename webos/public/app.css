@@ -279,3 +279,11 @@ nav button.active:focus, .rail-library-items button.active:focus {
 .detail-episode .detail-info { max-width:760px; }
 .detail-episode > .poster { min-width:0; margin-left:30px; }
 .detail-media > .poster { min-width:0; margin-left:35px; }
+
+/* Plezy browse toolbar: tonal icon actions, with separate sort/filter surfaces. */
+.library-toolbar { display:flex; flex-wrap:wrap; margin:8px 0 18px; }
+.library-toolbar-button { display:inline-flex; align-items:center; border:0;
+  border-radius:24px; min-height:46px; padding:8px 18px; margin:0 10px 10px 0;
+  background:rgba(72,75,85,.6); font-size:17px; }
+.library-toolbar-button svg { width:21px; height:21px; margin-right:8px; }
+.library-toolbar-button:focus { background:#ededed; color:#16171b; }
