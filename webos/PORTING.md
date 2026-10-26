@@ -110,3 +110,29 @@ player similarly keeps the detail DOM beneath its overlay. On Stop/Back,
 restore the focused launch action and refresh resume/watched controls from
 server metadata **in place**. Re-rendering the page after hiding the player
 temporarily empties the screen and loses remote focus.
+
+### Alphabet rail in large libraries
+
+The library browse rail translates
+`lib/screens/libraries/alpha_jump_bar.dart`,
+`alpha_jump_helper.dart`,
+`library_alpha_bar_strategy.dart`, and
+`tabs/library_browse_tab.dart`. It is rendered on TV when there are at least
+80 entries and six nonempty Plex first-character buckets, only under
+`titleSort`. For Plex the actual per-letter counts come from
+`/library/sections/{id}/firstCharacter` with `includeCollections=1`.
+Cumulative offsets jump directly to nonloaded Plex items; the webOS grid
+retains an index-aligned window with spacers rather than attempting to render
+all intervening DOM cards. This is the Chrome 53 replacement for Flutter's
+sparse `SliverGrid`. The displayed/current letter, pointer gestures, 150ms
+D-pad stepping, remote Back/Left return, 20px tonal letter rail, 24px TV
+overscan, and circular highlight follow the original widgets.
+
+Jellyfin and Emby use Plezy's separate `MediaBrowserAlphaBarStrategy`:
+27 synthetic `#`–`Z` entries acting as server-side `NameStartsWith` filters
+(`#` is `NameLessThan=A`), with the active prefix toggled off by reselecting
+the letter. No per-letter Plex offset approximation is applied to those servers.
+The browser-level letter rail and title DOM snapshot are preserved during
+navigation to a media detail and back. TV-only actual remote and real Plex/Jellyfin
+library geometry still require hardware verification; desktop Playwright tests
+cover server requests, navigation, focus and fallbacks.
