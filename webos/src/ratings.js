@@ -58,7 +58,8 @@ export function simklRatings(data){
  const result=[];
  for(const [key,possible] of [['simkl',['simkl']],['imdb',['imdb','IMDB']],['mal',['mal','MAL']]]){
   const obj=possible.map(k=>data[k]).find(Boolean),value=clean(obj?.rating);
-  if(value!==null && Number(obj?.votes)!==0)result.push({source:key,value});
+  if(value!==null && (obj?.votes==null || Number(obj.votes)!==0))
+    result.push({source:key,value});
  }
  return result;
 }
@@ -73,7 +74,7 @@ export function mergeRatings(own,community){
 function paramsForIds(raw,kind){
  const ids=plexExternalIds(raw||{}),q=new URLSearchParams();
  if(ids.imdb)q.set('imdb',ids.imdb);
- if(ids.tmdb){q.set('tmdb',String(ids.tmdb));q.set('type',kind==='movie'?'movie':'tv');}
+ if(ids.tmdb){q.set('tmdb',String(ids.tmdb));q.set('type',kind==='movie'?'movie':'show');}
  if(ids.tvdb)q.set('tvdb',String(ids.tvdb));
  if(ids.mal)q.set('mal',String(ids.mal));
  return q;

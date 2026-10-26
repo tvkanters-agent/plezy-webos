@@ -1275,8 +1275,22 @@ window.addEventListener('keydown', event => {
   // The rail is one focus zone. RIGHT must leave it even if another rail
   // item happens to be geometrically to the right (indented libraries).
   if (dialog.hidden && !player.active && inRail && direction === 'right') {
-    if (route.type==='library' && !main.querySelector('.grid .card,.shelf .card'))
+    if (route.type==='library' && !main.querySelector('.grid .card,.shelf .card')) {
+      // RIGHT is an explicit intent to enter the media grid, even when
+      // the first paged fetch is still populating. Delay the focus target,
+      // not the user's keypress, and cancel on navigation.
+      const requested=revision;
+      let frames=0;
+      const enterWhenReady=()=>{
+        if(revision!==requested || !main.isConnected) return;
+        const artwork=main.querySelector('.grid .card,.shelf .card,.episode-list .episode-row');
+        if(artwork) { focusWithoutJump(artwork); return; }
+        if(frames++<120 && (document.activeElement===main || nav.contains(document.activeElement)))
+          requestAnimationFrame(enterWhenReady);
+      };
+      requestAnimationFrame(enterWhenReady);
       pendingRailEntryRevision=revision;
+    }
     const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
       main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
     const target = restored || preferredPaneControl();
