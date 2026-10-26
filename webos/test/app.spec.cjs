@@ -513,3 +513,24 @@ test('Plex watched indicators show remaining episodes on partially watched serie
  await page.goto('/');
  await expect(page.locator('.card').filter({hasText:'Partly watched'}).locator('.badge')).toHaveText('4');
 });
+
+test('left from first media card returns to the active library rail item',async({page})=>{
+ await mockServer(page);await page.goto('/');
+ await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+ const card=page.locator('.grid .card').first();
+ await card.focus();
+ await page.keyboard.press('ArrowLeft');
+ await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeFocused();
+});
+test('back restores a covered library page without refetching items',async({page})=>{
+ const calls=await mockServer(page);await page.goto('/');
+ await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+ const first=page.getByRole('button',{name:'The Test Film',exact:false}).first();
+ await first.focus();
+ const before=calls.filter(x=>x.path.endsWith('/Items')).length;
+ await first.click();
+ await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
+ expect(calls.filter(x=>x.path.endsWith('/Items')).length).toBe(before);
+});

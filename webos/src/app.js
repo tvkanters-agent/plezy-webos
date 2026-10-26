@@ -163,14 +163,42 @@ function navigation() {
   }
 }
 function go(next, remember = true) {
-  if (remember) history.push({...route, scroll: main.scrollTop, focus: main.contains(document.activeElement) ? document.activeElement.dataset.focus : null});
+  if (remember) {
+    // Flutter retains the covered route's subtree. Preserve this rendered
+    // page and its scroll/focus state instead of refetching and repainting it
+    // when a movie/episode detail is dismissed.
+    const snapshot = document.createDocumentFragment();
+    const scroll = main.scrollTop;
+    const focused = main.contains(document.activeElement) ?
+      document.activeElement.dataset.focus : null;
+    while (main.firstChild) snapshot.appendChild(main.firstChild);
+    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api});
+    if (history.length > 8) history.shift();
+  }
   route = next; render();
 }
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
 function back() {
   if (!dialog.hidden) { dialog.hidden = true; focusFirst(); return; }
   if (player.active) { player.close(); return; }
-  if (history.length) { route = history.pop(); render(); return; }
+  if (history.length) {
+    const previous = history.pop();
+    route = previous.route || previous;
+    if (previous.snapshot && previous.sourceApi === api && previous.snapshot.childNodes.length) {
+      ++revision;
+      cancelAuth();
+      main.textContent = '';
+      main.appendChild(previous.snapshot);
+      navigation();
+      main.scrollTop = route.scroll || 0;
+      const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
+        node => node.dataset.focus === route.focus);
+      if (focused) focusWithoutJump(focused, false);
+      else focusFirst();
+      schedulePosters();
+    } else render();
+    return;
+  }
   dialog.textContent = ''; dialog.append(el('h2', 'Close Plezy?'));
   const actions = el('div', undefined, 'actions');
   actions.append(button('Keep watching', () => { dialog.hidden = true; focusFirst(); }), button('Exit', () => window.close()));
@@ -271,11 +299,11 @@ async function paginated(loader, currentRevision, options = {}) {
     errorMessage.textContent = '';
     try {
       const page = await loader(start);
-      if (currentRevision !== revision) return;
+      if (!grid.isConnected) return;
       // Populate in short batches: rendering 60 DOM cards in one task blocks
       // Chromium 53's input thread just as badly as decoding their images.
       for (let i = 0; i < page.items.length; i += 8) {
-        if (currentRevision !== revision) return;
+        if (!grid.isConnected) return;
         const fragment = document.createDocumentFragment();
         page.items.slice(i, i + 8).forEach(item =>
           fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
@@ -296,7 +324,7 @@ async function paginated(loader, currentRevision, options = {}) {
         else main.focus();
       }
     } catch (error) {
-      if (currentRevision === revision) {
+      if (grid.isConnected) {
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
         more.textContent = 'Retry loading';
         more.hidden = false;
@@ -735,6 +763,23 @@ window.addEventListener('keydown', event => {
     candidates.map(value => ({value, rect: value.getBoundingClientRect()})), axis);
   if (dialog.hidden && !player.active && (inRail || inMain)) {
     const source = inRail ? nav : main;
+    // Spatial search must not send Left from the first artwork column to
+    // a filter button somewhere up the screen. Flutter's D-pad focus boundary
+    // transfers to the active rail destination when the current row ends.
+    if (inMain && direction === 'left') {
+      const rect = current.getBoundingClientRect();
+      const rowCandidates = validControls(main).filter(node => {
+        const box = node.getBoundingClientRect();
+        return box.right <= rect.left + 8 &&
+          box.top < rect.bottom - 4 && box.bottom > rect.top + 4;
+      });
+      const adjacent = choose(rowCandidates, 'left');
+      if (adjacent) { focusWithoutJump(adjacent); return; }
+      const selected = nav.querySelector('button.active') ||
+        nav.querySelector('button:not(:disabled)');
+      if (selected) focusWithoutJump(selected);
+      return;
+    }
     const local = choose(validControls(source), direction);
     if (local) { focusWithoutJump(local); return; }
     if (inMain && (direction === 'up' || direction === 'down')) {
@@ -748,15 +793,6 @@ window.addEventListener('keydown', event => {
       const first = main.querySelector('button:not(:disabled),input,select');
       if (first) focusWithoutJump(first);
       else { main.focus(); main.scrollTop = 0; }
-      return;
-    }
-    if (inMain && direction === 'left') {
-      const railControls = validControls(nav);
-      // Move to the currently selected library if possible, otherwise to the
-      // vertically closest rail control. Never do this for Up/Down.
-      const active = nav.querySelector('button.active');
-      const target = active || railControls[0];
-      if (target) focusWithoutJump(target);
       return;
     }
     return;

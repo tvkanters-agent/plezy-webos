@@ -217,3 +217,19 @@ nav { min-height: 0; }
 .episode-progress { position:absolute;left:0;bottom:0;width:100%;height:4px;z-index:2; }
 .episode-thumb .badge { z-index:2; }
 @media(max-width:1100px){.episode-thumb{flex-basis:165px;height:93px;}}
+
+/* Flutter TV scrollables do not expose Chromium's default skinny scrollbars.
+   Magic Remote wheel, mouse drag, and D-pad scroll still work. */
+main::-webkit-scrollbar, nav::-webkit-scrollbar, .player-sheet::-webkit-scrollbar {
+  width:0; height:0; display:none;
+}
+main, nav, .player-sheet { scrollbar-width:none; }
+/* Active destination must still have its own focused appearance. */
+nav button.active:focus, .rail-library-items button.active:focus {
+  background:#ededed; color:#111318; border-color:transparent;
+  box-shadow:inset 0 0 0 2px #fff;
+}
+.library-tabs button.active:focus, .sort-actions button.active:focus {
+  background:#ededed; color:#111318; box-shadow:0 0 0 2px #9da1ac;
+  outline:0;
+}
