@@ -353,6 +353,17 @@ export class Player {
   }
   async failed() {
     if (!this.session || this.recovering) return;
+    if (this.session.serverResumeOffset && !this.options.forceLocalResume) {
+      // Some older webOS HLS decoders reject a nonzero-offset playlist.
+      // Fall back once to the original local seek; never loop through
+      // server-offset retries or lose the episode's saved position.
+      this.recovering=true;
+      const position=this.session.timelineOffset || this.options.start || 0;
+      try {
+        await this.reopen({forceLocalResume:true,transcode:true,start:position});
+      } finally { this.recovering=false; }
+      return;
+    }
     if (!this.session.transcode) {
       this.recovering = true;
       this.showBuffering(true);
