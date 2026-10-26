@@ -896,7 +896,14 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  const film={ratingKey:'mdb-film',type:'movie',title:'The Rated Film',year:2024,
    Guid:[{id:'imdb://tt5522344'}],rating:7.1,ratingImage:'imdb://rating'};
  const called=[];
- await page.route('https://api.simkl.com/**',route=>
+ // Plezy delivers other catalog scores without waiting for a slow provider.
+ let releaseSimkl;
+ const simklWaiting=new Promise(resolve=>{releaseSimkl=resolve;});
+ await page.route('https://api.simkl.com/ratings**',async route=>{
+   await simklWaiting;
+   return route.fulfill({status:404,json:{}});
+ });
+ await page.route('https://api.simkl.com/redirect**',route=>
    route.fulfill({status:404,json:{}}));
  await page.route('https://api.mdblist.com/**',route=>{
    const url=new URL(route.request().url());
@@ -927,4 +934,5 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  }
  await expect(bubble.locator('img[src="assets/rating_icons/rt_fresh.svg"]')).toHaveCount(1);
  await expect(bubble.locator('img[src="assets/trakt_circlemark.svg"]')).toHaveCount(1);
+ releaseSimkl();
 });
