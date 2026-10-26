@@ -19,6 +19,7 @@ const player = new Player(document.querySelector('#player'), notify, () => rende
 let rememberedPaneFocus = null;
 let enterPaneAfterNavigation = false;
 let pendingRailEntryRevision = null;
+let lastRailRightRevision = null;
 function preferredPaneControl() {
   // Enter media before the toolbar when coming from the remote's side rail.
   return main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
@@ -100,8 +101,10 @@ function focusFirst(root = main, preferred = null, fromRail = false) {
     if (root === main && rememberedPaneFocus?.isConnected && nav.contains(active)) return;
     if (root === main && !fromRail && active && active !== document.body &&
         active !== main && !main.contains(active)) return;
-    focusWithoutJump(preferred && root.contains(preferred) ? preferred :
-      (root.querySelector('button:not(:disabled),input,select,.cast-strip[tabindex]') || root));
+    const railArt = root===main && lastRailRightRevision===expectedRevision
+      ? preferredPaneControl() : null;
+    focusWithoutJump(railArt || (preferred && root.contains(preferred) ? preferred :
+      (root.querySelector('button:not(:disabled),input,select,.cast-strip[tabindex]') || root)));
   });
 }
 // Translation of media_detail/action_buttons.dart FilledButton and
@@ -586,7 +589,7 @@ async function paginated(loader, currentRevision, options = {}) {
 }
 async function render() {
   const currentRevision = ++revision;
-  pendingRailEntryRevision=null;
+  pendingRailEntryRevision=null;lastRailRightRevision=null;
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
   let preferredFocus = null;
@@ -1278,6 +1281,7 @@ window.addEventListener('keydown', event => {
   // The rail is one focus zone. RIGHT must leave it even if another rail
   // item happens to be geometrically to the right (indented libraries).
   if (dialog.hidden && !player.active && inRail && direction === 'right') {
+    lastRailRightRevision=revision;
     if (route.type==='library' && !main.querySelector('.grid .card,.shelf .card')) {
       // RIGHT is an explicit intent to enter the media grid, even when
       // the first paged fetch is still populating. Delay the focus target,
@@ -1307,6 +1311,22 @@ window.addEventListener('keydown', event => {
   const choose = (candidates, axis) => nextFocus(current.getBoundingClientRect(),
     candidates.map(value => ({value, rect: value.getBoundingClientRect()})), axis);
   if (dialog.hidden && !player.active && (inRail || inMain)) {
+    // Match upstream CastMemberStrip's onNavigateDown/onNavigateUp: the
+    // last season/episode row leads into Cast, not off to a distant action.
+    if (inMain && direction==='down' && current.matches('.grid .card,.episode-list .episode-row')) {
+      const cast=main.querySelector('.cast-strip[tabindex]');
+      if(cast){
+        const currentRect=current.getBoundingClientRect();
+        const later=Array.from(main.querySelectorAll('.grid .card,.episode-list .episode-row'))
+          .some(node=>node!==current && node.getBoundingClientRect().top>currentRect.top+8);
+        if(!later){focusWithoutJump(cast);return;}
+      }
+    }
+    if (inMain && direction==='up' && current.classList.contains('cast-strip')) {
+      const previous=Array.from(main.querySelectorAll('.grid .card,.episode-list .episode-row')).pop() ||
+        main.querySelector('.detail-play');
+      if(previous){focusWithoutJump(previous);return;}
+    }
     const source = inRail ? nav : main;
     // Spatial search must not send Left from the first artwork column to
     // a filter button somewhere up the screen. Flutter's D-pad focus boundary
