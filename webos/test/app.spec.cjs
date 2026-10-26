@@ -711,7 +711,7 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await expect(page.getByRole('heading',{name:'Rate The Great Film'})).toBeVisible();
  const plex=page.locator('.rating-row[data-service="Plex"]');
  await plex.focus();
- for(let i=0;i<9;i++)await page.keyboard.press('ArrowRight');
+ for(let i=0;i<16;i++)await page.keyboard.press('ArrowRight');
  await expect(plex).toHaveAttribute('aria-label','Plex rating 9 out of 10');
  await page.keyboard.press('Enter');
  await expect.poll(()=>put.length).toBe(1);
@@ -838,9 +838,8 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.getByRole('button',{name:/Partially Viewed Series/}).first().click();
  await page.getByRole('button',{name:'Play',exact:true}).first().click();
  await expect(page.locator('#player')).toBeVisible();
- await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=0');
- // The original resume point is preserved for timeline syncing, even though
- // Plex's older HLS decoder cannot open its stream with a nonzero offset.
+ await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=125');
+ // The server-offset playlist and Plex timeline must begin at the saved position.
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });
 
