@@ -742,6 +742,10 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  await expect(page.getByRole('heading',{name:'Seasons'})).toBeVisible();
  const cast=page.locator('.cast-strip');
  await expect(cast).toHaveAttribute('tabindex','0');
+ const seasonCard=page.locator('main .grid .card').last();
+ await seasonCard.focus();
+ await page.keyboard.press('ArrowDown');
+ await expect(cast).toBeFocused();
  const order=await page.evaluate(()=>{
    const seasons=document.querySelector('.detail-children-title');
    const cast=document.querySelector('.cast-section');
@@ -802,4 +806,28 @@ test('connected Simkl movie and series rating rows read existing user score and 
  await page.keyboard.press('Enter');
  await expect.poll(()=>writes.length).toBe(1);
  expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
+});
+
+test('series Play uses the full on-deck episode resume offset before HLS buffering',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+ const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
+ const episode={ratingKey:'episode2',type:'episode',title:'Episode In Progress',
+   parentRatingKey:'season1',grandparentRatingKey:'series',duration:1200000,
+   viewOffset:125000,
+   Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'ac3',
+     Part:[{id:'part2',key:'/video.mkv',Stream:[]}]}]};
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   const rows=path==='/hubs'?[show]:path==='/library/metadata/series'?[show]:
+     path==='/library/metadata/series/onDeck'?[{ratingKey:'episode2',type:'episode',title:'Episode In Progress'}]:
+     path==='/library/metadata/episode2'?[episode]:[];
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?{Hub:[{title:'Shows',Metadata:rows}]}:
+     {Metadata:rows,totalSize:rows.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Partially Viewed Series/}).first().click();
+ await page.getByRole('button',{name:'Play',exact:true}).first().click();
+ await expect(page.locator('#player')).toBeVisible();
+ await expect.poll(()=>page.locator('#player video').getAttribute('src')).toContain('offset=125');
 });
