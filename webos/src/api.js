@@ -273,6 +273,22 @@ export class Plex {
     const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
     return (data.Metadata || []).map(plexItem)[0] || null;
   }
+  // Plezy PlexClient.fetchPersonDetails: resolve PMS tagKey, then query
+  // Plex Discover. Details are optional; the actor's filmography is not.
+  async personDetails(personId) {
+    const tag=(await this.get('/library/people/'+enc(personId))).MediaContainer?.Directory;
+    const entry=Array.isArray(tag)?tag[0]:tag;
+    if(!entry?.tagKey) return null;
+    const response=await fetch('https://discover.provider.plex.tv/library/people/'+
+      enc(entry.tagKey),{headers:{'X-Plex-Token':this.server.token,Accept:'application/json'}});
+    if(!response.ok) return null;
+    const result=await response.json();
+    const metadata=result.MediaContainer?.Metadata;
+    const person=Array.isArray(metadata)?metadata[0]:metadata;
+    if(!person)return null;
+    return {biography:person.summary||null, bornAt:person.bornAt||null,
+      diedAt:person.diedAt||null,birthPlace:person.birthPlace||null};
+  }
   async personMedia(personId, start = 0) {
     const data=(await this.get('/library/people/' + enc(personId) + '/media',{
       'X-Plex-Container-Start':start,'X-Plex-Container-Size':PAGE})).MediaContainer;

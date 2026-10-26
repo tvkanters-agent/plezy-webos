@@ -470,3 +470,24 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
   font-size:13px; line-height:18px; margin-top:3px; color:#aeb2bc;
   font-weight:400; white-space:normal; overflow-wrap:break-word; }
 .player-options-list button:focus small { color:#555b65; }
+
+/* Plezy ActorMediaScreen._buildActorHeader: small rounded avatar, name,
+   character credit, biographical facts, collapsible text and a poster grid. */
+.actor-hero { padding:8px 16px 18px; position:relative; z-index:1; }
+.actor-identity { display:flex; align-items:center; margin-bottom:12px; }
+.actor-avatar { width:80px; height:80px; flex:0 0 80px; border-radius:40px;
+  background:#2b2e35; overflow:hidden; display:flex; align-items:center;
+  justify-content:center; margin-right:16px; }
+.actor-avatar img { width:100%;height:100%;object-fit:cover; }
+.actor-placeholder { font-size:46px; opacity:.6; }
+.actor-heading { min-width:0; }
+.actor-heading h1 { margin:0 0 4px; font-size:30px; font-weight:700; }
+.actor-heading .actor-role { font-size:18px; color:#b5b9c2;margin:0 0 4px; }
+.actor-heading .actor-count { color:#b5b9c2;font-size:15px;margin:0; }
+.actor-fact { margin:2px 0; font-size:17px; }
+.actor-fact span { color:#aeb2bc; }
+.actor-biography { max-width:800px; margin-top:12px; }
+.actor-biography-text { font-size:17px;line-height:1.5;margin:0;white-space:pre-line; }
+.actor-biography-text.collapsed { display:-webkit-box;-webkit-line-clamp:4;
+  -webkit-box-orient:vertical;overflow:hidden; }
+.actor-biography-toggle { display:block;margin-top:8px; border-radius:20px; }

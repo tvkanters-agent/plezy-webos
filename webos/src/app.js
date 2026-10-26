@@ -715,9 +715,62 @@ async function render() {
         focusFirst(main, preferredPaneControl(), true);
       }
     } else if (route.type === 'person' && api instanceof Plex) {
-      title(route.actor,route.role||'Cast');
-      if (route.thumb) main.append(poster({poster:route.thumb},{detail:false}));
-      await paginated(start => api.personMedia(route.id,start),currentRevision);
+      // Plezy ActorMediaScreen._buildActorHeader, not a movie-detail poster.
+      const currentApi=api;
+      const header=el('section',undefined,'actor-hero');
+      const identity=el('div',undefined,'actor-identity');
+      const portrait=el('div',undefined,'actor-avatar');
+      if(route.thumb){
+        const img=el('img');img.alt='';
+        img.setAttribute('data-poster-src',currentApi.image({poster:route.thumb}));
+        portrait.append(img);
+      } else portrait.append(el('span','●','actor-placeholder'));
+      const labels=el('div',undefined,'actor-heading');
+      labels.append(el('h1',route.actor||'Cast member'));
+      if(route.role)labels.append(el('p',route.role,'actor-role'));
+      const count=el('p','','actor-count');
+      labels.append(count);identity.append(portrait,labels);header.append(identity);
+      const facts=el('div',undefined,'actor-facts');
+      const bio=el('div',undefined,'actor-biography');
+      header.append(facts,bio);main.append(header);
+      // The catalog lookup must survive unavailable Plex Discover details.
+      currentApi.personDetails(route.id).then(details=>{
+        if(!valid()||!header.isConnected||!details)return;
+        const formatDate=value=>{
+          if(!value)return '';
+          const date=new Date(value);
+          return Number.isNaN(date.valueOf())?String(value):date.toLocaleDateString(undefined,
+            {year:'numeric',month:'long',day:'numeric'});
+        };
+        for(const [label,value] of [['Born',details.bornAt],['Died',details.diedAt],
+          ['Birthplace',details.birthPlace]]){
+          if(!value)continue;
+          const line=el('p',undefined,'actor-fact');
+          line.append(el('span',label+'  '),document.createTextNode(
+            label==='Birthplace'?value:formatDate(value)));
+          facts.append(line);
+        }
+        if(details.biography){
+          const text=el('p',details.biography,'actor-biography-text');
+          const long=details.biography.length>320;
+          if(long)text.classList.add('collapsed');
+          bio.append(text);
+          if(long){
+            const expand=button('Show more',()=>{
+              const open=text.classList.toggle('collapsed');
+              expand.textContent=open?'Show more':'Show less';
+            },'actor-biography-toggle');
+            expand.dataset.focus='actor-biography';
+            bio.append(expand);
+          }
+        }
+      }).catch(()=>{});
+      await paginated(async start=>{
+        const page=await currentApi.personMedia(route.id,start);
+        if(!start&&valid()&&header.isConnected) count.textContent=
+          page.total+' '+(page.total===1?'title':'titles');
+        return page;
+      },currentRevision);
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id, route.kind); if (!valid()) return;
