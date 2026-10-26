@@ -849,17 +849,22 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
  const actor={id:'411',tag:'Movie Actor',role:'The Lead',thumb:'/cast/411.jpg'};
  const film={ratingKey:'film',type:'movie',title:'Movie with Actor',Role:[actor]};
  const other={ratingKey:'other',type:'movie',title:'Another Film'};
+ const series={ratingKey:'series',type:'show',title:'TV Series with Actor'};
  await page.route('https://discover.provider.plex.tv/library/people/plex-person',route=>
    route.fulfill({json:{MediaContainer:{Metadata:[{
      summary:'Biography about the actor.',bornAt:'1970-01-12',
      birthPlace:'Rotterdam, Netherlands'}]}}}));
  await page.route('http://plex.test/**',route=>{
    const path=new URL(route.request().url()).pathname;
+   if(path==='/hubs/search')return route.fulfill({json:{MediaContainer:{Hub:[{
+     title:'Actors',Directory:[{tag:'Movie Actor',
+       key:'/library/sections/2/all?actor=399',librarySectionType:2}]}]}}});
    if(path==='/library/people/411')
      return route.fulfill({json:{MediaContainer:{Directory:[{tagKey:'plex-person'}]}}});
    const entries=path==='/hubs'?[film]:
      path==='/library/metadata/film'?[film]:
-     path==='/library/people/411/media'?[film,other]:[];
+     path==='/library/people/411/media'?[film,other]:
+     path==='/library/sections/2/all'?[series]:[];
    return route.fulfill({json:{MediaContainer:path==='/hubs'?
      {Hub:[{title:'Movies',Metadata:entries}]}:{Metadata:entries,totalSize:entries.length}}});
  });
@@ -872,5 +877,6 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
  await expect(page.getByText('The Lead')).toBeVisible();
  await expect(page.getByText('Rotterdam, Netherlands')).toBeVisible();
  await expect(page.getByText('Biography about the actor.')).toBeVisible();
- await expect(page.locator('main .grid .card')).toHaveCount(2);
+ await expect(page.locator('main .grid .card')).toHaveCount(3);
+ await expect(page.getByRole('button',{name:/TV Series with Actor/})).toBeVisible();
 });
