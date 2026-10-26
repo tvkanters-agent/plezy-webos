@@ -248,3 +248,14 @@ test('buffering spinner takes over for waiting and clears on playback',async({pa
   await expect(spinner).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
 });
+
+test('focus is restored to playback controls when buffering finishes',async({page})=>{
+ await setup(page);
+ const pause=page.getByRole('button',{name:/^(Pause|Play)$/}).filter({has:page.locator('svg')}).first();
+ await page.evaluate(()=>document.activeElement.blur());
+ await page.locator('video').dispatchEvent('waiting');
+ await expect(page.locator('.player-buffering')).toBeVisible();
+ await page.locator('video').dispatchEvent('playing');
+ await expect(page.locator('.player-buffering')).toBeHidden();
+ await expect(page.locator('[data-action="pause"]')).toBeFocused();
+});
