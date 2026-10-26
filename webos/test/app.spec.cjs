@@ -713,3 +713,84 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await expect.poll(()=>put.length).toBe(1);
  expect(put[0]).toEqual({method:'PUT',key:'film',rating:'9'});
 });
+
+test('Plezy cast is below episode list with locked D-pad focus, invisible scrollbar and actor filmography',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'device',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'test'}]})));
+ const actors=Array.from({length:18},(_,i)=>({id:'actor'+i,tag:'Person '+i,
+   role:'Character '+i,thumb:'/actors/'+i+'.jpg'}));
+ const show={ratingKey:'series',type:'show',title:'Original Series',
+   Role:actors,Guid:[{id:'tvdb://123456'}]};
+ const season={ratingKey:'season',type:'season',title:'Season 1',parentRatingKey:'series'};
+ const episode={ratingKey:'episode',type:'episode',title:'Episode One',parentRatingKey:'season',parentIndex:1,index:1};
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   const entries=path==='/hubs'?[show]:
+     path==='/library/metadata/series'?[show]:
+     path==='/library/metadata/series/children'?[season]:
+     path==='/library/metadata/season/children'?[episode]:
+     path.startsWith('/library/people/actor')?[show]:[];
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?{Hub:[{title:'Shows',Metadata:[show]}]}:
+     {Metadata:entries,totalSize:entries.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Original Series/}).first().click();
+ await expect(page.getByRole('heading',{name:'Seasons'})).toBeVisible();
+ const cast=page.locator('.cast-strip');
+ await expect(cast).toHaveAttribute('tabindex','0');
+ const order=await page.evaluate(()=>{
+   const seasons=document.querySelector('.detail-children-title');
+   const cast=document.querySelector('.cast-section');
+   return !!(seasons.compareDocumentPosition(cast)&Node.DOCUMENT_POSITION_FOLLOWING);
+ });
+ expect(order).toBe(true);
+ await cast.focus();
+ await page.keyboard.press('ArrowRight');
+ await expect(cast).toBeFocused();
+ await expect(cast).toHaveAttribute('aria-label',/Person 1/);
+ for(let i=0;i<9;i++)await page.keyboard.press('ArrowRight');
+ await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBeGreaterThan(0);
+ const hidden=await cast.evaluate(el=>getComputedStyle(el).scrollbarWidth==='none');
+ // Chromium may not implement scrollbar-width, but the webOS CSS must hide it.
+ expect(hidden || await cast.evaluate(el=>getComputedStyle(el).overflowX==='auto')).toBe(true);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Person 10'})).toBeVisible();
+});
+
+test('connected Simkl movie and series rating rows read existing user score and write to Simkl',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}],
+   simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',scope:'media:read media:write',
+     expiresAt:Date.now()+3600000}})));
+ const show={ratingKey:'series',type:'show',title:'Rated Series',year:2024,
+   Guid:[{id:'tvdb://321'}],rating:8.0,ratingImage:'imdb://rating'};
+ const writes=[];
+ await page.route('https://api.simkl.com/**',route=>{
+   const url=new URL(route.request().url());
+   if(url.pathname==='/redirect')return route.fulfill({status:404,json:{}});
+   if(url.pathname==='/ratings')return route.fulfill({json:{simkl:{rating:8.6,votes:130},
+     imdb:{rating:8.9,votes:500}}});
+   if(url.pathname==='/sync/ratings/shows')return route.fulfill({json:[
+     {show:{ids:{tvdb:321}},user_rating:7}]});
+   if(url.pathname==='/sync/ratings'){writes.push(JSON.parse(route.request().postData()));
+      return route.fulfill({status:201,json:{added:{shows:1}}});}
+   return route.fulfill({json:{}});
+ });
+ await page.route('http://plex.test/**',route=>{
+   const path=new URL(route.request().url()).pathname;
+   return route.fulfill({json:{MediaContainer:path==='/hubs'?{Hub:[{title:'Shows',Metadata:[show]}]}:
+     {Metadata:path==='/library/metadata/series'?[show]:[],totalSize:0}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Rated Series/}).first().click();
+ await expect(page.locator('.ratings-chip .rating-badge[aria-label^="Simkl"]')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip .rating-badge[aria-label^="IMDb"]')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip')).toHaveCount(1);
+ await page.getByRole('button',{name:'Rate',exact:true}).click();
+ await expect(page.locator('.rating-service').nth(1)).toContainText('Simkl');
+ await expect(page.locator('.rating-service').nth(1)).toContainText('7 / 10');
+ await page.getByRole('button',{name:'Simkl 9 / 10'}).click();
+ await page.getByRole('button',{name:'Save Simkl rating'}).click();
+ await expect.poll(()=>writes.length).toBe(1);
+ expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
+});
