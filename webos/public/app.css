@@ -343,3 +343,15 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .detail-parent-overview p { margin:6px 0 0; }
 .detail-season .detail-info { max-width:900px; }
 .detail-season > .poster { min-width:0; margin-left:35px; }
+
+/* Plezy-style centered buffering indicator, without a text toast obscuring video. */
+.player-buffering { position:absolute; inset:0; z-index:4; pointer-events:none;
+  display:flex; align-items:center; justify-content:center; }
+.player-buffering[hidden] { display:none; }
+.player-spinner { width:54px; height:54px; border-radius:50%; border:5px solid rgba(255,255,255,.22);
+  border-top-color:#fff; -webkit-animation:player-spin .9s linear infinite; animation:player-spin .9s linear infinite; }
+@-webkit-keyframes player-spin { to { -webkit-transform:rotate(360deg); } }
+@keyframes player-spin { to { transform:rotate(360deg); } }
+#player .player-status { top:auto; bottom:155px; left:22%; right:22%; padding:12px 16px;
+  background:rgba(12,12,14,.88); font-size:17px; pointer-events:none; }
+#player .player-status:empty { display:none; }

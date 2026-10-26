@@ -19,7 +19,8 @@
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <section id="player" aria-label="Video player" hidden>
     <video tabindex="-1" playsinline></video>
-    <div class="player-status" role="status"></div>
+    <div class="player-buffering" role="status" aria-label="Buffering" aria-busy="true" hidden><div class="player-spinner" aria-hidden="true"></div></div>
+    <div class="player-status" role="alert"></div>
     <!-- Translated from upstream VideoControlsHeader, VideoTimelineBar and
          DesktopVideoControls (icon discs, timeline, compact track controls). -->
     <div class="player-top">

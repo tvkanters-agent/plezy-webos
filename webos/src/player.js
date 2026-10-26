@@ -7,18 +7,30 @@ export class Player {
     this.controls = root.querySelector('.controls');
     this.sheet = root.querySelector('.player-sheet');
     this.status = root.querySelector('.player-status');
+    this.buffering = root.querySelector('.player-buffering');
+    this.seeking = false;
+    this.seekPreview = 0;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
     this.video.addEventListener('loadedmetadata', () => this.resume());
     this.video.addEventListener('canplay', () => { this.status.textContent = ''; this.resume(); });
     this.video.addEventListener('timeupdate', () => this.update());
     this.video.addEventListener('playing', () => {
-      this.status.textContent = ''; this.report('playing');
+      this.status.textContent = ''; this.showBuffering(false); this.report('playing');
       this.track('start'); this.reveal();
+      // Video.load() and decoder buffering may move focus to <body>.
+      // Restore the active transport control, but not over user choices.
+      if (this.controls.contains(document.activeElement)) return;
+      if (this.root.contains(document.activeElement) &&
+          document.activeElement !== this.video && document.activeElement !== this.root) return;
+      if (!this.controls.classList.contains('hidden-controls'))
+        this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
       if (this.session && !this.closing) { this.report('paused'); this.track('pause'); this.reveal(); }
     });
-    this.video.addEventListener('waiting', () => { if (this.session) this.status.textContent = 'Buffering…'; });
+    this.video.addEventListener('waiting', () => { if (this.session) this.showBuffering(true); });
+    this.video.addEventListener('seeking', () => { if (this.session) this.showBuffering(true); });
+    this.video.addEventListener('seeked', () => { if (this.video.readyState >= 3) this.showBuffering(false); });
     this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
@@ -30,6 +42,8 @@ export class Player {
     this.scrubbing = false;
     this.seekBar.addEventListener('input', () => {
       this.scrubbing = true;
+      this.seeking = true;
+      this.seekPreview = Number(this.seekBar.value);
       const seconds = Number(this.seekBar.value);
       this.root.querySelector('.elapsed-current').textContent = time(seconds);
       this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, this.timelineDuration() - seconds));
@@ -39,7 +53,8 @@ export class Player {
     });
     this.seekBar.addEventListener('change', () => {
       this.scrubbing = false;
-      this.seekTo(Number(this.seekBar.value));
+      // Pointer scrubbing commits immediately; remote seeking commits with OK.
+      if (!this.remoteSeeking) this.seekTo(Number(this.seekBar.value));
     });
     root.querySelector('[data-chapter]').onchange = event => {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
@@ -119,7 +134,9 @@ export class Player {
     this.api = api; this.item = item; this.options = options;
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
-    this.root.hidden = false; this.status.textContent = 'Preparing video…';
+    this.root.hidden = false; this.status.textContent = '';
+    this.showBuffering(true); this.seeking = false; this.remoteSeeking = false;
+    this.scrubbing = false;
     this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
     this.root.querySelector('[data-action="skip"]').hidden = true; this.marker = null;
@@ -226,6 +243,8 @@ export class Player {
     // failed/replaced decoder must still finish the started Simkl viewing.
     if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
     this.session = null; this.pendingStart = 0;
+    this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
+    this.scrubbing = false;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
     if (session) await api.stop(session).catch(() => {});
@@ -266,6 +285,41 @@ export class Player {
     if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
     this.reveal();
   }
+  showBuffering(show) {
+    this.buffering.hidden = !show;
+    this.buffering.setAttribute('aria-busy', String(show));
+  }
+  hideControls() {
+    clearTimeout(this.hideTimer);
+    this.controls.classList.add('hidden-controls');
+    this.root.querySelector('.player-top').classList.add('hidden-controls');
+    this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
+    this.video.focus();
+  }
+  adjustSeek(delta) {
+    const total = this.timelineDuration();
+    if (!this.session || total <= 0) return;
+    const original = this.seeking ? this.seekPreview : (this.pendingStart || this.video.currentTime || 0);
+    this.seekPreview = clamp(original + delta, 0, Math.max(0, total - .1));
+    this.seeking = true; this.remoteSeeking = true; this.scrubbing = true;
+    this.seekBar.max = String(Math.floor(total));
+    this.seekBar.value = String(Math.round(this.seekPreview));
+    this.seekBar.setAttribute('aria-valuetext', time(this.seekPreview) + ' of ' + time(total));
+    this.root.querySelector('.elapsed-current').textContent = time(this.seekPreview);
+    this.root.querySelector('.elapsed-remaining').textContent = '-' + time(total - this.seekPreview);
+    this.root.querySelector('.timeline-track progress').value = this.seekPreview / total;
+    this.reveal();
+    this.seekBar.focus();
+  }
+  commitSeek() {
+    if (!this.seeking) return false;
+    const point = this.seekPreview;
+    this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
+    this.seekTo(point);
+    if (this.video.paused) this.video.play().catch(() => this.failed());
+    this.hideControls();
+    return true;
+  }
   timelineDuration() {
     const duration = this.video.duration;
     return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
@@ -291,9 +345,7 @@ export class Player {
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
       if (this.session && this.sheet.hidden && !this.video.paused && document.activeElement !== this.seekBar && !['SELECT'].includes(document.activeElement.tagName)) {
-        this.controls.classList.add('hidden-controls');
-        this.root.querySelector('.player-top').classList.add('hidden-controls');
-        this.video.focus();
+        this.hideControls();
       }
     }, 5000);
   }
@@ -302,7 +354,20 @@ export class Player {
     if (!this.sheet.hidden && [461, 27, 413].includes(code)) {
       event.preventDefault(); this.closeSheet(); return true;
     }
-    if ([461, 27, 413].includes(code)) { event.preventDefault(); this.close(); return true; }
+    if ([461, 27, 413].includes(code)) {
+      event.preventDefault();
+      if (!this.controls.classList.contains('hidden-controls')) this.hideControls();
+      else this.close();
+      return true;
+    }
+    if ([37, 39].includes(code) && (this.controls.classList.contains('hidden-controls') ||
+        this.seeking || event.target === this.seekBar)) {
+      event.preventDefault();
+      this.adjustSeek(code === 37 ? -10 : 10); return true;
+    }
+    if (code === 13 && this.seeking) {
+      event.preventDefault(); this.commitSeek(); return true;
+    }
     if ([415, 19, 10252, 32, 412, 417].includes(code)) {
       event.preventDefault();
       if (code === 412) this.seek(-10);
@@ -312,16 +377,9 @@ export class Player {
       else this.toggle();
       return true;
     }
-    if (event.target === this.seekBar && [37, 39].includes(code)) {
+    if (this.controls.classList.contains('hidden-controls') && [13, 38, 40].includes(code)) {
       event.preventDefault();
-      this.seek(code === 37 ? -10 : 10);
-      this.seekBar.focus();
-      return true;
-    }
-    if (this.controls.classList.contains('hidden-controls') && [13, 37, 38, 39, 40].includes(code)) {
-      event.preventDefault();
-      if (code === 37) this.seek(-10); else if (code === 39) this.seek(30);
-      else if (code === 13) this.toggle();
+      if (code === 13) this.toggle();
       this.reveal(); this.root.querySelector('[data-action="pause"]').focus(); return true;
     }
     this.reveal(); return false;
