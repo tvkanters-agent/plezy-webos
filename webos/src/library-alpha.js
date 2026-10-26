@@ -56,11 +56,15 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     topSpace.style.height = (topRows * rowHeight) + 'px';
     bottomSpace.style.height = (Math.max(0, totalRows - endRows) * rowHeight) + 'px';
   };
+  // Keep the first visible row at the same vertical inset as the normal
+  // library layout. Without this, a letter jump pins artwork to y=0 and the
+  // next focused card shifts the page back down to the focus safe area.
+  const topInset = () => Math.max(32,
+    parseFloat(window.getComputedStyle(main).paddingTop) || 0);
   const firstVisibleIndex = () => {
     const gridTop = grid.offsetTop + 10;
-    const row = Math.floor(Math.max(0, main.scrollTop - gridTop) / rowHeight);
-    return Math.max(0, Math.min(total - 1,
-      rangeStart + row * columns + columns - 1));
+    const row = Math.floor(Math.max(0, main.scrollTop + topInset() - gridTop) / rowHeight);
+    return Math.max(0, Math.min(total - 1, rangeStart + row * columns));
   };
   const focusGrid = () => {
     const pane = main.getBoundingClientRect();
@@ -87,7 +91,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   const position = index => {
     const row = Math.floor((index - rangeStart) / columns);
     // grid.offsetTop is relative to main (which is position:relative).
-    main.scrollTop = Math.max(0, grid.offsetTop + 10 + row * rowHeight);
+    main.scrollTop = Math.max(0, grid.offsetTop + 10 + row * rowHeight - topInset());
     previousScrollTop = main.scrollTop;
     pinnedIndex = index; // Plezy pins a jump until the next user scroll.
     rail.update(helper.currentLetter(index));

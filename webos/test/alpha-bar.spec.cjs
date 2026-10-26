@@ -168,3 +168,26 @@ test('MediaBrowser nonalphabetical # bucket uses NameLessThan=A',async({page})=>
   await page.getByRole('group',{name:'Alphabet navigation'}).getByRole('button',{name:'#'}).click();
   await expect.poll(()=>requests.some(q=>q.NameLessThan==='A' && !q.NameStartsWith)).toBe(true);
 });
+
+test('Plex alphabet jumps preserve normal top spacing when focus returns to the grid',async({page})=>{
+  await mockPlexAlphabet(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const rail=page.getByRole('group',{name:'Alphabet navigation'});
+  await rail.getByRole('button',{name:'F',exact:true}).click();
+  await expect(page.locator('.alpha-window-grid .card[data-focus="150"]')).toBeVisible();
+  const before=await page.evaluate(()=>{
+    const main=document.querySelector('main');
+    const card=main.querySelector('.alpha-window-grid .card[data-focus="150"]');
+    return {scroll:main.scrollTop, top:card.getBoundingClientRect().top-main.getBoundingClientRect().top,
+      inset:parseFloat(getComputedStyle(main).paddingTop)};
+  });
+  expect(before.top).toBeGreaterThanOrEqual(before.inset-2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.alpha-window-grid .card:focus')).toHaveCount(1);
+  const after=await page.locator('main').evaluate(main=>main.scrollTop);
+  expect(Math.abs(after-before.scroll)).toBeLessThan(2);
+  const railBottom=await rail.evaluate(node=>node.getBoundingClientRect().bottom);
+  const shellBottom=await page.locator('#shell').evaluate(node=>node.getBoundingClientRect().bottom);
+  expect(Math.abs(shellBottom-railBottom)).toBeLessThan(2);
+});
