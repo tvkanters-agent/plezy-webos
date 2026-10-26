@@ -39,6 +39,8 @@ test('Back during delayed stream cleanup cannot resurrect playback',async({page}
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.locator('.player-sheet').getByRole('button',{name:'Compatible playback',exact:true}).click();
   await expect.poll(()=>!!release).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.controls')).toBeHidden();
   await page.keyboard.press('Escape'); release();
   await expect(page.locator('#player')).toBeHidden();
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
@@ -54,6 +56,7 @@ test('failed audio restart still stops the existing Simkl viewing',async({page})
   await page.getByRole('button',{name:'Subtitles',exact:true}).click();
   await page.getByRole('button',{name:'Subtitles off',exact:true}).click();
   await expect(page.locator('.player-status')).toContainText('HTTP 500');
+  await page.keyboard.press('Escape');await expect(page.locator('.controls')).toBeHidden();
   await page.keyboard.press('Escape');
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
   expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
@@ -201,10 +204,47 @@ test('upgrade clears a title-only saved stop and sends ID-only current playback'
     movie:{ids:{},title:'Previously rejected film',year:2024},progress:85}}]);
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/start')).toBe(true);
   expect(events.find(e=>e.path==='/scrobble/start').body.movie).toEqual({ids:{imdb:'tt1234567'}});
-  expect(events.some(e=>e.body.movie && Object.keys(e.body.movie.ids).length===0)).toBe(false);
+  expect(events.some(e=>e.body?.movie && Object.keys(e.body.movie.ids).length===0)).toBe(false);
   expect(calls.some(u=>u.pathname==='/library/metadata/movie' &&
     u.searchParams.get('includeGuids')==='1' && !u.searchParams.has('includeMarkers'))).toBe(true);
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(0);
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
+});
+
+test('Back hides player controls first and a second Back exits',async({page})=>{
+  await setup(page);
+  await expect(page.locator('.controls')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.controls')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#player')).toBeHidden();
+});
+test('remote seeks in hidden mode and center commits preview then dismisses controls',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.controls')).toBeHidden();
+  await page.keyboard.press('ArrowRight');
+  const slider=page.getByRole('slider',{name:'Seek playback'});
+  await expect(slider).toBeFocused();
+  const value=Number(await slider.inputValue());
+  expect(value).toBeGreaterThanOrEqual(10);
+  await page.keyboard.press('ArrowRight');
+  const next=Number(await slider.inputValue());
+  expect(next).toBeGreaterThan(value);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.controls')).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
+  await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime)).toBeGreaterThanOrEqual(next-2);
+});
+test('buffering spinner takes over for waiting and clears on playback',async({page})=>{
+  await setup(page);
+  const spinner=page.locator('.player-buffering');
+  await page.locator('video').dispatchEvent('waiting');
+  await expect(spinner).toBeVisible();
+  await expect(page.locator('.player-status')).toBeHidden();
+  await page.locator('video').dispatchEvent('playing');
+  await expect(spinner).toBeHidden();
+  await expect(page.locator('#player')).toBeVisible();
 });

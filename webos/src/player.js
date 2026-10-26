@@ -54,7 +54,10 @@ export class Player {
     this.seekBar.addEventListener('change', () => {
       this.scrubbing = false;
       // Pointer scrubbing commits immediately; remote seeking commits with OK.
-      if (!this.remoteSeeking) this.seekTo(Number(this.seekBar.value));
+      if (!this.remoteSeeking) {
+        this.seeking = false;
+        this.seekTo(Number(this.seekBar.value));
+      }
     });
     root.querySelector('[data-chapter]').onchange = event => {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
@@ -178,12 +181,12 @@ export class Player {
       }, 30000);
       try { await this.video.play(); } catch (error) {
         if (generation !== this.generation) return;
-        if (error.name === 'NotAllowedError') this.status.textContent = 'Press Play to start.';
+        if (error.name === 'NotAllowedError') {this.showBuffering(false);this.status.textContent = 'Press Play to start.';}
         // The media error handler owns decoding/network errors and fallback.
-        else if (!this.video.error && error.name !== 'AbortError') this.status.textContent = 'Press Play, or try compatible playback.';
+        else if (!this.video.error && error.name !== 'AbortError') {this.showBuffering(false);this.status.textContent = 'Press Play, or try compatible playback.';}
       }
     } catch (error) {
-      if (generation === this.generation) { this.status.textContent = error.message; this.reveal(); }
+      if (generation === this.generation) { this.showBuffering(false);this.status.textContent = error.message; this.reveal(); }
     }
   }
   resume() {
@@ -272,11 +275,12 @@ export class Player {
     if (!this.session || this.recovering) return;
     if (!this.session.transcode) {
       this.recovering = true;
-      this.notify('Direct playback failed; trying H.264/AAC transcoding.');
+      this.showBuffering(true);
       await this.reopen({transcode: true});
       this.recovering = false;
     } else {
-      this.status.textContent = 'Video could not play. Check server transcoding and TV codec support. Press Back to return.';
+      this.showBuffering(false);
+      this.status.textContent = 'Video could not play. Check server transcoding and TV codec support. Press Stop to return.';
       this.reveal();
     }
   }

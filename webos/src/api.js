@@ -277,8 +277,11 @@ export class Plex {
   async rate(item, value) {
     if (!Number.isFinite(value) || (value !== -1 && (value < 0 || value > 10)))
       throw new Error('Invalid Plex rating.');
-    return this.get('/:/rate', {key:item.id, identifier:'com.plexapp.plugins.library',rating:value},
-      {method:'PUT'});
+    // Plex responds with XML or an empty body, not necessarily JSON.
+    const response=await fetch(this.url('/:/rate',{
+      key:item.id,identifier:'com.plexapp.plugins.library',rating:value}),{method:'PUT'});
+    if (!response.ok) throw new Error('Plex rating returned HTTP '+response.status+'.');
+    return true;
   }
   async playback(item, options = {}) {
     const mediaIndex = options.mediaIndex ?? 0;
