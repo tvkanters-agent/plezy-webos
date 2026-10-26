@@ -785,17 +785,27 @@ async function render() {
         if (item.type === 'show' || item.type === 'Series') {
           try {
             const next = await api.onDeck(item.id);
-            if (next) return next;
+            if (next) {
+              try { return await api.detail(next.id,'episode'); }
+              catch (_) { return next; }
+            }
           } catch (_) { /* On Deck is optional */ }
         }
         const first = await api.children(item.id);
         if (item.type === 'season' || item.type === 'Season')
           return first.items.find(e => e.type === 'episode' || e.type === 'Episode') || null;
+        let firstEpisode=null;
         for (const season of first.items) {
           const episodes = await api.children(season.id);
-          const episode = episodes.items.find(e => e.type === 'episode' || e.type === 'Episode');
-          if (episode) return episode;
+          const candidates=episodes.items.filter(e => e.type === 'episode' || e.type === 'Episode');
+          const resumed=candidates.find(e=>e.resume>0);
+          if(resumed) {
+            try { return await api.detail(resumed.id,'episode'); }
+            catch (_) { return resumed; }
+          }
+          if(!firstEpisode)firstEpisode=candidates.find(e=>!e.watched)||candidates[0];
         }
+        if(firstEpisode)return firstEpisode;
         return null;
       };
       if (item.folder && (isPlexShow || isSeason)) {

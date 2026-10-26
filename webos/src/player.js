@@ -12,14 +12,20 @@ export class Player {
     this.seekPreview = 0;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.initialSeekPending = false;
+    this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
-    this.video.addEventListener('loadedmetadata', () => this.resume());
+    this.video.addEventListener('loadedmetadata', () => { this.resume(); this.startAfterInitialSeek(); });
     this.video.addEventListener('canplay', () => {
       this.status.textContent = ''; this.resume();
-      if (this.video.readyState >= 2) this.showBuffering(false);
+      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
+        this.showBuffering(false);
+      this.startAfterInitialSeek();
     });
     this.video.addEventListener('loadeddata', () => {
-      if (this.video.readyState >= 2) this.showBuffering(false);
+      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
+        this.showBuffering(false);
+      this.startAfterInitialSeek();
     });
     this.video.addEventListener('stalled', () => {
       if (this.session && !this.seeking) this.showBuffering(true);
@@ -48,11 +54,11 @@ export class Player {
       if (this.session && !this.seeking) this.showBuffering(true);
     });
     this.video.addEventListener('seeking', () => {
-      if (this.session && !this.remoteSeeking) this.showBuffering(true);
+      if (this.session) this.showBuffering(true);
     });
     this.video.addEventListener('seeked', () => {
-      // A paused frame is already drawable at HAVE_CURRENT_DATA.
-      if (this.video.readyState >= 2 || this.remoteSeeking) this.showBuffering(false);
+      this.startAfterInitialSeek();
+      if (this.video.readyState >= 2 && !this.initialSeekPending) this.showBuffering(false);
     });
     this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
@@ -164,6 +170,8 @@ export class Player {
     this.showBuffering(true); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.initialSeekPending = false;
+    this.initialSeekTarget = 0;
     this.scrubbing = false;
     this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
@@ -177,6 +185,9 @@ export class Player {
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
       this.pendingStart = session.start;
+      this.initialSeekTarget = Number(session.start) || 0;
+      // Do not decode/play the opening frame before seeking to resume.
+      this.initialSeekPending = this.initialSeekTarget > 0 && !session.transcode;
       this.root.querySelector('.play-method').textContent = session.transcode ? 'HLS · H.264 / AAC' : 'Direct play';
       for (const kind of ['audio', 'subtitle']) {
         const select = this.root.querySelector('[data-track="' + kind + '"]');
@@ -204,22 +215,42 @@ export class Player {
       this.startTimeout = setTimeout(() => {
         if (generation === this.generation && this.video.readyState < 2) this.failed();
       }, 30000);
-      try { await this.video.play(); } catch (error) {
-        if (generation !== this.generation) return;
-        if (error.name === 'NotAllowedError') {this.showBuffering(false);this.status.textContent = 'Press Play to start.';}
-        // The media error handler owns decoding/network errors and fallback.
-        else if (!this.video.error && error.name !== 'AbortError') {this.showBuffering(false);this.status.textContent = 'Press Play, or try compatible playback.';}
-      }
+      if (!this.initialSeekPending) await this.beginVideoPlayback(generation);
     } catch (error) {
       if (generation === this.generation) { this.showBuffering(false);this.status.textContent = error.message; this.reveal(); }
     }
   }
-  resume() {
-    if (this.pendingStart && this.session) {
-      try { this.video.currentTime = clamp(this.pendingStart, 0, Math.max(0, (this.video.duration || this.item.duration) - 1)); this.pendingStart = 0; }
-      catch (_) { /* Retry at canplay if the timeline is not available yet. */ }
+  async beginVideoPlayback(generation=this.generation) {
+    if (generation!==this.generation || !this.session) return;
+    try { await this.video.play(); }
+    catch(error) {
+      if (generation!==this.generation) return;
+      if (error.name==='NotAllowedError') {
+        this.showBuffering(false);this.status.textContent='Press Play to start.';
+      } else if (!this.video.error && error.name!=='AbortError') {
+        this.showBuffering(false);
+        this.status.textContent='Press Play, or try compatible playback.';
+      }
     }
-    clearTimeout(this.startTimeout);
+  }
+  resume() {
+    if (this.pendingStart && this.session && this.video.readyState>=1) {
+      try {
+        const target=clamp(this.pendingStart,0,Math.max(0,(this.video.duration||this.item.duration)-1));
+        this.video.currentTime=target;
+        this.pendingStart=0;
+        if(this.initialSeekPending)this.initialSeekTarget=target;
+      } catch (_) { /* Retry once the source is seekable. */ }
+    }
+    if (!this.pendingStart) clearTimeout(this.startTimeout);
+  }
+  startAfterInitialSeek() {
+    if(!this.initialSeekPending || this.pendingStart || !this.session)return;
+    if(this.video.seeking || this.video.readyState<2 ||
+       Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
+    this.initialSeekPending=false;
+    this.showBuffering(false);
+    this.beginVideoPlayback();
   }
   update() {
     const marker = (this.session?.markers || []).find(m => this.video.currentTime >= m.start && this.video.currentTime < m.end);
@@ -275,6 +306,8 @@ export class Player {
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.initialSeekPending = false;
+    this.initialSeekTarget = 0;
     this.scrubbing = false;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
@@ -350,7 +383,7 @@ export class Player {
       if (this.video.readyState >= 1) this.video.currentTime = this.seekPreview;
       else this.pendingStart = this.seekPreview;
     } catch (_) { this.pendingStart = this.seekPreview; }
-    this.showBuffering(false);
+    this.showBuffering(this.video.readyState < 2 || this.video.seeking);
     this.seekBar.max = String(Math.floor(total));
     this.seekBar.value = String(Math.round(this.seekPreview));
     this.seekBar.setAttribute('aria-valuetext', time(this.seekPreview) + ' of ' + time(total));
@@ -366,6 +399,7 @@ export class Player {
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
     this.seekTo(point);
+    this.showBuffering(true);
     // OK confirms the preview and resumes playback from that frame.
     this.video.play().catch(() => this.failed());
     this.seekWasPlaying = false;
