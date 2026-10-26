@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, version 0.2.4 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, version 0.2.5 alpha. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Build the 0.2.4 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.4 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
+4. **Build the 0.2.5 IPK** using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml) for commit 0.2.5 or newer. The published 0.2.0 release and legacy 0.1.0 IPK **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_0.2.4_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_0.2.5_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -84,7 +84,7 @@ This first target intentionally advertises a conservative profile rather than cl
 
 Not yet ported: native Flutter UI parity, music, Live TV/DVR, downloads, playlists, Plex Home user switching, Jellyfin Quick Connect, cross-server search, auto-next episode, multi-part playback, advanced filtering, localization, watch parties, additional tracker/Seerr integrations, HDR/Dolby Vision profiles, configurable HEVC/AV1 direct play, audio passthrough and mpv-specific shaders/subtitle rendering. There is no root/native Flutter embedder requirement.
 
-**Validation:** see [TESTING.md](TESTING.md). Desktop browser tests do not validate LG's decoder, native HLS support, firmware behavior, server compatibility or real account authentication. Real TV/server testing remains required before a stable release. webOS versions below 6 are not supported by this build target.
+**Validation:** see [TESTING.md](TESTING.md). Desktop browser tests do not validate LG's decoder, native HLS support, firmware behavior, server compatibility or real account authentication. Real TV/server testing remains required before a stable release. The primary test target is webOS 4.4.3-22 / Chromium 53. This does not guarantee every webOS 4.x device's media codecs or network setup.
 
 ## Build and test
 
@@ -166,3 +166,13 @@ The webOS frontend now loads the Plex library list into the navigation rail, all
 Show details include the Plex spotlight backdrop, tagline, year, studio, certificate, rating, summary, genres, credits, cast and season navigation. The player’s right-side controls now open compact audio/subtitle/chapter/settings choice sheets rather than exposing native HTML dropdowns. Horizontal shelf padding was adjusted to keep the final card visible.
 
 To reduce artwork stalls on webOS 4.4 / Chromium 53, Plezy asks Plex for pre-sized thumbnails, loads at most two images concurrently, and yields between small batches of card insertion. Simkl now reads full Plex GUIDs and sends upstream Plezy's exact identifier-only scrobble body. No title search or speculative matching is performed. Full fidelity and hardware playback/scrobble validation remain outstanding; don't treat these changes as a complete Flutter UI port.
+
+### 0.2.5 upstream-reference UI translation
+
+- Show/season poster badges use **remaining unwatched episode counts**, as in Flutter `WatchedIndicator`. Played movies/episodes use progress bars and completed indicators.
+- Season episode pages use Flutter `EpisodeCard`-style **landscape 16:9 thumbnails**, a play overlay, synopsis, episode index and runtime/air-date metadata, rather than poster grids.
+- Detail pages use the upstream-style separate **metadata/genre chips** and compact, tonal Play/Resume/watch/next controls. Large detail posters and backdrops request higher-resolution server-transcoded artwork than ordinary library cards.
+- Plex audio/subtitle selectors preserve original descriptions (e.g. SDH, CC, forced, commentary), codec/channel details and language names, using a browser translation of upstream `TrackLabelBuilder` and the full generated ISO-639 language map.
+- Back restores the covered library/home DOM, focus and scroll position without a fresh server fetch. Left from the first artwork column returns focus to the sidebar. Scrollbars are visually hidden on TV as in Flutter's immersive browsing UI, while wheel and remote scrolling remain functional.
+
+**Fidelity still incomplete:** this is a focused translation of the affected components, not the Flutter widget tree running on webOS. Full navigation, detail-screen geometry, action menus and TV-level performance require additional source-by-source porting and physical-device verification.

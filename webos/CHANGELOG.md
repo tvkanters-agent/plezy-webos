@@ -1,5 +1,15 @@
 # webOS changelog
 
+## 0.2.5 alpha — upstream WatchedIndicator, EpisodeCard and detail actions
+
+- Port show/season unwatched counts; episode lists now show 16:9 episode stills, synopsis and metadata.
+- Translate detail hero metadata/genre chips, compact tonal action pills and correct show/season Play actions.
+- Fetch higher-resolution art when it is shown large while retaining small poster requests in browsing grids.
+- Preserve original subtitle descriptions (including SDH/forced/CC) and audio details, with upstream ISO 639 language mappings.
+- Hide browser-default vertical scrollbars; distinguish focused active navigation; preserve covered page DOM, focus and scroll on Back; fix Left-to-sidebar boundaries.
+- The webOS application is still not feature/visual parity with native Plezy. Verify on LG webOS 4.4.3.
+
+
 ## 0.2.4 alpha — Plex library rail, show details and player fidelity
 
 - Fetch Plex libraries directly into the original-style navigation rail; support compact rail and per-library hidden preferences.

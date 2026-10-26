@@ -108,3 +108,12 @@ Test the exact `POST /oauth2/device` request shape (bare OAuth URL and URL-encod
 ## Upstream-first Simkl parity
 
 The webOS Simkl adapter now uses the body produced by `lib/services/trackers/simkl/simkl_tracker.dart`: movies `{progress,movie:{ids}}`, episodes `{progress,show:{ids},episode:{season,number}}`; absent external IDs are skipped. It does not query Simkl's catalog or invent matches from titles. Tests assert whole payload equality, ID resolution from Plex show metadata, no write for absent IDs, and no extra request following HTTP 404. Browser OAuth transport remains JSON as a webOS-specific accommodation based on the TV's observed rejection of URL-encoded requests, although native Plezy's Dart HTTP adapter uses form fields. This is an explicitly documented platform difference, not a change to the OAuth field names or grant flow.
+
+## webOS 4.4.3-22: 0.2.5 UI fidelity acceptance
+
+- Confirm partially viewed shows/seasons have remaining unwatched **number** badges rather than a completion tick.
+- Confirm show/movie/episode detail metadata appears as separate chips, and the active focused navigation item remains visibly focused.
+- Confirm season episodes use correct **episode thumbnail still** in a vertical 16:9 list, with episode number, synopsis and metadata.
+- Confirm subtitles show SDH/forced/commentary descriptors and ISO 639 language names.
+- Confirm Back from a detail returns to the same library scroll/focus without full page reload; Left from a first-row/first-column media card reaches the active sidebar destination.
+- Confirm higher-quality artwork on large detail views and the lack of native browser vertical scrollbar artifacts. These remain hardware checks, not proven by Chromium 134 Playwright.
