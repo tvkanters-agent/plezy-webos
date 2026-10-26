@@ -11,7 +11,7 @@ function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
-let detailMenu = null;
+let detailMenu = null, ratingDialogReturnFocus = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
@@ -187,7 +187,15 @@ function closeDetailMenu() {
 // Port of Plezy RatingBottomSheet / _RatingRow / _StarRatingControl.
 // One focusable row per service; LEFT/RIGHT changes half-stars; OK saves.
 // Pointer interaction chooses a 0-10 unit value across five star glyphs.
-function showRatingSheet(item, client) {
+function closeRatingSheet() {
+  dialog.hidden=true;
+  const target=ratingDialogReturnFocus;
+  ratingDialogReturnFocus=null;
+  if(target?.isConnected) focusWithoutJump(target,false);
+  else focusFirst();
+}
+function showRatingSheet(item, client, onSaved=()=>{}) {
+  ratingDialogReturnFocus=document.activeElement;
   dialog.textContent='';
   dialog.append(el('h2','Rate '+item.title));
   const shell=el('div',undefined,'rating-sheet-rows');
@@ -262,8 +270,8 @@ function showRatingSheet(item, client) {
         else await client.rate(item,value||-1);
         if(!tracker)item.raw.userRating=value;
         status.textContent='Saved';
-        // Refresh the title's source ratings and the personal Simkl badge.
-        dialog.hidden=true;render();
+        onSaved({tracker,value});
+        closeRatingSheet();
       }catch(error){status.textContent='Could not save: '+error.message;}
       finally{pending=false;}
     }
@@ -285,7 +293,7 @@ function showRatingSheet(item, client) {
       if(simkl.control.isConnected)simkl.status.textContent='Unavailable: '+error.message;
     });
   }
-  dialog.append(button('Close',()=>{dialog.hidden=true;focusFirst();}));
+  dialog.append(button('Close',closeRatingSheet));
   dialog.hidden=false;
   focusFirst(dialog,firstRow);
 }
@@ -411,7 +419,10 @@ function go(next, remember = true) {
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
 function back() {
   if (detailMenu) { closeDetailMenu(); return; }
-  if (!dialog.hidden) { dialog.hidden = true; focusFirst(); return; }
+  if (!dialog.hidden) {
+    if(ratingDialogReturnFocus){closeRatingSheet();return;}
+    dialog.hidden = true; focusFirst(); return;
+  }
   if (player.active) { player.close(); return; }
   if (history.length) {
     const previous = history.pop();
@@ -907,7 +918,10 @@ async function render() {
           await currentApi.watched(item, watched);
           render();
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
-        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api),'rating','detail-icon'));
+        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
+          ({tracker,value})=>{
+            if(tracker && ratingItem?.id===item.id){ownRating=value;showRatings();}
+          }),'rating','detail-icon'));
         const extra = [];
         if (parentShow) extra.push({label:'View series', action:() =>
           go({type:'detail',id:parentShow.id,kind:'show'})});
@@ -939,7 +953,10 @@ async function render() {
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           render();
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
-        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api),'rating','detail-icon'));
+        if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
+          ({tracker,value})=>{
+            if(tracker && ratingItem?.id===item.id){ownRating=value;showRatings();}
+          }),'rating','detail-icon'));
         if (api instanceof Plex && item.type === 'episode' && raw.parentRatingKey) {
           actions.append(detailButton('Next episode', async () => {
             const expected = revision, currentApi = api;
@@ -1012,7 +1029,16 @@ async function render() {
           selectedIndex=Math.max(0,Math.min(tiles.length-1,index));
           tiles.forEach((tile,i)=>tile.classList.toggle('cast-selected',i===selectedIndex));
           const tile=tiles[selectedIndex];
-          strip.scrollLeft=Math.max(0,tile.offsetLeft-tiles[0].offsetLeft-12);
+          // Match Plezy's scrollListToIndex: keep the selected card visible,
+          // but don't jump it to the left while it already fits on screen.
+          if(strip.clientWidth) {
+            const start=tile.offsetLeft-tiles[0].offsetLeft;
+            const end=start+tile.offsetWidth, edge=10;
+            if(start<strip.scrollLeft+edge)
+              strip.scrollLeft=Math.max(0,start-edge);
+            else if(end>strip.scrollLeft+strip.clientWidth-edge)
+              strip.scrollLeft=end-strip.clientWidth+edge;
+          }
           strip.setAttribute('aria-label','Cast: '+(actors[selectedIndex].tag||'Actor')+
             (actors[selectedIndex].role?' as '+actors[selectedIndex].role:''));
         }
