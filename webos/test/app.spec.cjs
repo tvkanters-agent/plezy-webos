@@ -580,3 +580,63 @@ test('D-pad Right from every sidebar destination crosses directly into the main 
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('main button').first()).toBeFocused();
 });
+
+test('Plezy season header includes series information and functional actions',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+  deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
+ const show={ratingKey:'show',type:'show',title:'Example Series',year:2023,
+  summary:'The series overview.',contentRating:'TV-14',thumb:'/show/thumb',
+  art:'/show/art',Genre:[{tag:'Drama'}]};
+ const season={ratingKey:'season1',parentRatingKey:'show',type:'season',title:'Season 1',
+  index:1,thumb:'/season/thumb',leafCount:1,viewedLeafCount:0};
+ const episode={ratingKey:'ep',type:'episode',title:'Pilot',index:1,parentIndex:1,
+  parentRatingKey:'season1',grandparentRatingKey:'show',grandparentTitle:'Example Series'};
+ await page.route('http://plex.test/**',route=>{
+  const name=new URL(route.request().url()).pathname;
+  if(name==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'Shows',Metadata:[show]}]}}});
+  if(name==='/library/metadata/show')return route.fulfill({json:{MediaContainer:{Metadata:[show]}}});
+  if(name==='/library/metadata/season1')return route.fulfill({json:{MediaContainer:{Metadata:[season]}}});
+  if(name==='/library/metadata/show/children')return route.fulfill({json:{MediaContainer:{Metadata:[season],totalSize:1}}});
+  if(name==='/library/metadata/season1/children')return route.fulfill({json:{MediaContainer:{Metadata:[episode],totalSize:1}}});
+  return route.fulfill({json:{MediaContainer:{Directory:[],Metadata:[]}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:'Example Series',exact:true}).click();
+ await page.getByRole('button',{name:'Season 1',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Example Series',exact:true})).toBeVisible();
+ await expect(page.getByText('The series overview.')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Shuffle'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Mark watched'})).toBeVisible();
+ await page.getByRole('button',{name:'More options'}).click();
+ await expect(page.getByRole('button',{name:'View series'})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'View series'})).toBeHidden();
+});
+test('episode overflow opens actions without launching compatible playback',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+  deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
+ const show={ratingKey:'show',type:'show',title:'The Parent Series',year:2020,
+   summary:'About this series.',art:'/show/art'};
+ const episode={ratingKey:'ep',type:'episode',title:'Pilot',parentIndex:1,index:1,
+   parentRatingKey:'season',grandparentRatingKey:'show',
+   grandparentTitle:'The Parent Series',thumb:'/episode/thumb',
+   summary:'The first episode.',Media:[{Part:[{id:'part',key:'/video.mp4'}]}]};
+ await page.route('http://plex.test/**',route=>{
+   const name=new URL(route.request().url()).pathname;
+   if(name==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'On deck',Metadata:[episode]}]}}});
+   if(name==='/library/metadata/ep')return route.fulfill({json:{MediaContainer:{Metadata:[episode]}}});
+   if(name==='/library/metadata/show')return route.fulfill({json:{MediaContainer:{Metadata:[show]}}});
+   return route.fulfill({json:{MediaContainer:{Directory:[],Metadata:[]}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:'Pilot',exact:true}).click();
+ await expect(page.getByRole('button',{name:'The Parent Series',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'More options'}).click();
+ await expect(page.getByRole('button',{name:'Compatible playback'})).toBeVisible();
+ await expect(page.locator('#player')).toBeHidden();
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('button',{name:'Compatible playback'})).toBeHidden();
+ await expect(page.getByRole('heading',{name:'Pilot'})).toBeVisible();
+});

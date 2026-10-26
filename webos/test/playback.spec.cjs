@@ -158,3 +158,14 @@ test('audio, subtitle and chapter buttons open focused choice sheets',async({pag
   await page.getByRole('button',{name:'Chapters',exact:true}).click();
   await expect(page.getByRole('button',{name:/Later/})).toBeVisible();
 });
+
+test('remote focus can scrub player timeline independently of playback controls',async({page})=>{
+ await setup(page);
+ const slider=page.getByRole('slider',{name:'Seek playback'});
+ await expect(slider).toBeVisible();
+ await slider.focus();
+ await page.keyboard.press('ArrowRight');
+ await expect(slider).toBeFocused();
+ await expect(slider).toHaveAttribute('aria-valuetext',/of/);
+ await expect(page.locator('#player')).toBeVisible();
+});
