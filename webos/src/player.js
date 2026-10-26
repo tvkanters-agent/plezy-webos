@@ -11,9 +11,19 @@ export class Player {
     this.seeking = false;
     this.seekPreview = 0;
     this.hideAfterSeek = false;
+    this.seekWasPlaying = false;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
     this.video.addEventListener('loadedmetadata', () => this.resume());
-    this.video.addEventListener('canplay', () => { this.status.textContent = ''; this.resume(); });
+    this.video.addEventListener('canplay', () => {
+      this.status.textContent = ''; this.resume();
+      if (this.video.readyState >= 2) this.showBuffering(false);
+    });
+    this.video.addEventListener('loadeddata', () => {
+      if (this.video.readyState >= 2) this.showBuffering(false);
+    });
+    this.video.addEventListener('stalled', () => {
+      if (this.session && !this.seeking) this.showBuffering(true);
+    });
     this.video.addEventListener('timeupdate', () => this.update());
     this.video.addEventListener('playing', () => {
       this.status.textContent = ''; this.showBuffering(false); this.report('playing');
@@ -29,14 +39,21 @@ export class Player {
         this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
-      if (this.session && !this.closing) {
+      if (this.session && !this.closing && !this.remoteSeeking) {
         this.report('paused'); this.track('pause');
         if (!this.hideAfterSeek) this.reveal();
       }
     });
-    this.video.addEventListener('waiting', () => { if (this.session) this.showBuffering(true); });
-    this.video.addEventListener('seeking', () => { if (this.session) this.showBuffering(true); });
-    this.video.addEventListener('seeked', () => { if (this.video.readyState >= 3) this.showBuffering(false); });
+    this.video.addEventListener('waiting', () => {
+      if (this.session && !this.seeking) this.showBuffering(true);
+    });
+    this.video.addEventListener('seeking', () => {
+      if (this.session && !this.remoteSeeking) this.showBuffering(true);
+    });
+    this.video.addEventListener('seeked', () => {
+      // A paused frame is already drawable at HAVE_CURRENT_DATA.
+      if (this.video.readyState >= 2 || this.remoteSeeking) this.showBuffering(false);
+    });
     this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
@@ -146,6 +163,7 @@ export class Player {
     this.root.hidden = false; this.status.textContent = '';
     this.showBuffering(true); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
+    this.seekWasPlaying = false;
     this.scrubbing = false;
     this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
@@ -220,7 +238,8 @@ export class Player {
       this.seekBar.value = String(Math.min(Math.floor(total), Math.floor(played)));
       this.seekBar.setAttribute('aria-valuetext', time(played) + ' of ' + time(total));
     }
-    this.root.querySelector('.timeline-track progress').value = fraction;
+    this.root.querySelector('.timeline-track progress').value =
+      this.scrubbing && total ? this.seekPreview / total : fraction;
     const pause = this.root.querySelector('[data-action="pause"]');
     pause.setAttribute('aria-label', this.video.paused ? 'Play' : 'Pause');
     pause.setAttribute('title', this.video.paused ? 'Play' : 'Pause');
@@ -255,6 +274,7 @@ export class Player {
     this.session = null; this.pendingStart = 0;
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
+    this.seekWasPlaying = false;
     this.scrubbing = false;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
@@ -298,8 +318,11 @@ export class Player {
     this.reveal();
   }
   showBuffering(show) {
+    if (!this.active) show = false;
     this.buffering.hidden = !show;
     this.buffering.setAttribute('aria-busy', String(show));
+    // Older LG Chromium versions are inconsistent about the :hidden rule.
+    this.buffering.style.display = show ? 'flex' : 'none';
   }
   hideControls() {
     clearTimeout(this.hideTimer);
@@ -314,7 +337,20 @@ export class Player {
     if (!this.session || total <= 0) return;
     const original = this.seeking ? this.seekPreview : (this.pendingStart || this.video.currentTime || 0);
     this.seekPreview = clamp(original + delta, 0, Math.max(0, total - .1));
-    this.seeking = true; this.remoteSeeking = true; this.scrubbing = true;
+    if (!this.seeking) {
+      this.seekWasPlaying = !this.video.paused;
+      this.seeking = true;
+      this.remoteSeeking = true;
+      this.video.pause();
+    }
+    this.scrubbing = true;
+    // Plezy previews an actual video frame at every D-pad seek step.
+    // Changing only the range input moved a number but never the picture.
+    try {
+      if (this.video.readyState >= 1) this.video.currentTime = this.seekPreview;
+      else this.pendingStart = this.seekPreview;
+    } catch (_) { this.pendingStart = this.seekPreview; }
+    this.showBuffering(false);
     this.seekBar.max = String(Math.floor(total));
     this.seekBar.value = String(Math.round(this.seekPreview));
     this.seekBar.setAttribute('aria-valuetext', time(this.seekPreview) + ' of ' + time(total));
@@ -330,7 +366,9 @@ export class Player {
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
     this.seekTo(point);
-    if (this.video.paused) this.video.play().catch(() => this.failed());
+    // OK confirms the preview and resumes playback from that frame.
+    this.video.play().catch(() => this.failed());
+    this.seekWasPlaying = false;
     this.hideControls();
     return true;
   }

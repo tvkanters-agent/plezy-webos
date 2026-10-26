@@ -345,7 +345,7 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .detail-season > .poster { min-width:0; margin-left:35px; }
 
 /* Plezy-style centered buffering indicator, without a text toast obscuring video. */
-.player-buffering { position:absolute; inset:0; z-index:4; pointer-events:none;
+.player-buffering { position:absolute; top:0; right:0; bottom:0; left:0; z-index:4; pointer-events:none;
   display:flex; align-items:center; justify-content:center; }
 .player-buffering[hidden] { display:none; }
 .player-spinner { width:54px; height:54px; border-radius:50%; border:5px solid rgba(255,255,255,.22);

@@ -230,6 +230,9 @@ test('remote seeks in hidden mode and center commits preview then dismisses cont
   await expect(slider).toBeFocused();
   const value=Number(await slider.inputValue());
   expect(value).toBeGreaterThanOrEqual(10);
+  await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime))
+    .toBeGreaterThanOrEqual(value-1);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
   await page.keyboard.press('ArrowRight');
   const next=Number(await slider.inputValue());
   expect(next).toBeGreaterThan(value);
