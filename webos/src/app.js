@@ -481,7 +481,7 @@ async function render() {
       if (api instanceof Plex) {
         const tags = values => (Array.isArray(values) ? values : []).map(x => x.tag || x.title).filter(Boolean);
         const metaRows = [
-          ['Genres', tags(raw.Genre)],
+          // Genres are already displayed as Flutter-style hero chips.
           ['Directors', tags(raw.Director)],
           ['Writers', tags(raw.Writer)],
           ['Cast', tags(raw.Role).slice(0, 12)]
