@@ -96,3 +96,65 @@ test('alpha rail is absent when sort is not title or fewer than 80 titles',async
   await expect(page.locator('.alpha-jump-bar')).toHaveCount(0);
   await expect(page.locator('.alpha-window-grid')).toHaveCount(0);
 });
+
+test('MediaBrowser alphabet filters by NameStartsWith and reselect toggles it off',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'jellyfin',quality:'auto',
+    servers:[{id:'jellyfin',kind:'jellyfin',url:'http://media.test',
+      name:'Jellyfin',token:'token',userId:'user'}]
+  })));
+  const calls=[];
+  await page.route('http://media.test/**',route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname==='/Users/user/Views')
+      return route.fulfill({json:{Items:[{Id:'movies',Name:'Movies',CollectionType:'movies'}]}});
+    if(url.pathname==='/Users/user/Items'){
+      calls.push(Object.fromEntries(url.searchParams.entries()));
+      const prefix=url.searchParams.get('NameStartsWith');
+      const items=Array.from({length:90},(_,i)=>({
+        Id:String(i),Name:(i<45?'A':'B')+' Film '+i,Type:'Movie'
+      })).filter(item=>!prefix || item.Name.startsWith(prefix));
+      const start=Number(url.searchParams.get('StartIndex')||0);
+      return route.fulfill({json:{Items:items.slice(start,start+60),TotalRecordCount:items.length}});
+    }
+    return route.fulfill({json:{Items:[]}});
+  });
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const bar=page.getByRole('group',{name:'Alphabet navigation'});
+  await expect(bar).toBeVisible();
+  await expect(bar.locator('.alpha-letter-slot')).toHaveCount(27);
+  await expect(bar.locator('.alpha-letter-slot.current')).toHaveCount(0);
+  await bar.getByRole('button',{name:'B',exact:true}).click();
+  await expect.poll(()=>calls.some(c=>c.NameStartsWith==='B')).toBe(true);
+  await expect(bar.locator('.alpha-letter-slot.highlighted')).toContainText('B');
+  await bar.getByRole('button',{name:'B',exact:true}).click();
+  await expect.poll(()=>calls.filter(c=>!c.NameStartsWith).length).toBeGreaterThan(1);
+  await expect(bar.locator('.alpha-letter-slot.highlighted')).toContainText('B');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.grid .card:focus')).toHaveCount(1);
+});
+
+test('MediaBrowser nonalphabetical # bucket uses NameLessThan=A',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'jellyfin',quality:'auto',
+    servers:[{id:'jellyfin',kind:'jellyfin',url:'http://media.test',
+      name:'Jellyfin',token:'token',userId:'user'}]
+  })));
+  const requests=[];
+  await page.route('http://media.test/**',route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname==='/Users/user/Views')
+      return route.fulfill({json:{Items:[{Id:'movies',Name:'Movies',CollectionType:'movies'}]}});
+    if(url.pathname==='/Users/user/Items'){
+      requests.push(Object.fromEntries(url.searchParams.entries()));
+      return route.fulfill({json:{TotalRecordCount:90,
+        Items:Array.from({length:60},(_,i)=>({Id:String(i),Name:'A Film '+i,Type:'Movie'}))}});
+    }
+    return route.fulfill({json:{Items:[]}});
+  });
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await page.getByRole('group',{name:'Alphabet navigation'}).getByRole('button',{name:'#'}).click();
+  await expect.poll(()=>requests.some(q=>q.NameLessThan==='A' && !q.NameStartsWith)).toBe(true);
+});
