@@ -1,12 +1,12 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version) {
+async function setup(page, extra = {}, version, pendingStops = []) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
-  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
+  await page.addInitScript(pendingStops=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
-    simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write'}})));
+    simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),pendingStops);
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
     Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm',Stream:[]}]}],...extra};
   await page.route('https://api.simkl.com/**',route=>{
@@ -168,4 +168,17 @@ test('remote focus can scrub player timeline independently of playback controls'
  await expect(slider).toBeFocused();
  await expect(slider).toHaveAttribute('aria-valuetext',/of/);
  await expect(page.locator('#player')).toBeVisible();
+});
+
+test('upgrade clears a title-only saved stop and sends ID-only current playback',async({page})=>{
+  const {events,calls}=await setup(page,{},undefined,[{id:'legacy',body:{
+    movie:{ids:{},title:'Previously rejected film',year:2024},progress:85}}]);
+  await expect.poll(()=>events.some(e=>e.path==='/scrobble/start')).toBe(true);
+  expect(events.find(e=>e.path==='/scrobble/start').body.movie).toEqual({ids:{imdb:'tt1234567'}});
+  expect(events.some(e=>e.body.movie && Object.keys(e.body.movie.ids).length===0)).toBe(false);
+  expect(calls.some(u=>u.pathname==='/library/metadata/movie' &&
+    u.searchParams.get('includeGuids')==='1' && !u.searchParams.has('includeMarkers'))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).simkl.pendingStops.length)).toBe(0);
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
 });

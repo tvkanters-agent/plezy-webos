@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Protocols ported from lib/services/{plex,jellyfin}_* and their client parts.
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
+import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
 const enc = encodeURIComponent;
 const PAGE = 60;
@@ -189,6 +190,15 @@ export class Plex {
     const data = await this.get('/hubs/search', {query, limit: 60});
     return (data.MediaContainer.Hub || []).reduce((all, h) => all.concat(h.Metadata || []), [])
       .filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem);
+  }
+  async fetchExternalIds(itemId) {
+    // Port PlexClient.fetchExternalIds exactly: missing/deleted metadata is
+    // empty, but network/auth/server failures must not masquerade as no IDs.
+    let data;
+    try { data = await this.get('/library/metadata/' + enc(itemId), {includeGuids: 1}); }
+    catch (error) { if (error.status === 404) return {}; throw error; }
+    const metadata = data?.MediaContainer?.Metadata;
+    return plexExternalIds(Array.isArray(metadata) ? metadata[0] : null);
   }
   async detail(itemId, kind = '') {
     const path = kind === 'collection' ? '/library/collections/' + enc(itemId) :

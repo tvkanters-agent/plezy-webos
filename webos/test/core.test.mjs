@@ -411,3 +411,23 @@ test('Plex translates upstream ISO 639 language names and keeps SDH display titl
  assert.equal(t.primary,'French');
  assert.match(t.secondary,/commentary/);
 });
+
+test('Plex tracker ID fetch matches upstream modern, legacy, empty and HTTP error cases', async () => {
+  const api=new Plex(server,'device'); let response, seen;
+  const restore=mock(async url=>{seen=new URL(url);return response;});
+  try {
+    response=json({MediaContainer:{Metadata:[{guid:'plex://show/abc',Guid:[
+      {id:'imdb://tt12345'},{id:'tmdb://456'},{id:'tvdb://789'}]}]}});
+    assert.deepEqual(await api.fetchExternalIds('show-1'),{imdb:'tt12345',tmdb:456,tvdb:789});
+    assert.equal(seen.pathname,'/prefix/library/metadata/show-1');
+    assert.equal(seen.searchParams.get('includeGuids'),'1');
+    assert.equal(seen.searchParams.has('includeMarkers'),false);
+    response=json({MediaContainer:{Metadata:[{guid:'com.plexapp.agents.thetvdb://315500?lang=en'}]}});
+    assert.deepEqual(await api.fetchExternalIds('show-1'),{tvdb:315500});
+    for(const body of [{},{MediaContainer:{Metadata:[]}},{MediaContainer:{Metadata:[{guid:'plex://show/a'}]}}]) {
+      response=json(body);assert.deepEqual(await api.fetchExternalIds('show-1'),{});
+    }
+    response=new Response('',{status:404});assert.deepEqual(await api.fetchExternalIds('gone'),{});
+    response=new Response('',{status:500});await assert.rejects(api.fetchExternalIds('show-1'),/HTTP 500/);
+  } finally {restore();}
+});

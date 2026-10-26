@@ -117,3 +117,9 @@ The webOS Simkl adapter now uses the body produced by `lib/services/trackers/sim
 - Confirm subtitles show SDH/forced/commentary descriptors and ISO 639 language names.
 - Confirm Back from a detail returns to the same library scroll/focus without full page reload; Left from a first-row/first-column media card reaches the active sidebar destination.
 - Confirm higher-quality artwork on large detail views and the lack of native browser vertical scrollbar artifacts. These remain hardware checks, not proven by Chromium 134 Playwright.
+
+## Simkl poisoned-queue regression (2026-10-26)
+
+Reproduced the reported `404 id_err; IDs: none; title: present; year: present` on commit `25c27cd39`: seed a persisted title-only stop, then start a movie with valid TMDB IDs. Only the old `/scrobble/stop` was sent; the current `/scrobble/start` never reached the network.
+
+Regression coverage checks upgrade cleanup of that saved row, continuation after an ID-bearing failed stop, exact upstream ID-only movie/episode bodies, no Fribb request, and the dedicated Plex GUID fetch including legacy GUIDs, missing metadata, 404 and server errors. A real browser video test also starts/stops playback with the poisoned queue loaded from localStorage. This is mock API validation, not confirmation of a live Plex/Simkl account.

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {beginSimklLink, pollSimklLink, parseSession, validSession, scrobblePayload,
-  simklMovieIds, findFribbSimklId, progressPercent, SimklTracker, SIMKL_CLIENT_ID} from '../src/simkl.js';
+  simklMovieIds, progressPercent, SimklTracker, SIMKL_CLIENT_ID} from '../src/simkl.js';
 
 const token = (value='simkl_at_example') => ({
   access_token:value,refresh_token:'simkl_rt_test',expires_in:3600,scope:'media:read media:write'
@@ -54,12 +54,11 @@ test('Simkl device flow treats pending and slow down as nonterminal but rejects 
 });
 test('Simkl normalizes Plex external GUIDs and builds series-level episode IDs',()=>{
   assert.deepEqual(simklMovieIds(movie.raw),{imdb:'tt1234567',tmdb:9988});
-  assert.deepEqual(scrobblePayload(movie),{movie:{ids:{imdb:'tt1234567',tmdb:9988},
-    title:'Test film',year:2024}});
+  assert.deepEqual(scrobblePayload(movie),{movie:{ids:{imdb:'tt1234567',tmdb:9988}}});
   const episode={type:'episode',raw:{index:3,parentIndex:2,grandparentTitle:'Series Name',
     Guid:[{id:'tmdb://9999'}]}};
   const show={raw:{title:'Series Name',year:2020,Guid:[{id:'tvdb://321'}]}};
-  assert.deepEqual(scrobblePayload(episode,show),{show:{ids:{tvdb:321},title:'Series Name',year:2020},
+  assert.deepEqual(scrobblePayload(episode,show),{show:{ids:{tvdb:321}},
     episode:{season:2,number:3}});
   assert.equal(scrobblePayload({type:'show',raw:{}}),null);
   assert.equal(scrobblePayload({type:'episode',raw:{index:2,parentIndex:null}}),null);
@@ -79,7 +78,8 @@ test('Simkl scrobbles only real play/pause/stop events, paced and without heartb
     await play.event('pause',55,100);
     await play.event('stop',96,100,true);
     await play.event('stop',96,100,true);
-    // Upstream-style Fribb ID lookup is a separate request, not a Simkl write.
+    // Simkl-only configuration must not fetch the Fribb mapping at all.
+    assert.ok(calls.every(c=>c.url.hostname==='api.simkl.com'));
     const scrobbles = calls.filter(c=>c.url.hostname==='api.simkl.com');
     assert.deepEqual(scrobbles.map(c=>c.url.pathname),['/scrobble/start','/scrobble/pause','/scrobble/stop']);
     assert.deepEqual(scrobbles.map(c=>JSON.parse(c.opts.body).progress),[10,55,100]);
@@ -132,7 +132,7 @@ test('Simkl manual watched and unwatched changes use movie/episode history endpo
   const restore=mock(async(url,opts)=>{calls.push({path:new URL(url).pathname,body:JSON.parse(opts.body)});return respond({});});
   try{
     const tracker=new SimklTracker(()=>session,()=>{});
-    const api={server:{kind:'plex'},detail:async()=>({raw:{title:'Show',Guid:[{id:'tvdb://135'}]}})};
+    const api={server:{kind:'plex'},fetchExternalIds:async()=>({tvdb:135})};
     await tracker.markWatched(api,movie,true);
     await tracker.markWatched(api,{type:'episode',raw:{
       parentIndex:1,index:2,grandparentRatingKey:'show',grandparentTitle:'Show'}},false);
@@ -150,14 +150,14 @@ test('Simkl never sends an old account playback after disconnect and relink',asy
   const restore=mock(async(url,opts)=>{calls.push(new URL(url).pathname);return respond({});});
   try{
     let finish;const blocker=new Promise(resolve=>{finish=resolve;});
-    const api={server:{kind:'plex'},detail:()=>blocker};
+    const api={server:{kind:'plex'},fetchExternalIds:()=>blocker};
     const item={type:'episode',raw:{index:1,parentIndex:1,grandparentRatingKey:'show',grandparentTitle:'A'}};
     const tracker=new SimklTracker(()=>session,newSession=>{session=newSession;});
     const playback=tracker.createPlayback(api,item);
     const first=playback.event('start',10,100);
     tracker.reset();
     session=saved({accessToken:'simkl_at_second'});
-    finish({raw:{title:'A',Guid:[{id:'tvdb://23'}]}});
+    finish({tvdb:23});
     await first;
     assert.deepEqual(calls,[]);
   }finally{restore();}
@@ -220,7 +220,7 @@ test('Simkl daily quota keeps final stops without hammering the API',async()=>{
 test('Simkl ignores a rate-limit response from a disconnected account',async()=>{
   let session=saved(),complete;
   const restore=mock(async()=>new Promise(resolve=>{complete=resolve;}));
-  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});const pending=tracker.scrobble('start',{});
+  try{const tracker=new SimklTracker(()=>session,value=>{session=value;});const pending=tracker.scrobble('start',{movie:{ids:{tmdb:603}},progress:0});
     await new Promise(resolve=>setTimeout(resolve,0));tracker.reset();session=saved({accessToken:'simkl_at_other'});
     complete(respond({error:'user_limit_exceeded'},429));await pending;assert.equal(tracker.holdUntil,0);
   }finally{restore();}
@@ -256,17 +256,15 @@ test('Simkl fetches full Plex movie GUIDs when home hub omits external identifie
   try{
     const tracker=new SimklTracker(()=>saved(),()=>{});
     let detailCalls=0;
-    const payload=await tracker.itemPayload({detail:async()=>{detailCalls++;
-      return {type:'movie',title:'Film',raw:{title:'Film',year:2025,Guid:[{id:'imdb://tt7654321'}]}};}},
+    const payload=await tracker.itemPayload({fetchExternalIds:async()=>{detailCalls++; return {imdb:'tt7654321'};}},
       {type:'movie',id:'movie1',title:'Film',raw:{title:'Film',guid:'plex://movie/xyz'}});
     assert.equal(detailCalls,1);
     assert.equal(payload.movie.ids.imdb,'tt7654321');
-    assert.equal(payload.movie.title,'Film');
-    assert.equal(payload.movie.year,2025);
+    assert.deepEqual(payload.movie,{ids:{imdb:'tt7654321'}});
   }finally{restore();}
 });
 
-test('Simkl includes external IDs and title/year for server-side match fallback',async()=>{
+test('Simkl matches upstream ID-only movie and episode request bodies',async()=>{
   const calls=[],session=saved();
   const restore=mock(async(url,options)=>{
     calls.push({path:new URL(url).pathname,body:JSON.parse(options.body)});
@@ -276,27 +274,24 @@ test('Simkl includes external IDs and title/year for server-side match fallback'
     const tracker=new SimklTracker(()=>session,()=>{});
     await tracker.scrobble('start',{...scrobblePayload(movie),progress:20.5});
     const episode={type:'episode',raw:{index:3,parentIndex:1,grandparentRatingKey:'show'}};
-    const context=await tracker.itemPayload({detail:async()=>({
-      raw:{title:'My Show',Guid:[{id:'tvdb://321'}]}})},episode);
+    const context=await tracker.itemPayload({fetchExternalIds:async()=>({tvdb:321})},episode);
     await tracker.scrobble('stop',{...context,progress:80});
     assert.deepEqual(calls.map(c=>c.path),['/scrobble/start','/scrobble/stop']);
-    assert.deepEqual(calls[0].body,{progress:20.5,movie:{ids:{imdb:'tt1234567',tmdb:9988},
-      title:'Test film',year:2024}});
-    assert.deepEqual(calls[1].body,{progress:80,show:{ids:{tvdb:321},title:'My Show'},
+    assert.deepEqual(calls[0].body,{progress:20.5,movie:{ids:{imdb:'tt1234567',tmdb:9988}}});
+    assert.deepEqual(calls[1].body,{progress:80,show:{ids:{tvdb:321}},
       episode:{season:1,number:3}});
   } finally{restore();}
 });
-test('Simkl reports titles lacking external Plex IDs without an extra search request',async()=>{
+test('Simkl sends nothing for titles lacking external IDs, as upstream does',async()=>{
   const calls=[];
   const restore=mock(async(url)=>{calls.push(new URL(url).pathname);return respond({});});
   try {
     const tracker=new SimklTracker(()=>saved(),()=>{});
-    const api={server:{kind:'plex'},detail:async()=>({type:'movie',raw:{
-      title:'Unresolved movie',year:2026,guid:'plex://movie/abc'}})};
+    const api={server:{kind:'plex'},fetchExternalIds:async()=>({})};
     const play=tracker.createPlayback(api,{id:'unknown',type:'movie',raw:{title:'Unresolved movie'}});
     await play.event('start',10,100);
     await play.event('stop',30,100);
-    assert.deepEqual(calls,['/scrobble/start','/scrobble/stop']);
+    assert.deepEqual(calls,[]);
   }finally{restore();}
 });
 test('Simkl does not invent a title-search fallback after an upstream API 404',async()=>{
@@ -330,25 +325,46 @@ test('Simkl inherits upstream ExternalIds legacy Plex agent GUID matching',()=>{
    'modern Plex Guid takes precedence over legacy scalar');
 });
 
-test('Fribb Simkl resolution prefers mapped show IDs and disambiguates seasons', () => {
-  const rows = [
-    {tvdb_id:321,simkl_id:444,season:{tvdb:1},themoviedb_id:{tv:654}},
-    {tvdb_id:321,simkl_id:555,season:{tvdb:2},themoviedb_id:{tv:654}},
-    {imdb_id:['tt1234567'],simkl_id:123,themoviedb_id:{movie:[9988]}}
-  ];
-  assert.equal(findFribbSimklId(rows,{tvdb:321},{season:1}),444);
-  assert.equal(findFribbSimklId(rows,{tvdb:321},{season:2}),555);
-  assert.equal(findFribbSimklId(rows,{tvdb:321}),null);
-  assert.equal(findFribbSimklId(rows,{tmdb:9988},{movie:true}),123);
-  assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:true}),null);
-  assert.equal(findFribbSimklId(rows,{tmdb:654},{movie:false,season:1}),444);
+test('Simkl never substitutes title/year for a missing movie or show identity',()=>{
+  assert.equal(scrobblePayload({type:'movie',raw:{title:'Film',year:2025}}),null);
+  assert.equal(scrobblePayload({type:'episode',raw:{parentIndex:4,index:8,
+    grandparentTitle:'Show',Guid:[{id:'tvdb://999'}]}}),null);
 });
 
-test('Simkl identity fallback preserves movie and series coordinates without guessing IDs',()=>{
-  const onlyTitle = {type:'movie',raw:{title:'Unindexed Film',year:2025,guid:'plex://movie/id'}};
-  assert.deepEqual(scrobblePayload(onlyTitle),{movie:{ids:{},title:'Unindexed Film',year:2025}});
-  const ep = {type:'episode',raw:{parentIndex:4,index:8,grandparentTitle:'Show Without GUIDs'}};
-  assert.deepEqual(scrobblePayload(ep),{show:{ids:{},title:'Show Without GUIDs'},
-    episode:{season:4,number:8}});
-  assert.equal(scrobblePayload({type:'movie',raw:{}}),null);
+test('a persisted title-only stop cannot poison fresh movie tracking after upgrade',async()=>{
+  let session=saved({pendingStops:[{id:'old',body:{progress:81,
+    movie:{ids:{},title:'Old unmatched title',year:2024}}}]});
+  const calls=[], errors=[];
+  const restore=mock(async(url,options)=>{
+    const body=JSON.parse(options.body); calls.push({path:new URL(url).pathname,body});
+    return respond(Object.keys((body.movie||body.show).ids).length?{}:{error:'id_err'},
+      Object.keys((body.movie||body.show).ids).length?200:404);
+  });
+  try {
+    const tracker=new SimklTracker(()=>session,s=>session=s,e=>errors.push(e));
+    const play=tracker.createPlayback({server:{kind:'plex'},fetchExternalIds:async()=>({tmdb:603})},
+      {id:'movie',type:'movie',raw:{title:'The Matrix',year:1999}});
+    await play.event('start',30,100); await play.event('stop',90,100);
+    assert.deepEqual(calls,[{path:'/scrobble/start',body:{movie:{ids:{tmdb:603}},progress:30}},
+      {path:'/scrobble/stop',body:{movie:{ids:{tmdb:603}},progress:90}}]);
+    assert.deepEqual(session.pendingStops,[]);assert.deepEqual(errors,[]);
+  } finally {restore();}
+});
+test('an ID-bearing saved stop rejected with id_err does not block the current episode',async()=>{
+  let session=saved({pendingStops:[{id:'old',body:{progress:81,movie:{ids:{tmdb:999}}}}]});
+  const calls=[],errors=[];
+  const restore=mock(async(url,options)=>{
+    const body=JSON.parse(options.body);calls.push({path:new URL(url).pathname,body});
+    return body.movie?respond({error:'id_err'},404):respond({});
+  });
+  try {
+    const tracker=new SimklTracker(()=>session,s=>session=s,e=>errors.push(e));
+    const play=tracker.createPlayback({server:{kind:'plex'},fetchExternalIds:async id=>{
+      assert.equal(id,'show');return {tvdb:12345};}},
+      {type:'episode',raw:{grandparentRatingKey:'show',parentIndex:1,index:3}});
+    await play.event('start',30,100);
+    assert.deepEqual(calls.map(c=>c.path),['/scrobble/stop','/scrobble/start']);
+    assert.deepEqual(calls[1].body,{show:{ids:{tvdb:12345}},episode:{season:1,number:3},progress:30});
+    assert.equal(session.pendingStops.length,1);assert.match(errors[0],/Saved Simkl update/);
+  } finally {restore();}
 });
