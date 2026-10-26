@@ -601,7 +601,7 @@ test('Plezy season header includes series information and functional actions',as
   return route.fulfill({json:{MediaContainer:{Directory:[],Metadata:[]}}});
  });
  await page.goto('/');
- await page.getByRole('button',{name:'Example Series',exact:true}).click();
+ await page.getByRole('button',{name:/Example Series/}).first().click();
  await page.getByRole('button',{name:'Season 1',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
  await expect(page.getByRole('button',{name:'Example Series',exact:true})).toBeVisible();
@@ -631,7 +631,7 @@ test('episode overflow opens actions without launching compatible playback',asyn
    return route.fulfill({json:{MediaContainer:{Directory:[],Metadata:[]}}});
  });
  await page.goto('/');
- await page.getByRole('button',{name:'Pilot',exact:true}).click();
+ await page.getByRole('button',{name:/Pilot/}).first().click();
  await expect(page.getByRole('button',{name:'The Parent Series',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'More options'}).click();
  await expect(page.getByRole('button',{name:'Compatible playback'})).toBeVisible();
