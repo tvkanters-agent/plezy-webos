@@ -1160,6 +1160,11 @@ window.addEventListener('keydown', event => {
   if (player.active && player.key(event)) return;
   if ([461, 27].includes(event.keyCode)) { event.preventDefault(); back(); return; }
   const direction = {37: 'left', 38: 'up', 39: 'right', 40: 'down'}[event.keyCode];
+  // CastMemberStrip captures OK as a locked-focus row (there is no focused
+  // child button for the browser to synthesize a click on).
+  if (event.keyCode===13 && document.activeElement?.classList.contains('cast-strip')) {
+    event.preventDefault();document.activeElement.castKey?.(13);return;
+  }
   if (!direction) return;
   const current = document.activeElement;
   if (current.classList?.contains('cast-strip') && [37,39,13].includes(event.keyCode)) {

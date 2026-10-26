@@ -682,6 +682,7 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
   Role:[{tag:'Actor Example',role:'Detective',thumb:'/cast/actor.jpg'}],
   Media:[{videoResolution:'1080',Part:[{id:'part',key:'/movie.mp4'}]}]};
  const put=[];
+ await page.route('https://api.simkl.com/redirect**',route=>route.fulfill({status:404,json:{}}));
  await page.route('https://api.simkl.com/ratings**',route=>route.fulfill({json:{
    simkl:{rating:8.1,votes:120},imdb:{rating:8.6,votes:9000}}}));
  await page.route('http://plex.test/**',route=>{
@@ -696,8 +697,11 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
  await page.goto('/');
  await page.getByRole('button',{name:/The Great Film/}).first().click();
  await expect(page.locator('.detail-chips')).toContainText('1080p');
- await expect(page.locator('.rating-line')).toContainText('IMDb');
- await expect(page.locator('.rating-line')).toContainText('Simkl');
+ await expect(page.locator('.ratings-chip .rating-badge[aria-label^="IMDb"]')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip .rating-badge[aria-label^="Simkl"]')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip img[src="assets/rating_icons/imdb.svg"]')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip img[src="assets/simkl_mark.svg"]')).toHaveCount(1);
  await expect(page.getByRole('heading',{name:'Cast'})).toBeVisible();
  await expect(page.getByText('Actor Example')).toBeVisible();
  await expect(page.getByText('Detective')).toBeVisible();

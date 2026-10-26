@@ -25,7 +25,7 @@ export function ratingBadgeInfo(source,value) {
    key==='metacritic'?(value*10).toFixed(0):
    key==='letterboxd'?(value/2).toFixed(1):
    key==='mal'?value.toFixed(2):value.toFixed(1);
- return {src:file?'/assets/'+file[0]:null,aspect:file?file[1]:1,value:numeric,
+ return {src:file?'assets/'+file[0]:null,aspect:file?file[1]:1,value:numeric,
    label:({imdb:'IMDb',tmdb:'TMDB',simkl:'Simkl',mal:'MyAnimeList',critic:'Critics',
     audience:'Audience',rottenTomatoesCritic:'Rotten Tomatoes critics',
     rottenTomatoesAudience:'Rotten Tomatoes audience'})[key]||key};
