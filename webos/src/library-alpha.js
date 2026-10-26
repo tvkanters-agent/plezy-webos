@@ -56,26 +56,33 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     topSpace.style.height = (topRows * rowHeight) + 'px';
     bottomSpace.style.height = (Math.max(0, totalRows - endRows) * rowHeight) + 'px';
   };
-  // Keep the first visible row at the same vertical inset as the normal
-  // library layout. Without this, a letter jump pins artwork to y=0 and the
-  // next focused card shifts the page back down to the focus safe area.
-  const topInset = () => Math.max(32,
-    parseFloat(window.getComputedStyle(main).paddingTop) || 0);
   const firstVisibleIndex = () => {
     const gridTop = grid.offsetTop + 10;
-    const row = Math.floor(Math.max(0, main.scrollTop + topInset() - gridTop) / rowHeight);
+    // A small epsilon avoids rounding a correctly aligned first row into the
+    // preceding row if the browser's pixel snapping loses a fraction of a px.
+    const row = Math.floor(Math.max(0, main.scrollTop - gridTop + 1) / rowHeight);
     return Math.max(0, Math.min(total - 1, rangeStart + row * columns));
   };
   const focusGrid = () => {
-    const pane = main.getBoundingClientRect();
-    const visible = allCards().filter(node => {
-      const r = node.getBoundingClientRect();
-      return r.bottom > pane.top && r.top < pane.bottom;
-    });
-    const rowY = visible.length ? visible[0].getBoundingClientRect().top : null;
-    const firstRow = visible.filter(node =>
-      Math.abs(node.getBoundingClientRect().top - rowY) < 3);
-    const target = firstRow[firstRow.length - 1] || visible[0] || allCards()[0];
+    // Port of LibraryBrowseTab._navigateToGridNearScroll: select the LAST
+    // item of the targeted first-visible row, not the first DOM node whose
+    // bottom overlaps the viewport. A partially visible preceding row must
+    // never hijack Left/Back from the alphabet rail.
+    const index = pinnedIndex === null ? firstVisibleIndex() : pinnedIndex;
+    const end = Math.min(total - 1, (Math.floor(index / columns) + 1) * columns - 1);
+    const loaded = allCards();
+    let target = loaded[end - rangeStart];
+    if (!target) {
+      const pane = main.getBoundingClientRect();
+      const visible = loaded.filter(node => {
+        const r = node.getBoundingClientRect();
+        return r.top >= pane.top - 1 && r.top < pane.bottom;
+      });
+      const rowY = visible.length ? visible[0].getBoundingClientRect().top : null;
+      const firstRow = visible.filter(node =>
+        Math.abs(node.getBoundingClientRect().top - rowY) < 3);
+      target = firstRow[firstRow.length - 1] || visible[0] || loaded[0];
+    }
     if (target) focusWithoutJump(target, false);
   };
   const rail = createAlphaJumpBar(characters, {
@@ -90,8 +97,9 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   rail.update(helper.currentLetter(0));
   const position = index => {
     const row = Math.floor((index - rangeStart) / columns);
-    // grid.offsetTop is relative to main (which is position:relative).
-    main.scrollTop = Math.max(0, grid.offsetTop + 10 + row * rowHeight - topInset());
+    // Position the selected row flush with the viewport, like Plezy's
+    // scrollOffsetForItemIndex. Extra top padding exposes the preceding row.
+    main.scrollTop = Math.max(0, grid.offsetTop + 10 + row * rowHeight);
     previousScrollTop = main.scrollTop;
     pinnedIndex = index; // Plezy pins a jump until the next user scroll.
     rail.update(helper.currentLetter(index));

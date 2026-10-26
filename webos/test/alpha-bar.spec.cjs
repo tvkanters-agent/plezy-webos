@@ -169,7 +169,7 @@ test('MediaBrowser nonalphabetical # bucket uses NameLessThan=A',async({page})=>
   await expect.poll(()=>requests.some(q=>q.NameLessThan==='A' && !q.NameStartsWith)).toBe(true);
 });
 
-test('Plex alphabet jumps preserve normal top spacing when focus returns to the grid',async({page})=>{
+test('Plex alphabet jumps align the requested row and focus that row on the first Left',async({page})=>{
   await mockPlexAlphabet(page);
   await page.goto('/');
   await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
@@ -178,15 +178,28 @@ test('Plex alphabet jumps preserve normal top spacing when focus returns to the 
   await expect(page.locator('.alpha-window-grid .card[data-focus="150"]')).toBeVisible();
   const before=await page.evaluate(()=>{
     const main=document.querySelector('main');
-    const card=main.querySelector('.alpha-window-grid .card[data-focus="150"]');
-    return {scroll:main.scrollTop, top:card.getBoundingClientRect().top-main.getBoundingClientRect().top,
-      inset:parseFloat(getComputedStyle(main).paddingTop)};
+    const cards=Array.from(main.querySelectorAll('.alpha-window-grid .card'));
+    const target=main.querySelector('.alpha-window-grid .card[data-focus="150"]');
+    const top=target.getBoundingClientRect().top;
+    const paneTop=main.getBoundingClientRect().top;
+    const previous=cards.filter(card=>Number(card.dataset.focus)<150);
+    return {scroll:main.scrollTop, top:top-paneTop,
+      precedingVisible:previous.some(card=>card.getBoundingClientRect().bottom>paneTop)};
   });
-  expect(before.top).toBeGreaterThanOrEqual(before.inset-2);
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.alpha-window-grid .card:focus')).toHaveCount(1);
+  // A letter jump should never leave an earlier-letter row peeking above it.
+  expect(before.top).toBeGreaterThanOrEqual(-2);
+  expect(before.top).toBeLessThan(10);
+  expect(before.precedingVisible).toBe(false);
+  await page.keyboard.press('ArrowLeft');
+  const focused=page.locator('.alpha-window-grid .card:focus');
+  await expect(focused).toHaveCount(1);
+  expect(Number(await focused.getAttribute('data-focus'))).toBeGreaterThanOrEqual(150);
+  expect(Number(await focused.getAttribute('data-focus'))).toBeLessThan(180);
   const after=await page.locator('main').evaluate(main=>main.scrollTop);
   expect(Math.abs(after-before.scroll)).toBeLessThan(2);
+  // Walking the focused first row must not trigger the old 32px focus bump.
+  await page.keyboard.press('ArrowLeft');
+  expect(Math.abs((await page.locator('main').evaluate(main=>main.scrollTop))-after)).toBeLessThan(2);
   const railBottom=await rail.evaluate(node=>node.getBoundingClientRect().bottom);
   const shellBottom=await page.locator('#shell').evaluate(node=>node.getBoundingClientRect().bottom);
   expect(Math.abs(shellBottom-railBottom)).toBeLessThan(2);

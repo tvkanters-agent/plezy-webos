@@ -109,9 +109,14 @@ function focusWithoutJump(target, reveal = true) {
   if (reveal) {
     const item = target.getBoundingClientRect();
     if (vertical) {
-      const view = vertical.getBoundingClientRect(), pad = 32;
-      if (item.top < view.top + pad) dy = item.top - view.top - pad;
-      else if (item.bottom > view.bottom - pad) dy = item.bottom - view.bottom + pad;
+      const view = vertical.getBoundingClientRect();
+      // Alphabet jumps deliberately align the first grid row to the top.
+      // Applying the normal 32px focus margin here drags the previous row
+      // back into view on the next D-pad press.
+      const topPad = target.closest && target.closest('.alpha-window-grid') ? 0 : 32;
+      const bottomPad = 32;
+      if (item.top < view.top + topPad) dy = item.top - view.top - topPad;
+      else if (item.bottom > view.bottom - bottomPad) dy = item.bottom - view.bottom + bottomPad;
     }
     if (row) {
       const view = row.getBoundingClientRect(), pad = 12;
