@@ -440,3 +440,30 @@ test('repeated saved stops for one identity are coalesced',()=>{
   assert.equal(session.pendingStops[0].id,'latest');
   assert.equal(session.pendingStops[0].body.progress,95);
 });
+
+test('Simkl tracker reads and writes movie/series personal ratings using matched IDs',async()=>{
+ let session=saved(),calls=[];
+ const restore=mock(async(url,opts)=>{
+   const path=new URL(url).pathname,method=opts?.method||'GET';
+   calls.push({path,method,body:opts?.body?JSON.parse(opts.body):null,headers:opts?.headers});
+   if(path==='/sync/ratings/shows')return respond([{show:{ids:{tvdb:321,simkl:900}},user_rating:8}]);
+   if(path==='/sync/ratings/movies')return respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:9}]);
+   return respond({added:{shows:1,movies:1}});
+ });
+ try{
+   const tracker=new SimklTracker(()=>session,value=>session=value);
+   const api={fetchExternalIds:async()=>({tvdb:321})};
+   const show={id:'series',type:'show',raw:{Guid:[{id:'tvdb://321'}]}};
+   assert.equal(await tracker.getTitleRating(api,show),8);
+   assert.equal(await tracker.getTitleRating(api,movie),9);
+   await tracker.rateTitle(api,show,7);
+   await tracker.rateTitle(api,movie,10);
+   await tracker.rateTitle(api,show,null);
+   assert.deepEqual(calls.filter(c=>c.method==='POST').map(c=>[c.path,c.body]),[
+      ['/sync/ratings',{shows:[{ids:{tvdb:321},rating:7}]}],
+      ['/sync/ratings',{movies:[{ids:{imdb:'tt1234567',tmdb:9988},rating:10}]}],
+      ['/sync/ratings/remove',{shows:[{ids:{tvdb:321}}]}]
+   ]);
+   assert.ok(calls.filter(c=>c.method==='GET').every(c=>c.headers['simkl-api-key']===SIMKL_CLIENT_ID));
+ }finally{restore();}
+});
