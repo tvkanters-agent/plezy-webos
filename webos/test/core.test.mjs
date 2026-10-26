@@ -297,7 +297,7 @@ test('Plex artwork URLs request server-side resized images',()=>{
 test('Plex backdrop requests a downsized server-transcoded photo',()=>{
  const api=new Plex(server,'device');
  const url=new URL(api.backdrop({background:'/library/metadata/9/art'}));
- assert.equal(url.searchParams.get('width'),'960');
+ assert.equal(url.searchParams.get('width'),'1280');
  assert.equal(url.searchParams.get('url'),'/library/metadata/9/art');
 });
 
