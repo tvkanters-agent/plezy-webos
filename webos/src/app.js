@@ -869,12 +869,18 @@ async function render() {
         const rawIds=ratingItem.raw||{};
         Promise.resolve().then(async()=>{
           const resolved=Object.assign({},rawIds);
-          if(!Array.isArray(resolved.Guid)||!resolved.Guid.length) {
-            try{
-              const ids=await api.fetchExternalIds(ratingItem.id);
-              resolved.Guid=Object.keys(ids).map(k=>({id:k+'://'+ids[k]}));
-            }catch(_){}
-          }
+          // Plezy asks the actual media metadata for all catalog IDs; a
+          // headline Plex GUID on a show is not necessarily the one Simkl can
+          // match. Merge every available IMDb, TMDB and TVDB ID from detail.
+          try {
+            const ids=await api.fetchExternalIds(ratingItem.id);
+            const old=Array.isArray(resolved.Guid)?resolved.Guid:[];
+            resolved.Guid=[...old];
+            for(const [key,value] of Object.entries(ids)) {
+              if(!resolved.Guid.some(entry=>entry?.id===key+'://'+value))
+                resolved.Guid.push({id:key+'://'+value});
+            }
+          }catch(error){console.warn('Could not enrich Plex rating IDs',error);}
           return communityRatings(resolved,ratingItem.type);
         }).then(external=>{
           if(revision!==expected||!info.isConnected)return;
