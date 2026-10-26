@@ -57,3 +57,14 @@ test('public Simkl ratings are a simple ID request and return multiple providers
  assert.equal(new URL(requested.url).searchParams.get('tvdb'),'151113');
  assert.equal(requested.options.headers['simkl-api-key'],undefined);
 });
+
+test('Simkl series TMDB IDs use upstream type=tv, not the unsupported show value',async()=>{
+ let requested;
+ const ratings=await communityRatings({Guid:[{id:'tmdb://1402'}]},'show',async(url)=>{
+   requested=new URL(url);
+   return new Response(JSON.stringify({simkl:{rating:8.6,votes:232},IMDB:{rating:8.9,votes:9000}}),{status:200});
+ });
+ assert.equal(requested.searchParams.get('tmdb'),'1402');
+ assert.equal(requested.searchParams.get('type'),'tv');
+ assert.deepEqual(ratings.map(x=>x.source),['simkl','imdb']);
+});
