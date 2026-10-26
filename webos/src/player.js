@@ -252,14 +252,18 @@ export class Player {
     this.showBuffering(false);
     this.beginVideoPlayback();
   }
+  position() {
+    return this.pendingStart || ((this.video.currentTime || 0) + (this.session?.timelineOffset || 0));
+  }
   update() {
-    const marker = (this.session?.markers || []).find(m => this.video.currentTime >= m.start && this.video.currentTime < m.end);
+    const position=this.position();
+    const marker = (this.session?.markers || []).find(m => position >= m.start && position < m.end);
     const skip = this.root.querySelector('[data-action="skip"]');
     if (!marker && document.activeElement === skip) this.root.querySelector('[data-action="pause"]').focus();
     skip.hidden = !marker; skip.textContent = marker?.type === 'credits' ? 'Skip credits' : 'Skip intro';
     this.marker = marker;
-    const played = this.video.currentTime || 0;
-    const total = this.video.duration || (this.item && this.item.duration) || 0;
+    const played = position;
+    const total = this.timelineDuration();
     this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
     this.root.querySelector('.elapsed-current').textContent = time(played);
     this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, total - played));
@@ -279,8 +283,8 @@ export class Player {
   report(state) {
     if (!this.session) return;
     const api = this.api, session = this.session;
-    const position = this.pendingStart || this.video.currentTime || 0;
-    const duration = Number.isFinite(this.video.duration) ? this.video.duration : this.item.duration;
+    const position = this.position();
+    const duration = this.timelineDuration();
     // Serialize start/progress/stop so a delayed heartbeat cannot overwrite stop.
     this.reporting = this.reporting.then(() => api.report(session, state, position, duration)).catch(() => {
       if (!this.reportWarning) { this.reportWarning = true; this.notify('Progress could not be synced to the server.'); }
@@ -288,16 +292,15 @@ export class Player {
   }
   track(action, ended = false) {
     if (!this.playbackTracking || !this.item) return;
-    const position = this.pendingStart || this.video.currentTime || this.lastPosition || 0;
-    const duration = Number.isFinite(this.video.duration) && this.video.duration > 0
-      ? this.video.duration : this.item.duration;
+    const position = this.position() || this.lastPosition || 0;
+    const duration = this.timelineDuration();
     this.playbackTracking.event(action, position, duration, ended);
   }
   async release(ended = false, preserveTracking = false) {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     const session = this.session, api = this.api;
-    this.lastPosition = this.pendingStart || this.video.currentTime || this.lastPosition || 0;
+    this.lastPosition = this.position() || this.lastPosition || 0;
     if (session) this.report('stopped');
     // Tracking belongs to the viewing, not a particular decoder session. A
     // failed/replaced decoder must still finish the started Simkl viewing.
@@ -327,7 +330,7 @@ export class Player {
   }
   async reopen(changes) {
     if (!this.item || this.closing) return;
-    const options = {...this.options, ...changes, start: this.pendingStart || this.video.currentTime || 0};
+    const options = {...this.options, ...changes, start: this.position()};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
     return this.open(this.api, this.item, options, true);
@@ -368,7 +371,7 @@ export class Player {
     this.hideAfterSeek = false;
     const total = this.timelineDuration();
     if (!this.session || total <= 0) return;
-    const original = this.seeking ? this.seekPreview : (this.pendingStart || this.video.currentTime || 0);
+    const original = this.seeking ? this.seekPreview : this.position();
     this.seekPreview = clamp(original + delta, 0, Math.max(0, total - .1));
     if (!this.seeking) {
       this.seekWasPlaying = !this.video.paused;
@@ -380,7 +383,8 @@ export class Player {
     // Plezy previews an actual video frame at every D-pad seek step.
     // Changing only the range input moved a number but never the picture.
     try {
-      if (this.video.readyState >= 1) this.video.currentTime = this.seekPreview;
+      if (this.video.readyState >= 1)
+        this.video.currentTime = Math.max(0,this.seekPreview-(this.session?.timelineOffset||0));
       else this.pendingStart = this.seekPreview;
     } catch (_) { this.pendingStart = this.seekPreview; }
     this.showBuffering(this.video.readyState < 2 || this.video.seeking);
@@ -408,17 +412,25 @@ export class Player {
   }
   timelineDuration() {
     const duration = this.video.duration;
+    // Plex transcoded HLS starts at an absolute offset, but video.currentTime
+    // and video.duration describe only the resulting segment.
+    if (this.session?.timelineOffset) return this.item?.duration || ((Number(duration)||0)+this.session.timelineOffset);
     return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
   }
-  seek(delta) { this.seekTo((this.pendingStart || this.video.currentTime || 0) + delta); }
+  seek(delta) { this.seekTo(this.position() + delta); }
   seekTo(position) {
     if (!this.session || !Number.isFinite(position)) return;
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
+    if (this.session?.timelineOffset && target<this.session.timelineOffset) {
+      this.reopen({...this.options,start:target,transcode:true}).catch(()=>this.failed());
+      return;
+    }
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
-      try { this.video.currentTime = target; } catch (_) { this.pendingStart = target; }
+      try { this.video.currentTime = target-(this.session?.timelineOffset||0); }
+      catch (_) { this.pendingStart = target; }
     }
     this.seekBar.value = String(Math.round(target));
     this.seekBar.setAttribute('aria-valuetext', time(target) + ' of ' + time(total));
