@@ -46,3 +46,27 @@ All Plex/player work should follow the same upstream-first rule; when something 
 The pre-fix webOS queue replayed an old stop before each new start/pause. A title-only row returning `404 id_err` threw out of that replay and cancelled the **new** viewing's event, even when its Plex IDs were valid. Native `TrackerWriteQueue._flushOnce` handles item failures independently. Keep that isolation in the browser queue; account/rate cooldowns still apply to the whole service.
 
 On upgrade, old saved stops with empty IDs are skipped and removed without a network request, matching native Simkl's no-ID guard. They cannot be resolved retroactively because those rows contain no Plex rating key. New viewings fetch movie/show IDs via `PlexClient.fetchExternalIds`' exact metadata query. Old ID-bearing stops remain retryable, but title/year fields are stripped before transmission. `SimklTracker.needsFribb` is false upstream, so the standalone Simkl integration must not fetch or apply Fribb mappings.
+
+### Simkl community scores: native HTTP transport
+
+The original `SimklCatalogSource.fetchCommunityRatings` uses the connected account
+on `GET /redirect?to=simkl&…`, reads the unfollowed Location, then requests
+`/{movies|tv|anime}/{id}` and reads `ratings.simkl/imdb/mal`. The former webOS
+`/ratings` shortcut omitted Authorization; a live unauthenticated request with
+this V2 client ID on 2026-10-26 returned 401 `user_token_required`. Its browser
+`redirect:manual` fallback could not expose Location either.
+
+The packaged `com.tvkdevelopment.plezy.catalog` JS service now supplies only the
+missing native HTTP capability, following LG's JS Service Usage packaging guide:
+https://webostv.developer.lge.com/develop/guides/js-service-usage . It issues
+read-only HTTPS requests to api.simkl.com for redirect/detail paths, never follows
+redirects, and neither stores nor logs credentials. The UI supplies its connected
+session and reuses SimklTracker's refresh owner. Failed lookups aren't cached;
+known empty replies and real scores use Plezy's 12-hour cache. Each provider still
+updates the metadata ratings pill independently.
+
+Install the complete IPK (`npm run package`, which includes `service/`). Serving
+`dist/` in a desktop browser cannot provide this native transport; browser tests
+simulate PalmServiceBridge explicitly. This is a transport adaptation, not an
+alternate catalog lookup or title-matching algorithm. LG TV installation, Luna
+permissions and live authenticated scores still require hardware verification.

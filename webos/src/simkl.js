@@ -2,6 +2,7 @@
 // Browser translation of upstream lib/services/trackers/simkl/{simkl_auth_service,
 // simkl_client,simkl_tracker}.dart. Preserve the upstream ID-only request
 // bodies, endpoint behavior and event model. Do not implement catalog guessing.
+import {communityRatings} from './ratings.js';
 import {VERSION, id} from './core.js';
 import {plexExternalIds as simklMovieIds} from './external-ids.js';
 export {plexExternalIds as simklMovieIds} from './external-ids.js';
@@ -315,6 +316,23 @@ export class SimklTracker {
     this.queue = this.queue.catch(() => {}).then(() => this.retryPendingStops(epoch, 50, true))
       .catch(error => this.onError(error.message));
     return this.queue;
+  }
+  async getCommunityRatings(raw, kind, request) {
+    const epoch=this.epoch;
+    let session=this.getSession();
+    if (!validSession(session) || this.holdUntil>Date.now()) return [];
+    if (session.expiresAt<Date.now()+60000) session=await this.refresh();
+    if (epoch!==this.epoch) return [];
+    try {
+      const result=await communityRatings(raw,kind,request,session.accessToken);
+      return epoch===this.epoch?result:[];
+    } catch (error) {
+      if (error.status!==401 || epoch!==this.epoch) throw error;
+      session=this.getSession()?.accessToken!==session.accessToken?this.getSession():await this.refresh();
+      if (epoch!==this.epoch || !validSession(session)) return [];
+      const result=await communityRatings(raw,kind,request,session.accessToken);
+      return epoch===this.epoch?result:[];
+    }
   }
   // TrackerRatingSource from upstream SimklTracker: only movies/shows,
   // /sync/ratings/{movies,shows,anime} for reads, matching external IDs.

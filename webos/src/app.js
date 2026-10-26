@@ -4,7 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
-import {plexRatings, communityRatings, fetchMdblistRatings, mergeProviderRatings,
+import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 // Accessing localStorage itself may throw in a restricted webOS app context.
@@ -907,7 +907,7 @@ async function render() {
             community=mergeProviderRatings(answers);
             showRatings();
           };
-          communityRatings(resolved,ratingItem.type)
+          simklTracker.getCommunityRatings(resolved,ratingItem.type)
             .then(ratings=>received('simkl',ratings))
             .catch(error=>console.warn('Simkl ratings unavailable',error));
           if(state.mdblistApiKey)fetchMdblistRatings(resolved,ratingItem.type,state.mdblistApiKey)

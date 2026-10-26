@@ -1,0 +1,6 @@
+{
+  "name": "com.tvkdevelopment.plezy.catalog",
+  "version": "1.0.0",
+  "main": "service.js",
+  "license": "GPL-3.0-only"
+}

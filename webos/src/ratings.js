@@ -3,8 +3,10 @@
 // SimklCatalogSource.fetchCommunityRatings from upstream Plezy.
 // The original source logos are installed under public/assets/.
 import {SIMKL_CLIENT_ID} from './simkl.js';
+import {simklCatalogRequest} from './simkl-transport.js';
+import {VERSION} from './core.js';
 import {plexExternalIds} from './external-ids.js';
-const cache=new Map(),TTL=6*60*60*1000;
+const cache=new Map(),TTL=12*60*60*1000;
 export const displayOrder=['rottenTomatoesCritic','rottenTomatoesAudience','imdb','tmdb',
  'metacritic','letterboxd','trakt','simkl','mal','anilist'];
 const assets={
@@ -58,8 +60,9 @@ export function simklRatings(data){
  if(!data||typeof data!=='object')return [];
  const result=[];
  for(const [key,possible] of [['simkl',['simkl']],['imdb',['imdb','IMDB']],['mal',['mal','MAL']]]){
-  const obj=possible.map(k=>data[k]).find(Boolean),value=clean(obj?.rating);
-  if(value!==null && (obj?.votes==null || Number(obj.votes)!==0))
+  const obj=possible.map(k=>data[k]).find(Boolean),n=Number(obj?.rating);
+  const value=Number.isFinite(n)&&n>0&&n<=10?n:null;
+  if(value!==null && (obj?.votes==null || Number(obj.votes)>0))
     result.push({source:key,value});
  }
  return result;
@@ -80,55 +83,45 @@ function paramsForIds(raw,kind){
  if(ids.mal)q.set('mal',String(ids.mal));
  return q;
 }
-export async function communityRatings(raw,kind,fetchImpl=fetch){
- if(!raw||!['movie','show'].includes(kind))return [];
- const q=paramsForIds(raw,kind);if(!Array.from(q.keys()).length)return [];
- const cacheKey=kind+':'+q.toString(),old=cache.get(cacheKey);
+export async function communityRatings(raw,kind,request=simklCatalogRequest,token) {
+ if(!raw||!token||!['movie','show'].includes(kind))return [];
+ const ids=paramsForIds(raw,kind);if(!Array.from(ids.keys()).length)return [];
+ const cacheKey=kind+':'+ids.toString(),old=cache.get(cacheKey);
  if(old&&Date.now()-old.at<TTL)return old.ratings;
- // Simkl's documented /ratings API accepts native IMDb, TVDB, TMDB IDs.
- // A custom API-key header would force CORS preflight on old LG Chromium.
- const headers={Accept:'application/json'};
- const base='https://api.simkl.com';
- q.set('client_id',SIMKL_CLIENT_ID);
- q.set('fields','simkl,ext');
- let result=[],confirmed=false;
- try {
-   const response=await fetchImpl(base+'/ratings?'+q.toString(),{headers});
-   if(response.ok) {
-     confirmed=true;
-     result=simklRatings(await response.json());
+ const headers={Accept:'application/json',Authorization:'Bearer '+token};
+ const query=new URLSearchParams();query.set('to','simkl');
+ ids.forEach((value,key)=>query.set(key,value));
+ function url(path,q=new URLSearchParams()) {
+   q.set('client_id',SIMKL_CLIENT_ID);
+   q.set('app-name','plezy');q.set('app-version',VERSION);
+   return 'https://api.simkl.com'+path+'?'+q.toString();
+ }
+ function check(response) {
+   if(response.status<200 || response.status>=400) {
+     const error=new Error('Simkl community lookup failed (HTTP '+response.status+').');
+     error.status=response.status;throw error;
    }
- }catch(error){
-   // Mirrors CommunityRatingsLoader._answer: failed requests never enter the
-   // cache, otherwise one transient CORS/server failure hides ratings for hours.
-   console.warn('Simkl community ratings temporarily unavailable',error);
  }
- if(!result.length){
-   // Native Plezy's /redirect -> detail flow, as a fallback only when the
-   // public ratings endpoint has no matching result.
-   try {
-     const redirect=new URLSearchParams(q);
-     redirect.delete('fields');
-     redirect.set('to','simkl');
-     const response=await fetchImpl(base+'/redirect?'+redirect.toString(),
-       {headers,redirect:'manual'});
-     const location=response.headers?.get('Location');
-     const match=location && /\/(movies|tv|anime)\/(\d+)(?:\/|$)/.exec(location);
-     if(match){
-       const detail=await fetchImpl(base+'/'+match[1]+'/'+match[2]+
-         '?client_id='+SIMKL_CLIENT_ID,{headers});
-       if(detail.ok) {
-         confirmed=true;
-         result=simklRatings((await detail.json())?.ratings);
-       }
+ let ratings=[];
+ const response=await request(url('/redirect',query),{headers,redirect:'manual'});
+ if(response.status!==404) {
+   check(response);
+   const location=[301,302,303,307,308].includes(response.status)?response.headers.get('Location'):null;
+   const page=location && /^\/(movies|tv|anime)\/([1-9]\d*)(?:\/|$)/.exec(new URL(location,'https://simkl.com').pathname);
+   if(page) {
+     const detail=await request(url('/'+page[1]+'/'+page[2]),{headers,redirect:'manual'});
+     if(detail.status!==404) {
+       check(detail);
+       if(!detail.ok)throw new Error('Unexpected Simkl detail redirect.');
+       ratings=simklRatings((await detail.json())?.ratings);
      }
-   }catch(_){/* An opaque redirect cannot expose Location in some webOS. */}
+   }
  }
- // Plezy caches real provider replies, but not offline/error results.
- if(confirmed) cache.set(cacheKey,{at:Date.now(),ratings:result});
- return result;
+ // Successful empty answers are cached; HTTP, transport and JSON errors aren't.
+ cache.delete(cacheKey);cache.set(cacheKey,{at:Date.now(),ratings});
+ while(cache.size>300)cache.delete(cache.keys().next().value);
+ return ratings;
 }
-
 
 // Literal port of MdblistCatalogSource.fetchCommunityRatings and
 // CommunityRatings.mergeCommunityRatings from upstream Plezy. Only one

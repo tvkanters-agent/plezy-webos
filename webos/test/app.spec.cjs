@@ -1,5 +1,25 @@
 const {test,expect} = require('@playwright/test');
 const item={Id:'movie',Name:'The Test Film',Type:'Movie',Overview:'A test library title.',RunTimeTicks:1200000000,ImageTags:{Primary:'poster'},UserData:{PlaybackPositionTicks:200000000}};
+// Simulate only the TV's native bus boundary. The shipped code still performs
+// both authenticated upstream requests and parses the title-detail payload.
+async function mockCatalogBridge(page, ratings, type='movies') {
+ await page.addInitScript(({ratings,type})=>{
+   window.catalogCalls=[];
+   window.PalmServiceBridge=class {
+     cancel(){}
+     call(uri,json){
+       const payload=JSON.parse(json);window.catalogCalls.push({uri,...payload});
+       const path=payload.path.split('?')[0];
+       const authenticated=payload.authorization==='Bearer simkl_at_test';
+       const response=!authenticated?{status:401,headers:{},body:'{}'}:
+         path==='/redirect'?{status:302,headers:{location:'https://simkl.com/'+type+'/123/title'},body:''}:
+         path==='/'+type+'/123'?{status:200,headers:{},body:JSON.stringify({ratings})}:
+         {status:404,headers:{},body:'{}'};
+       setTimeout(()=>this.onservicecallback(JSON.stringify({returnValue:true,...response})),0);
+     }
+   };
+ },{ratings,type});
+}
 async function serveVideo(route, movie) {
   const range = route.request().headers()['range'];
   const match = range && /^bytes=(\d+)-(\d*)$/.exec(range);
@@ -675,6 +695,7 @@ test('library rail enters first poster, restores poster on return, and moves to 
 });
 test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and allow rating',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',scope:'media:read media:write',expiresAt:Date.now()+3600000},
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
  const film={ratingKey:'film',type:'movie',title:'The Great Film',year:2024,
   rating:7.3,ratingImage:'rottentomatoes://image.rating.ripe',
@@ -682,9 +703,8 @@ test('Plex details show attributed IMDb/Simkl scores, 1080p, cast photos and all
   Role:[{tag:'Actor Example',role:'Detective',thumb:'/cast/actor.jpg'}],
   Media:[{videoResolution:'1080',Part:[{id:'part',key:'/movie.mp4'}]}]};
  const put=[];
- await page.route('https://api.simkl.com/redirect**',route=>route.fulfill({status:404,json:{}}));
- await page.route('https://api.simkl.com/ratings**',route=>route.fulfill({json:{
-   simkl:{rating:8.1,votes:120},imdb:{rating:8.6,votes:9000}}}));
+ await mockCatalogBridge(page,{simkl:{rating:8.1,votes:120},imdb:{rating:8.6,votes:9000}});
+ await page.route('https://api.simkl.com/**',route=>route.fulfill({json:[]}));
  await page.route('http://plex.test/**',route=>{
    const url=new URL(route.request().url()),path=url.pathname;
    if(path==='/:/rate') {put.push({method:route.request().method(),key:url.searchParams.get('key'),
@@ -776,12 +796,10 @@ test('connected Simkl movie and series rating rows read existing user score and 
      expiresAt:Date.now()+3600000}})));
  const show={ratingKey:'series',type:'show',title:'Rated Series',
    Guid:[{id:'tvdb://321'}]};
+ await mockCatalogBridge(page,{simkl:{rating:8.6,votes:130},imdb:{rating:8.9,votes:500},mal:{rating:8.2,votes:30}},'anime');
  const writes=[];
  await page.route('https://api.simkl.com/**',route=>{
    const url=new URL(route.request().url());
-   if(url.pathname==='/redirect')return route.fulfill({status:404,json:{}});
-   if(url.pathname==='/ratings')return route.fulfill({json:{simkl:{rating:8.6,votes:130},
-     imdb:{rating:8.9,votes:500}}});
    if(url.pathname==='/sync/ratings/shows')return route.fulfill({json:[
      {show:{ids:{tvdb:321}},user_rating:7}]});
    if(url.pathname==='/sync/ratings'){writes.push(JSON.parse(route.request().postData()));
@@ -798,6 +816,10 @@ test('connected Simkl movie and series rating rows read existing user score and 
  await expect(page.locator('.ratings-chip .rating-badge[aria-label^="Simkl"]')).toHaveCount(1);
  await expect(page.locator('.ratings-chip .rating-badge[aria-label^="IMDb"]')).toHaveCount(1);
  await expect(page.locator('.ratings-chip')).toHaveCount(1);
+ await expect(page.locator('.ratings-chip .rating-badge[aria-label="MyAnimeList 8.20"]')).toHaveCount(1);
+ const catalogCalls=await page.evaluate(()=>window.catalogCalls);
+ expect(catalogCalls.map(call=>call.path.split('?')[0])).toEqual(['/redirect','/anime/123']);
+ expect(catalogCalls.every(call=>call.authorization==='Bearer simkl_at_test')).toBe(true);
  await page.getByRole('button',{name:'Rate',exact:true}).click();
  const personal=page.locator('.ratings-chip .rating-personal');
  await expect(personal).toHaveAttribute('aria-label','Your Simkl rating 7/10');
@@ -891,20 +913,17 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
 
 test('Plezy MDBList provider adds multiple branded ratings to one metadata pill',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   simkl:{accessToken:'simkl_at_test',refreshToken:'simkl_rt_test',scope:'media:read media:write',expiresAt:Date.now()+3600000},
    deviceId:'dev',active:'plex',mdblistApiKey:'example-key',
    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const film={ratingKey:'mdb-film',type:'movie',title:'The Rated Film',year:2024,
    Guid:[{id:'imdb://tt5522344'}],rating:7.1,ratingImage:'imdb://rating'};
  const called=[];
  // Plezy delivers other catalog scores without waiting for a slow provider.
- let releaseSimkl;
- const simklWaiting=new Promise(resolve=>{releaseSimkl=resolve;});
- await page.route('https://api.simkl.com/ratings**',async route=>{
-   await simklWaiting;
-   return route.fulfill({status:404,json:{}});
+ await page.addInitScript(()=>{
+   window.PalmServiceBridge=class { cancel(){} call(){window.releaseCatalog=()=>this.onservicecallback(
+     JSON.stringify({returnValue:true,status:404,headers:{},body:'{}'}));} };
  });
- await page.route('https://api.simkl.com/redirect**',route=>
-   route.fulfill({status:404,json:{}}));
  await page.route('https://api.mdblist.com/**',route=>{
    const url=new URL(route.request().url());
    called.push(url);
@@ -934,5 +953,5 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  }
  await expect(bubble.locator('img[src="assets/rating_icons/rt_fresh.svg"]')).toHaveCount(1);
  await expect(bubble.locator('img[src="assets/trakt_circlemark.svg"]')).toHaveCount(1);
- releaseSimkl();
+ await page.evaluate(()=>window.releaseCatalog());
 });
