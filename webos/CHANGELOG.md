@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.1.3 — Stable alphabet row alignment
+
+- Share grid decoration clearance between alphabet jumps and D-pad focus reveal.
+- Keep the previous row offscreen and return to the selected row on the first Left.
+- Cover forward/backward jumps and focus movement in grid and TV flex layouts.
+
 ## 1.1.2 — Alphabet jump placement and focus
 
 - Align alphabet jumps to the actual top of the media grid rather than adding a full page-padding inset. Previously this exposed a preceding row.
