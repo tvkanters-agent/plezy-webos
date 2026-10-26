@@ -213,6 +213,9 @@ export class Player {
       });
       this.root.querySelector('[data-chapters]').hidden = !session.chapters?.length;
     this.root.querySelector('[data-action="chapter-options"]').hidden = !session.chapters?.length;
+      // Keep the opening frame invisible until the resume target has been
+      // sought and decoded. Loading indicators remain independently visible.
+      this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
       this.video.src = session.url;
       this.video.load();
       this.report('start');
@@ -258,6 +261,7 @@ export class Player {
     if(this.video.seeking || this.video.readyState<2 ||
        Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
     this.initialSeekPending=false;
+    this.video.style.visibility='visible';
     clearTimeout(this.startTimeout);
     this.showBuffering(false);
   }
@@ -321,6 +325,7 @@ export class Player {
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
+    this.video.style.visibility='visible';
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
     await this.reporting;
     if (session) await api.stop(session).catch(() => {});
