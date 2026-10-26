@@ -18,6 +18,7 @@ const simklTracker = new SimklTracker(() => state.simkl, session => {
 const player = new Player(document.querySelector('#player'), notify, () => render(), simklTracker);
 let rememberedPaneFocus = null;
 let enterPaneAfterNavigation = false;
+let pendingRailEntryRevision = null;
 function preferredPaneControl() {
   // Enter media before the toolbar when coming from the remote's side rail.
   return main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
@@ -547,6 +548,7 @@ async function paginated(loader, currentRevision, options = {}) {
 }
 async function render() {
   const currentRevision = ++revision;
+  pendingRailEntryRevision=null;
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
   let preferredFocus = null;
@@ -656,6 +658,10 @@ async function render() {
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
       await paginated(start => currentApi.list(route.library.id, start, selected, selectedFilter), currentRevision);
+      if (valid() && pendingRailEntryRevision===currentRevision) {
+        pendingRailEntryRevision=null;
+        focusFirst(main, preferredPaneControl(), true);
+      }
     } else if (route.type === 'person' && api instanceof Plex) {
       title(route.actor,route.role||'Cast');
       if (route.thumb) main.append(poster({poster:route.thumb},{detail:false}));
@@ -1188,6 +1194,8 @@ window.addEventListener('keydown', event => {
   // The rail is one focus zone. RIGHT must leave it even if another rail
   // item happens to be geometrically to the right (indented libraries).
   if (dialog.hidden && !player.active && inRail && direction === 'right') {
+    if (route.type==='library' && !main.querySelector('.grid .card,.shelf .card'))
+      pendingRailEntryRevision=revision;
     const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
       main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
     const target = restored || preferredPaneControl();
