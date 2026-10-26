@@ -322,3 +322,24 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
   border-radius:26px; padding:9px; }
 .player-secondary .transport-icon svg { width:34px; height:34px; }
 .episode-play-icon { width:46px; height:46px; font-size:24px; }
+
+/* Native Plezy's detail overflow button opens a menu, not a playback action. */
+.detail-more { position:relative; display:inline-flex; flex:0 0 auto; }
+.detail-more-menu { position:absolute; right:0; top:calc(100% + 8px);
+  min-width:285px; padding:10px; border:1px solid #454953;
+  border-radius:18px; background:#252831; z-index:12;
+  box-shadow:0 18px 40px rgba(0,0,0,.65); }
+.detail-more-menu button { display:block; width:100%; min-height:47px; height:auto;
+  padding:10px 16px; text-align:left; border-radius:12px; font-size:18px;
+  background:transparent; }
+.detail-more-menu button:focus { background:#ededed; color:#15171b; }
+.detail-series-link { background:transparent; border:0; box-shadow:none;
+  font-size:22px; padding:0; margin:0 0 9px; color:#c9cbd3; text-align:left;
+  text-decoration:underline; text-underline-offset:4px; }
+.detail-series-link:focus { outline:2px solid #eee; border:0; }
+.detail-context { font-size:16px; margin:0 0 7px; color:#bcbfc7; }
+.detail-parent-overview { max-width:800px; margin:20px 0; }
+.detail-parent-overview strong { font-size:21px; }
+.detail-parent-overview p { margin:6px 0 0; }
+.detail-season .detail-info { max-width:900px; }
+.detail-season > .poster { min-width:0; margin-left:35px; }

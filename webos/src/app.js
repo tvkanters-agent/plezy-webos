@@ -10,6 +10,7 @@ function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
+let detailMenu = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
@@ -116,6 +117,35 @@ function detailButton(label, action, symbol, className = '') {
   }
   return control;
 }
+function closeDetailMenu() {
+  if (!detailMenu) return;
+  const {menu, trigger} = detailMenu;
+  menu.hidden = true;
+  trigger.setAttribute('aria-expanded', 'false');
+  detailMenu = null;
+  if (trigger.isConnected) focusWithoutJump(trigger, false);
+}
+function detailMoreOptions(options) {
+  const group = el('div', undefined, 'detail-more');
+  const menu = el('div', undefined, 'detail-more-menu');
+  menu.hidden = true;
+  const trigger = detailButton('More options', () => {
+    if (!menu.hidden) { closeDetailMenu(); return; }
+    closeDetailMenu();
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    detailMenu = {menu, trigger};
+    focusWithoutJump(menu.querySelector('button'), false);
+  }, 'more', 'detail-icon');
+  trigger.setAttribute('aria-haspopup', 'true');
+  trigger.setAttribute('aria-expanded', 'false');
+  options.forEach(option => menu.append(button(option.label, () => {
+    closeDetailMenu();
+    option.action();
+  }, 'detail-more-option')));
+  group.append(trigger, menu);
+  return group;
+}
 function title(text, subtitle) {
   main.append(el('h1', text));
   if (subtitle) main.append(el('p', subtitle, 'intro'));
@@ -207,6 +237,7 @@ function go(next, remember = true) {
 }
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
 function back() {
+  if (detailMenu) { closeDetailMenu(); return; }
   if (!dialog.hidden) { dialog.hidden = true; focusFirst(); return; }
   if (player.active) { player.close(); return; }
   if (history.length) {
@@ -385,7 +416,7 @@ async function paginated(loader, currentRevision, options = {}) {
 }
 async function render() {
   const currentRevision = ++revision;
-  cancelAuth(); main.textContent = ''; main.scrollTop = 0; navigation();
+  cancelAuth(); detailMenu = null; main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
     if (!api && !['settings', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
@@ -493,34 +524,65 @@ async function render() {
     else if (route.type === 'detail') {
       const item = await api.detail(route.id, route.kind); if (!valid()) return;
       const isPlexShow = api instanceof Plex && item.type === 'show';
+      const isSeason = item.type === 'season' || item.type === 'Season';
+      const isEpisode = item.type === 'episode' || item.type === 'Episode';
       const raw = item.raw || {};
+      // Season and episode metadata is often sparse in Plex; upstream Plezy's
+      // detail header also knows the containing show.
+      const parentShowId = api instanceof Plex
+        ? (isSeason ? raw.parentRatingKey : isEpisode ? raw.grandparentRatingKey : null)
+        : null;
+      let parentShow = null;
+      if (parentShowId) {
+        try { parentShow = await api.detail(parentShowId, 'show'); }
+        catch (_) { /* Standalone season/episode detail remains usable. */ }
+        if (!valid()) return;
+      }
+      const showRaw = parentShow?.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
+      if (isSeason) content.classList.add('detail-season');
       content.classList.add(item.type === 'episode' || item.type === 'Episode' ? 'detail-episode' : 'detail-media');
-      if (api instanceof Plex && item.background) {
+      const heroMedia = item.background ? item : (parentShow?.background ? parentShow : null);
+      if (api instanceof Plex && heroMedia) {
         const hero = el('div', undefined, 'detail-backdrop');
         // Server-transcoded low-resolution artwork, not a source-sized image.
         hero.style.backgroundImage = 'linear-gradient(to right, #0e0f12 2%, rgba(14,15,18,.86) 48%, rgba(14,15,18,.2)), linear-gradient(to top, #0e0f12, transparent 65%), url("' +
-          api.backdrop(item).replace(/"/g, '%22') + '")';
+          api.backdrop(heroMedia).replace(/"/g, '%22') + '")';
         main.append(hero);
       }
-      if (raw.tagline) info.append(el('p', raw.tagline, 'detail-tagline'));
+      if (parentShow) {
+        const parentLink = button(parentShow.title, () => go({type:'detail',id:parentShow.id,kind:'show'}), 'detail-series-link');
+        parentLink.dataset.focus = 'detail-series';
+        info.append(parentLink);
+        if (isEpisode && raw.parentIndex != null && raw.index != null)
+          info.append(el('p', 'Season ' + raw.parentIndex + ' · Episode ' + raw.index, 'detail-context'));
+      }
+      if (raw.tagline || showRaw.tagline)
+        info.append(el('p', raw.tagline || showRaw.tagline, 'detail-tagline'));
       info.append(el('h1', item.title));
       // Source: MediaDetailScreen._buildMetadataChip and hero chip rows.
       // Keep each field as a distinct Material tonal pill, not a sentence.
       const chips = el('div', undefined, 'detail-chips');
       const media = raw.Media && raw.Media[0] || {};
-      const facts = [raw.year, raw.editionTitle, raw.contentRating,
+      const facts = [raw.year || showRaw.year, raw.editionTitle, raw.contentRating || showRaw.contentRating,
         item.duration ? time(item.duration) : '',
         media.videoResolution ? String(media.videoResolution).toUpperCase() : '',
         raw.rating != null ? '★ ' + Number(raw.rating).toFixed(1) : ''].filter(Boolean);
       facts.forEach(value => chips.append(el('span', String(value), 'detail-chip')));
       if (chips.children.length) info.append(chips);
       const genreChips = el('div', undefined, 'detail-chips detail-genres');
-      (Array.isArray(raw.Genre) ? raw.Genre : []).forEach(genre => {
+      (Array.isArray(raw.Genre) && raw.Genre.length ? raw.Genre : showRaw.Genre || []).forEach(genre => {
         if (genre.tag) genreChips.append(el('span', genre.tag, 'detail-chip'));
       });
       if (genreChips.children.length) info.append(genreChips);
-      if (item.summary) info.append(el('p', item.summary, 'detail-summary'));
+      if (item.summary || (isSeason && parentShow?.summary))
+        info.append(el('p', item.summary || parentShow.summary, 'detail-summary'));
+      if (isSeason && parentShow?.summary && item.summary && item.summary !== parentShow.summary) {
+        const showSynopsis = el('div', undefined, 'detail-parent-overview');
+        showSynopsis.append(el('strong', 'About ' + parentShow.title),
+          el('p', parentShow.summary));
+        info.append(showSynopsis);
+      }
       if (api instanceof Plex) {
         const tags = values => (Array.isArray(values) ? values : []).map(x => x.tag || x.title).filter(Boolean);
         const metaRows = [
@@ -554,7 +616,7 @@ async function render() {
         }
         return null;
       };
-      if (item.folder && (isPlexShow || item.type === 'season' || item.type === 'Season')) {
+      if (item.folder && (isPlexShow || isSeason)) {
         const expectedRevision = revision, currentApi = api;
         actions.append(detailButton('Play', async () => {
           const episode = await chooseEpisode();
@@ -562,6 +624,31 @@ async function render() {
           if (episode) play(episode, episode.resume || 0);
           else notify('No playable episodes were found.');
         }, 'play', 'detail-play'));
+        // Show/season actions from MediaDetailScreen.action_buttons.dart.
+        actions.append(detailButton('Shuffle', async () => {
+          const currentApi = api, expected = revision;
+          let start = 0, all = [];
+          while (start < 10000) {
+            const page = await currentApi.children(item.id, start, item.type);
+            all = all.concat(page.items.filter(x => x.type === 'episode' || x.type === 'Episode'));
+            start += page.items.length;
+            if (!page.items.length || start >= page.total) break;
+          }
+          if (expected !== revision || currentApi !== api) return;
+          if (all.length) {
+            const random = all[Math.floor(Math.random() * all.length)];
+            play(random, 0);
+          } else notify('No playable episodes were found.');
+        }, 'shuffle', 'detail-icon'));
+        actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
+          const currentApi = api, watched = !item.watched;
+          await currentApi.watched(item, watched);
+          render();
+        }, 'watched', 'detail-icon'));
+        const extra = [];
+        if (parentShow) extra.push({label:'View series', action:() =>
+          go({type:'detail',id:parentShow.id,kind:'show'})});
+        if (extra.length) actions.append(detailMoreOptions(extra));
       } else if (!item.folder) {
         const versions = api instanceof Plex ? item.raw.Media || [] : [];
         if (item.resume > 0) actions.append(detailButton('Resume · ' + time(item.resume),
@@ -598,14 +685,22 @@ async function render() {
             else notify('No further episodes are available for this show.');
           }, 'next', 'detail-icon'));
         }
-        actions.append(detailButton('Compatible playback',
-          () => play(item, item.resume, true), 'more', 'detail-icon'));
+        const extra = [
+          {label:'Compatible playback', action:() => play(item, item.resume, true)}
+        ];
+        if (parentShow) extra.push({label:'View series', action:() =>
+          go({type:'detail',id:parentShow.id,kind:'show'})});
+        if (isEpisode && raw.parentRatingKey) extra.push({label:'View season', action:() =>
+          go({type:'detail',id:raw.parentRatingKey,kind:'season'})});
+        actions.append(detailMoreOptions(extra));
       }
       info.append(actions);
-      if (!item.background && item.type !== 'episode') content.append(poster(item, {detail:true}));
+      if (!item.background && !isEpisode) content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       content.append(info);
-      if (item.type === 'episode' || item.type === 'Episode')
+      if (isEpisode)
         content.append(poster(item, {detail:true,landscape:true}));
+      else if (isSeason && item.background)
+        content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       main.append(content);
       if (item.folder) {
         const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
