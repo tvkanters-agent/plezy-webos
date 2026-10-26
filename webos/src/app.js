@@ -16,7 +16,38 @@ let detailMenu = null, ratingDialogReturnFocus = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
-const player = new Player(document.querySelector('#player'), notify, () => render(), simklTracker);
+let playbackReturn = null;
+const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker);
+// Plezy keeps the detail route beneath playback. Never clear/refetch that
+// page after hiding the player: it flashes blank and discards remote focus.
+function playbackClosed() {
+  const previous = playbackReturn;
+  playbackReturn = null;
+  if (!previous || route !== previous.route || api !== previous.api) return;
+  if (previous.focus && previous.focus.isConnected)
+    focusWithoutJump(previous.focus, false);
+  else focusFirst();
+  if (route.type !== 'detail' || route.id !== previous.item.id) return;
+  const expectedRevision = revision;
+  previous.api.detail(route.id, route.kind).then(updated => {
+    if (revision !== expectedRevision || route !== previous.route ||
+        api !== previous.api || player.active) return;
+    // Detail actions close over this item. Refresh it and the affected
+    // controls in place rather than replacing the mounted screen.
+    Object.assign(previous.item, updated);
+    refreshDetailAction(main.querySelector('.detail-actions .detail-play'),
+      updated.resume > 0 ? 'Resume · ' + time(updated.resume) : 'Play', 'play');
+    const restart = main.querySelector('.detail-actions .detail-restart');
+    if (restart) {
+      restart.hidden = !(updated.resume > 0);
+      if (restart.hidden && document.activeElement === restart)
+        focusWithoutJump(main.querySelector('.detail-actions .detail-play'), false);
+    }
+    refreshDetailAction(main.querySelector('.detail-actions .detail-watched'),
+      updated.watched ? 'Mark unwatched' : 'Mark watched',
+      updated.watched ? 'unwatched' : 'watched');
+  }).catch(() => { /* Keep the mounted page usable if metadata is offline. */ });
+}
 let rememberedPaneFocus = null;
 let enterPaneAfterNavigation = false;
 let pendingRailEntryRevision = null;
@@ -180,6 +211,14 @@ function detailButton(label, action, symbol, className = '') {
     control.insertBefore(svg,control.firstChild);
   }
   return control;
+}
+function refreshDetailAction(control, label, symbol) {
+  if (!control) return;
+  const rendered = detailButton(label, () => {}, symbol);
+  control.textContent = '';
+  while (rendered.firstChild) control.appendChild(rendered.firstChild);
+  control.setAttribute('aria-label', label);
+  control.setAttribute('title', label);
 }
 function closeDetailMenu() {
   if (!detailMenu) return;
@@ -1021,7 +1060,7 @@ async function render() {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
           render();
-        }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
+        }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
             if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
@@ -1034,7 +1073,7 @@ async function render() {
         const versions = api instanceof Plex ? item.raw.Media || [] : [];
         if (item.resume > 0) actions.append(detailButton('Resume · ' + time(item.resume),
           () => play(item, item.resume), 'play', 'detail-play'));
-        else actions.append(detailButton('Play', () => play(item, 0), 'play', 'detail-play'));
+        else actions.append(detailButton('Play', () => play(item, item.resume || 0), 'play', 'detail-play'));
         if (versions.length > 1) {
           const version = el('label', undefined, 'detail-version');
           const select = el('select'); select.setAttribute('aria-label', 'Media version');
@@ -1049,14 +1088,16 @@ async function render() {
           select.onchange = () => { route.mediaIndex = Number(select.value); };
           version.append(select); actions.append(version);
         }
-        if (item.resume > 0) actions.append(detailButton('Play from beginning',
-          () => play(item, 0), 'restart', 'detail-icon'));
+        const restart = detailButton('Play from beginning',
+          () => play(item, 0), 'restart', 'detail-icon detail-restart');
+        restart.hidden = !(item.resume > 0);
+        actions.append(restart);
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           render();
-        }, item.watched ? 'unwatched' : 'watched', 'detail-icon'));
+        }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
             if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
@@ -1172,7 +1213,14 @@ async function render() {
     } else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
   }
 }
-function play(item, start, transcode = false) { return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0, transcode: transcode || state.quality === 'transcode'}); }
+function play(item, start, transcode = false) {
+  playbackReturn = {
+    route, api, item,
+    focus: main.contains(document.activeElement) ? document.activeElement : null
+  };
+  return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0,
+    transcode: transcode || state.quality === 'transcode'});
+}
 function settings() {
   title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');
   state.servers.forEach(server => {

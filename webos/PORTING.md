@@ -90,3 +90,13 @@ preview retains its HTML seek path because it has no LG media pipeline.
 Release removes source children before unloading so a later open cannot reuse
 an old URL or resume option. Tests verify source configuration, startup reporting,
 no second seek, and source cleanup; actual buffering on LG requires TV validation.
+
+### Playback return without blank navigation frames
+
+Native Plezy retains the covered detail route during playback
+(`lib/screens/media_detail_screen.dart` uses `RouteAware.didPopNext`;
+see `test/screens/video_player/player_route_exit_test.dart`). The webOS
+player similarly keeps the detail DOM beneath its overlay. On Stop/Back,
+restore the focused launch action and refresh resume/watched controls from
+server metadata **in place**. Re-rendering the page after hiding the player
+temporarily empties the screen and loses remote focus.

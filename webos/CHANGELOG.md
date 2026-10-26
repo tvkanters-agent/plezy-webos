@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 0.2.9 — Smooth playback exit
+
+- Preserve the mounted detail page and remote focus when stopping playback; avoid a blank re-render between two copies of the screen.
+- Refresh Resume/Play, restart and watched actions in place using updated server metadata.
+- Add browser regression coverage for DOM continuity, focus and resume; physical LG verification remains outstanding.
+
 ## 0.2.8 — Native resume at load
 
 - Pass the saved playback position to LG mediaOption before loading direct or HLS media, avoiding the initial load-then-seek buffering cycle.

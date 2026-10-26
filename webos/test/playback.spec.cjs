@@ -30,6 +30,35 @@ async function setup(page, extra = {}, version, pendingStops = []) {
   await expect.poll(()=>events.length).toBeGreaterThan(0);
   return {calls,events};
 }
+test('closing playback preserves the detail screen and focused action without a blank repaint',async({page})=>{
+  await setup(page);
+  await page.evaluate(()=>{
+    window.detailBeforePlayerClose=document.querySelector('#main .detail');
+    window.detailDetachedOnClose=false;
+    const original=window.detailBeforePlayerClose;
+    new MutationObserver(()=>{
+      if (!original.isConnected) window.detailDetachedOnClose=true;
+    }).observe(document.querySelector('#main'),{childList:true});
+  });
+  // A new resume value is fetched after stopping, without replacing the page.
+  await page.route('http://plex.test/library/metadata/movie**',route=>route.fulfill({json:{
+    MediaContainer:{Metadata:[{
+      ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,
+      viewOffset:40000,viewCount:0,
+      Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm'}]}]
+    }]}
+  }}));
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect(page.locator('#player')).toBeHidden();
+  const play=page.locator('#main .detail-actions .detail-play');
+  await expect(play).toBeFocused();
+  await expect(play).toHaveAttribute('aria-label','Resume · 0:40');
+  await expect(page.getByRole('button',{name:'Play from beginning'})).toBeVisible();
+  expect(await page.evaluate(()=>({
+    sameNode:document.querySelector('#main .detail')===window.detailBeforePlayerClose,
+    detached:window.detailDetachedOnClose
+  }))).toEqual({sameNode:true,detached:false});
+});
 test('Back during delayed stream cleanup cannot resurrect playback',async({page})=>{
   const {calls,events}=await setup(page);let release;
   await page.route('http://plex.test/**/timeline**',async route=>{
