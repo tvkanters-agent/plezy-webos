@@ -1,67 +1,114 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Upstream Plezy's MediaRatingSource and SimklCatalogSource community score
-// mappings. Simkl /ratings accepts IMDb, TMDB and TVDB IDs directly.
+// Ports PlexMappers.plexRatingSources, CommunityRatings and
+// SimklCatalogSource.fetchCommunityRatings from upstream Plezy.
+// The original source logos are installed under public/assets/.
 import {SIMKL_CLIENT_ID} from './simkl.js';
 import {plexExternalIds} from './external-ids.js';
-const cache = new Map();
-const TTL = 6 * 60 * 60 * 1000;
-export function plexRatings(raw) {
-  if (!raw) return [];
-  const results = new Map();
-  function add(source, score) {
-    const number = Number(score);
-    if (source && Number.isFinite(number) && number > 0 && number <= 10 && !results.has(source))
-      results.set(source, {source, value:number});
+const cache=new Map(),TTL=6*60*60*1000;
+export const displayOrder=['rottenTomatoesCritic','rottenTomatoesAudience','imdb','tmdb',
+ 'metacritic','letterboxd','trakt','simkl','mal','anilist'];
+const assets={
+ imdb:['rating_icons/imdb.svg',575/289.83],tmdb:['rating_icons/tmdb.svg',185.04/133.4],
+ rottenTomatoesCriticFresh:['rating_icons/rt_fresh.svg',138.75/141.25],
+ rottenTomatoesCriticRotten:['rating_icons/rt_rotten.svg',145/140],
+ rottenTomatoesAudienceFresh:['rating_icons/rt_upright.svg',106.25/140],
+ rottenTomatoesAudienceRotten:['rating_icons/rt_spilled.svg',143.75/108.75],
+ metacritic:['rating_icons/metacritic.svg',1],letterboxd:['rating_icons/letterboxd.svg',262/97],
+ simkl:['simkl_mark.svg',1],mal:['mal_mark.svg',1]
+};
+export function ratingBadgeInfo(source,value) {
+ const key=source==='rottenTomatoes'?'rottenTomatoesCritic':source;
+ const file=key==='rottenTomatoesCritic'?assets[value>=6?'rottenTomatoesCriticFresh':'rottenTomatoesCriticRotten']:
+  key==='rottenTomatoesAudience'?assets[value>=6?'rottenTomatoesAudienceFresh':'rottenTomatoesAudienceRotten']:assets[key];
+ const numeric=key==='tmdb'||key.startsWith('rottenTomatoes')||key==='trakt'||key==='anilist'?
+   (value*10).toFixed(0)+'%':
+   key==='metacritic'?(value*10).toFixed(0):
+   key==='letterboxd'?(value/2).toFixed(1):
+   key==='mal'?value.toFixed(2):value.toFixed(1);
+ return {src:file?'/assets/'+file[0]:null,aspect:file?file[1]:1,value:numeric,
+   label:({imdb:'IMDb',tmdb:'TMDB',simkl:'Simkl',mal:'MyAnimeList',critic:'Critics',
+    audience:'Audience',rottenTomatoesCritic:'Rotten Tomatoes critics',
+    rottenTomatoesAudience:'Rotten Tomatoes audience'})[key]||key};
+}
+function clean(value) {
+ const n=Number(value);
+ if(!Number.isFinite(n)||n<=0||n>100)return null;
+ return n>10?n/10:n;
+}
+export function plexRatings(raw){
+ if(!raw)return [];
+ const result=[];
+ function add(value,image,type='critic'){
+   const score=clean(value);if(score===null)return;
+   const scheme=String(image||'').split(':')[0].toLowerCase();
+   const source=scheme==='imdb'?'imdb':
+    scheme==='themoviedb'||scheme==='tmdb'?'tmdb':
+    scheme==='rottentomatoes'?(type==='critic'?'rottenTomatoesCritic':'rottenTomatoesAudience'):
+    type==='audience'?'audience':'critic';
+   if(!result.some(x=>x.source===source&&x.value===score))result.push({source,value:score});
+ }
+ add(raw.rating,raw.ratingImage,'critic');
+ add(raw.audienceRating,raw.audienceRatingImage,'audience');
+ for(const entry of (Array.isArray(raw.Rating)?raw.Rating:[]))
+  add(entry.value,entry.image,entry.type||'audience');
+ return result;
+}
+export function simklRatings(data){
+ if(!data||typeof data!=='object')return [];
+ const result=[];
+ for(const [key,possible] of [['simkl',['simkl']],['imdb',['imdb','IMDB']],['mal',['mal','MAL']]]){
+  const obj=possible.map(k=>data[k]).find(Boolean),value=clean(obj?.rating);
+  if(value!==null && Number(obj?.votes)!==0)result.push({source:key,value});
+ }
+ return result;
+}
+export function mergeRatings(own,community){
+ if(!community.length)return own;
+ const covered=new Set(community.map(x=>x.source));
+ return [...community,...own.filter(x=>!covered.has(x.source))].sort((a,b)=>{
+  const rank=v=>{let n=displayOrder.indexOf(v);return n<0?displayOrder.length:n;};
+  return rank(a.source)-rank(b.source);
+ });
+}
+function paramsForIds(raw,kind){
+ const ids=plexExternalIds(raw||{}),q=new URLSearchParams();
+ if(ids.imdb)q.set('imdb',ids.imdb);
+ if(ids.tmdb){q.set('tmdb',String(ids.tmdb));q.set('type',kind==='movie'?'movie':'tv');}
+ if(ids.tvdb)q.set('tvdb',String(ids.tvdb));
+ if(ids.mal)q.set('mal',String(ids.mal));
+ return q;
+}
+export async function communityRatings(raw,kind,fetchImpl=fetch){
+ if(!raw||!['movie','show'].includes(kind))return [];
+ const q=paramsForIds(raw,kind);if(!Array.from(q.keys()).length)return [];
+ const cacheKey=kind+':'+q.toString(),old=cache.get(cacheKey);
+ if(old&&Date.now()-old.at<TTL)return old.ratings;
+ const headers={Accept:'application/json','simkl-api-key':SIMKL_CLIENT_ID};
+ const base='https://api.simkl.com';
+ q.set('client_id',SIMKL_CLIENT_ID);
+ let result=[];
+ // Upstream Plezy resolves Plex IDs via /redirect, then reads the
+ // corresponding Simkl detail /movies|tv|anime/<id> with its ratings object.
+ try{
+  const redirect=new URLSearchParams(q);redirect.set('to','simkl');redirect.delete('client_id');
+  redirect.set('client_id',SIMKL_CLIENT_ID);
+  const response=await fetchImpl(base+'/redirect?'+redirect.toString(),{headers,redirect:'manual'});
+  const location=response.headers?.get('Location');
+  const match=location&&/\/(movies|tv|anime)\/(\d+)(?:\/|$)/.exec(location);
+  if(match){
+   const detail=await fetchImpl(base+'/'+match[1]+'/'+match[2]+'?client_id='+SIMKL_CLIENT_ID,{headers});
+   if(detail.ok) result=simklRatings((await detail.json())?.ratings);
   }
-  const sourceFor = (image, type) => {
-    const key = String(image || '').toLowerCase();
-    if (key.startsWith('imdb://')) return 'IMDb';
-    if (key.startsWith('themoviedb://') || key.startsWith('tmdb://')) return 'TMDB';
-    if (key.startsWith('rottentomatoes://')) return type === 'audience' ? 'RT Audience' : 'RT Critics';
-    if (key.startsWith('metacritic://')) return 'Metacritic';
-    return type === 'audience' ? 'Audience' : 'Critics';
-  };
-  for (const item of (Array.isArray(raw.Rating) ? raw.Rating : []))
-    add(sourceFor(item.image, item.type), item.value);
-  if (raw.rating != null) add(sourceFor(raw.ratingImage, 'critic'), raw.rating);
-  if (raw.audienceRating != null) add(sourceFor(raw.audienceRatingImage,'audience'), raw.audienceRating);
-  return Array.from(results.values());
-}
-export function simklRatings(data) {
-  if (!data || typeof data !== 'object') return [];
-  const result=[];
-  for (const [source,key] of [['Simkl','simkl'],['IMDb','imdb'],['MAL','mal']]) {
-    const rating = data[key] || data[key.toUpperCase()];
-    const score = Number(rating?.rating);
-    if (Number.isFinite(score) && score > 0 && score <= 10 && Number(rating?.votes) !== 0)
-      result.push({source,value:score});
-  }
-  return result;
-}
-export async function communityRatings(raw, kind, fetchImpl = fetch) {
-  if (!raw || !['movie','show'].includes(kind)) return [];
-  const ids=plexExternalIds(raw), query=new URLSearchParams();
-  if (ids.imdb) query.set('imdb',ids.imdb);
-  else if (ids.tmdb) {query.set('tmdb',String(ids.tmdb));query.set('type',kind==='movie'?'movie':'tv');}
-  else if (ids.tvdb) query.set('tvdb',String(ids.tvdb));
-  else return [];
-  query.set('client_id',SIMKL_CLIENT_ID);
-  query.set('fields','simkl,ext');
-  const key=kind+':'+query.toString(),stored=cache.get(key);
-  if (stored && Date.now()-stored.at<TTL) return stored.ratings;
-  try {
-    const response=await fetchImpl('https://api.simkl.com/ratings?'+query.toString(),{
-      headers:{Accept:'application/json'}});
-    if (!response.ok) return [];
-    const data=await response.json();
-    const ratings=simklRatings(data);
-    cache.set(key,{at:Date.now(),ratings});
-    return ratings;
-  } catch (_) { return []; } // Optional service must never interrupt Plex details.
-}
-export function mergeRatings(plex, community) {
-  const merged=new Map();
-  for (const rating of plex) merged.set(rating.source,rating);
-  for (const rating of community) merged.set(rating.source,rating);
-  return Array.from(merged.values());
+ }catch(_){/* On old webOS browsers redirect Location may be unreadable. */}
+ if(!result.length){
+  // Documented Simkl Ratings by ID fallback supports TVDB/IMDb/TMDB directly
+  // without parsing a cross-origin redirect Location (Chromium 53).
+  try{
+   const query=new URLSearchParams(q);query.set('fields','simkl,ext');
+   const response=await fetchImpl(base+'/ratings?'+query.toString(),{headers});
+   if(response.ok)result=simklRatings(await response.json());
+  }catch(_){/* Optional community scores never prevent a detail page. */}
+ }
+ cache.set(cacheKey,{at:Date.now(),ratings:result});
+ return result;
 }
