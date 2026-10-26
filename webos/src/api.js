@@ -364,12 +364,9 @@ export class Plex {
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
-      // Plex Universal Transcoder offset is in SECONDS. Starting at the
-      // resume point prevents two full HLS buffer cycles on webOS. If a
-      // decoder/server rejects it, the Player retries once at zero.
+      // Match Plezy's full-title HLS timeline. The player supplies the
+      // resume point to the decoder at open, not to the transcoder URL.
       session: sessionId,
-      offset: transcode && !options.forceLocalResume
-        ? Math.max(0,Number(options.start)||0) : 0,
       subtitleSize: 100, subtitles: 'burn',
       'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined) {
@@ -378,10 +375,7 @@ export class Plex {
     }
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, item,
-      start: transcode && !options.forceLocalResume ? 0 : options.start || 0,
-      timelineOffset: transcode && !options.forceLocalResume
-        ? Math.max(0,Number(options.start)||0) : 0,
-      serverResumeOffset: !!(transcode && !options.forceLocalResume && Number(options.start)>0),
+      start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw),
       audio: (part.Stream || []).filter(s => s.streamType === 2)
         .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'audio', index)})),

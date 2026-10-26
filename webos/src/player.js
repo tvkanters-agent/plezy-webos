@@ -190,8 +190,7 @@ export class Player {
       this.session = session;
       this.pendingStart = session.start;
       this.initialSeekTarget = Number(session.start) || 0;
-      // Keep the player obscured by the spinner until the resume seek has
-      // decoded a frame. Starting play is necessary to initialize LG HLS.
+      // Keep the spinner until a frame at the requested position is ready.
       this.initialSeekPending = this.initialSeekTarget > 0;
       this.root.querySelector('.play-method').textContent = session.transcode ? 'HLS · H.264 / AAC' : 'Direct play';
       for (const kind of ['audio', 'subtitle']) {
@@ -216,12 +215,11 @@ export class Player {
       // Keep the opening frame invisible until the resume target has been
       // sought and decoded. Loading indicators remain independently visible.
       this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
-      this.video.src = session.url;
-      this.video.load();
+      this.loadSource(session);
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       this.startTimeout = setTimeout(() => {
-        if (generation === this.generation && this.video.readyState < 2) this.failed();
+        if (generation === this.generation && (this.video.readyState < 2 || this.initialSeekPending)) this.failed();
       }, 30000);
       // On webOS a non-started video often never reaches canplay/seeked.
       // Initialize the decoder, but do not show its frame until the resume
@@ -230,6 +228,31 @@ export class Player {
     } catch (error) {
       if (generation === this.generation) { this.showBuffering(false);this.status.textContent = error.message; this.reveal(); }
     }
+  }
+  loadSource(session) {
+    const nativeResume = typeof window.PalmSystem !== 'undefined' ||
+      /web0s|webos|netcast/i.test(navigator.userAgent);
+    if (nativeResume) {
+      // LG's equivalent of Plezy's Media(start:): pass milliseconds to the
+      // pipeline BEFORE load/play. A later currentTime assignment buffers twice.
+      const source = document.createElement('source');
+      source.setAttribute('src', session.url);
+      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : 'video/mp4') +
+        ';mediaOption=' + encodeURIComponent(JSON.stringify({option: {
+          transmission: {playTime: {start: this.initialSeekTarget * 1000}}
+        }})));
+      const generation = this.generation;
+      source.addEventListener('error', () => {
+        if (generation === this.generation && this.session === session) this.failed();
+      });
+      this.video.appendChild(source);
+      // Native startup owns the seek; metadata/canplay must not seek again.
+      this.pendingStart = 0;
+    } else {
+      // Desktop preview has no LG pipeline; retain the HTML media seek path.
+      this.video.src = session.url;
+    }
+    this.video.load();
   }
   async beginVideoPlayback(generation=this.generation) {
     if (generation!==this.generation || !this.session) return;
@@ -268,7 +291,7 @@ export class Player {
     this.showBuffering(false);
   }
   position() {
-    return this.pendingStart || ((this.video.currentTime || 0) + (this.session?.timelineOffset || 0));
+    return (this.initialSeekPending ? this.initialSeekTarget : this.pendingStart) || (this.video.currentTime || 0);
   }
   update() {
     const position=this.position();
@@ -328,7 +351,9 @@ export class Player {
     this.initialSeekTarget = 0;
     this.scrubbing = false;
     this.video.style.visibility='visible';
-    this.video.pause(); this.video.removeAttribute('src'); this.video.load();
+    this.video.pause(); this.video.removeAttribute('src');
+    Array.from(this.video.querySelectorAll('source')).forEach(source => source.remove());
+    this.video.load();
     await this.reporting;
     if (session) await api.stop(session).catch(() => {});
     this.reportWarning = false;
@@ -353,17 +378,6 @@ export class Player {
   }
   async failed() {
     if (!this.session || this.recovering) return;
-    if (this.session.serverResumeOffset && !this.options.forceLocalResume) {
-      // Some older webOS HLS decoders reject a nonzero-offset playlist.
-      // Fall back once to the original local seek; never loop through
-      // server-offset retries or lose the episode's saved position.
-      this.recovering=true;
-      const position=this.session.timelineOffset || this.options.start || 0;
-      try {
-        await this.reopen({forceLocalResume:true,transcode:true,start:position});
-      } finally { this.recovering=false; }
-      return;
-    }
     if (!this.session.transcode) {
       this.recovering = true;
       this.showBuffering(true);
@@ -411,7 +425,7 @@ export class Player {
     // Changing only the range input moved a number but never the picture.
     try {
       if (this.video.readyState >= 1)
-        this.video.currentTime = Math.max(0,this.seekPreview-(this.session?.timelineOffset||0));
+        this.video.currentTime = Math.max(0,this.seekPreview);
       else this.pendingStart = this.seekPreview;
     } catch (_) { this.pendingStart = this.seekPreview; }
     this.showBuffering(this.video.readyState < 2 || this.video.seeking);
@@ -439,9 +453,6 @@ export class Player {
   }
   timelineDuration() {
     const duration = this.video.duration;
-    // Plex transcoded HLS starts at an absolute offset, but video.currentTime
-    // and video.duration describe only the resulting segment.
-    if (this.session?.timelineOffset) return this.item?.duration || ((Number(duration)||0)+this.session.timelineOffset);
     return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
   }
   seek(delta) { this.seekTo(this.position() + delta); }
@@ -450,13 +461,9 @@ export class Player {
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
-    if (this.session?.timelineOffset && target<this.session.timelineOffset) {
-      this.reopen({...this.options,start:target,transcode:true}).catch(()=>this.failed());
-      return;
-    }
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
-      try { this.video.currentTime = target-(this.session?.timelineOffset||0); }
+      try { this.video.currentTime = target; }
       catch (_) { this.pendingStart = target; }
     }
     this.seekBar.value = String(Math.round(target));

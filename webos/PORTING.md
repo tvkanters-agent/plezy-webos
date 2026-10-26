@@ -70,3 +70,23 @@ Install the complete IPK (`npm run package`, which includes `service/`). Serving
 simulate PalmServiceBridge explicitly. This is a transport adaptation, not an
 alternate catalog lookup or title-matching algorithm. LG TV installation, Luna
 permissions and live authenticated scores still require hardware verification.
+
+### Resume at decoder open
+
+Native Plezy opens `Media(videoUrl, start: timing.mediaStart)` in
+`lib/screens/video_player/parts/playback_open.dart`. Its Plex client deliberately
+omits a transcoder URL offset (see `buildTranscodeStartPath`, issue #1859): the
+URL describes the full title and the decoder selects the resume segment.
+
+The LG equivalent is a `<source>` with an encoded `mediaOption` in its MIME type:
+`option.transmission.playTime.start` in milliseconds, attached before `load()`.
+See https://webostv.developer.lge.com/develop/guides/resuming-media-with-mediaoption
+and https://webostv.developer.lge.com/develop/guides/mediaoption-parameter .
+LG explicitly documents that setting `currentTime` after loading buffers twice.
+Both direct MP4 and HLS use this native option on webOS. Metadata/ready events
+must not issue another initial seek. Plex URLs have no resume offset and all
+progress, chapters and seeks retain the original full-title timeline. Desktop
+preview retains its HTML seek path because it has no LG media pipeline.
+Release removes source children before unloading so a later open cannot reuse
+an old URL or resume option. Tests verify source configuration, startup reporting,
+no second seek, and source cleanup; actual buffering on LG requires TV validation.

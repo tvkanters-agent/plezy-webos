@@ -839,7 +839,18 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
- const times=[],hlsStarts=[];
+ const times=[];
+ await page.addInitScript(()=>{
+   window.PalmSystem={};
+   window.nativeOpens=[];
+   HTMLMediaElement.prototype.load=function(){
+     const source=this.querySelector('source');
+     if(source) window.nativeOpens.push({url:source.src,type:source.type});
+   };
+   // Desktop Chromium cannot decode native LG mediaOption. Inspect the exact
+   // source at load time; this fixture does not validate TV buffering.
+   HTMLMediaElement.prototype.play=function(){return Promise.resolve();};
+ });
  const episode={ratingKey:'episode2',type:'episode',title:'Episode In Progress',
    parentRatingKey:'season1',grandparentRatingKey:'series',duration:1200000,
    viewOffset:125000,
@@ -848,7 +859,6 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.route('http://plex.test/**',route=>{
    const url=new URL(route.request().url()),path=url.pathname;
    if(path==='/video/:/transcode/universal/start.m3u8') {
-     hlsStarts.push(url.searchParams.get('offset'));
      // Mocked JSON is deliberately not valid video: decoder may fall back.
      return route.fulfill({status:200,contentType:'application/vnd.apple.mpegurl',
        body:'#EXTM3U\n#EXT-X-VERSION:3\n'});
@@ -867,9 +877,16 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.getByRole('button',{name:/Partially Viewed Series/}).first().click();
  await page.getByRole('button',{name:'Play',exact:true}).first().click();
  await expect(page.locator('#player')).toBeVisible();
- await expect.poll(()=>hlsStarts.includes('125')).toBe(true);
- expect(hlsStarts[0]).toBe('125');
- // The first request and Plex progress both start from the resume point.
+ const opens=await page.evaluate(()=>window.nativeOpens);
+ expect(opens).toHaveLength(1);
+ const url=new URL(opens[0].url);
+ expect(url.pathname).toBe('/video/:/transcode/universal/start.m3u8');
+ expect(url.searchParams.has('offset')).toBe(false);
+ expect(url.searchParams.get('path')).toBe('/library/metadata/episode2');
+ const [mime,encoded]=opens[0].type.split(';mediaOption=');
+ expect(mime).toBe('application/vnd.apple.mpegurl');
+ expect(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start).toBe(125000);
+ // Preserve the target in progress reports while the decoder is opening.
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });
 
