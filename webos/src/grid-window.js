@@ -332,12 +332,19 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
         counts.set(id,occurrence+1);
         return JSON.stringify([id,occurrence]);
       });
-      // Preserve which occurrence was focused if overlapping pages contain
-      // the same server ID. Other cases still fall back to the stable ID.
-      const newIndex = focusedKey == null ?
-        (focusedId == null ? -1 :
-          nextItems.findIndex(item => String(item.id) === focusedId)) :
-        nextKeys.indexOf(focusedKey);
+      // Preserve the exact occurrence when it survives. A refreshed offset
+      // page can also remove an earlier overlap, renumbering the surviving
+      // title's occurrence without removing the title itself.
+      let newIndex = focusedKey == null ? -1 : nextKeys.indexOf(focusedKey);
+      if (newIndex < 0 && focusedId != null) {
+        // Choose the surviving copy closest to the old logical position.
+        // This also works if one of several overlapping copies was deleted.
+        for (let i=0; i<nextItems.length; i++) {
+          if (String(nextItems[i].id) !== focusedId) continue;
+          if (newIndex < 0 || Math.abs(i-oldIndex)<Math.abs(newIndex-oldIndex))
+            newIndex = i;
+        }
+      }
       const nextScroll = oldIndex >= 0 && newIndex >= 0 && columns ?
         Math.max(0,main.scrollTop +
           (Math.floor(newIndex/columns)-Math.floor(oldIndex/columns))*stride) : null;
