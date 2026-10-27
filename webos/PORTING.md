@@ -266,3 +266,17 @@ performance and disk-quota verification.
 ### Native webOS launch splash
 
 LG displays `splashBackground` before starting the web app, so an HTML loading screen cannot replace the grey pre-launch background. The app declares a 1920×1080 PNG generated during the build from Plezy's unchanged `assets/plezy.svg` with the actual dark `webos/public/app.css` background. The already-required Playwright Chromium renders the vector; no browser, renderer or startup delay is added to the TV application. LG's `splashColor` setting applies only to StanbyME models, so the dark color is embedded in the PNG for normal TVs.
+
+### Root navigation history
+
+As in Flutter `MainScreen._selectTab`/`_selectLibrary`, choosing Home,
+libraries, Search or Settings in the side rail selects a persistent tab
+rather than pushing a new Back entry. The Back key on one of these tabs
+returns directly Home; a second Back at Home opens the existing webOS exit
+dialog. Detail, person and authentication routes remain pushed and restore
+their covered page, scroll and focus on Back. Up to eight inactive root tabs
+retain detached DOM for instant redisplay, with explicit cleanup of suspended
+alphabet rails on eviction/account changes. Re-entered library tabs revalidate
+first-page server data without blocking the first frame; changed responses
+repaint while preserving scroll and focus. Browser tests cover repeated tab
+switches, detail returns and switching tabs while a detail is open.

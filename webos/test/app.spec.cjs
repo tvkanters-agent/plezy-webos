@@ -83,11 +83,11 @@ test('slow library loading fades the first grid without re-fading back navigatio
   await expect(grid).toHaveClass(/content-enter/);
   await expect(grid.locator('.card')).toHaveCount(1);
   expect(await grid.evaluate(node=>getComputedStyle(node).animationName)).toBe('content-enter');
-  // Navigate away via the sidebar and Back: a preserved grid should return
-  // without running the entrance animation for a second time.
+  // Sidebar navigation does not accumulate Back entries; returning to the
+  // library tab restores its snapshot without replaying the entrance fade.
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
   await expect(page.locator('main .grid')).not.toHaveClass(/content-enter/);
   await expect(page.locator('main .grid .card')).toHaveCount(1);
@@ -1994,4 +1994,48 @@ test('changed catalog metadata preserves unchanged card DOM, artwork and focus',
       document.activeElement===after[0]];
   });
   expect(identity).toEqual([true,false,true,true]);
+});
+
+test('sidebar tabs do not build a duplicate Back stack',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('.rail-library-items')).toBeVisible();
+  for (const destination of ['Movies','Home','Search','Movies','Settings','Home','Movies','Search','Movies']) {
+    await page.locator('#nav').getByRole('button',{name:destination,exact:true}).click();
+    await expect(page.locator('#nav .active')).toContainText(destination);
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+test('nested details unwind to their library tab, then Home',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const poster = page.getByRole('button',{name:'The Test Film',exact:true});
+  await expect(poster).toBeVisible();
+  await poster.focus();
+  await poster.click();
+  await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+  await expect(poster).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+test('sidebar change from an open detail discards obsolete drilldown history',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+  await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
+  await expect(page.getByLabel('Title',{exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
 });

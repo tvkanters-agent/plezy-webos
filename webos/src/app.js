@@ -30,6 +30,9 @@ function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
+// Sidebar destinations are persistent tabs, not pushed navigator routes.
+// Bounded detached DOM snapshots keep returning to a library instantaneous.
+const rootSnapshots = new Map();
 let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
 let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
@@ -127,13 +130,14 @@ function setClient() {
   // Never reuse catalog metadata across accounts or server connections.
   catalogCache.clear();
   collectionIndex.clear();
+  clearNavigationHistory();
   const server = activeServer();
   api = server ? client(server, state.deviceId) : null;
   libraryCache = null; libraryCacheFor = null; libraryLoading = false;
 }
 function addServer(server) {
   state.servers = state.servers.filter(s => s.id !== server.id).concat(server);
-  state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
+  state.active = server.id; persist(); setClient(); go({type: 'home'}, false);
 }
 // The upstream Flutter D-pad navigator keeps the current scroll offset until
 // an item actually leaves the visible content viewport. Chromium's native
@@ -504,33 +508,123 @@ function navigation() {
     if (restore) focusWithoutJump(restore, false);
   }
 }
-// Home's already-mounted shelves and decoded poster elements can be reused
-// without a fetch, decode, or a single blank frame. Navigation history owns
-// the detached nodes; consuming its most recent matching snapshot is safe
-// because the older Back entry can still fall back to render().
-function restoreSessionHome() {
-  const priorRows = catalogCache.peek('home', {allowExpired:true});
-  if (!priorRows) return false;
-  const candidate = history.slice().reverse().find(entry =>
-    entry.route?.type === 'home' && entry.sourceApi === api &&
-    entry.catalogGeneration === catalogCache.generation &&
-    entry.snapshot && entry.snapshot.childNodes.length);
-  if (!candidate) return false;
-  const focusFromRail = enterPaneAfterNavigation;
+// Flutter MainScreen selects tabs in an IndexedStack. Only pushed detail or
+// sign-in routes belong to Back history; sidebar changes replace the active tab.
+function rootKey(value) {
+  if (value.type === 'library') return 'library:' + value.library.id;
+  return ['home', 'search', 'settings'].includes(value.type) ? value.type : null;
+}
+function releaseSnapshot(entry) {
+  if (entry && entry.alphabet) entry.alphabet.destroy();
+}
+function clearDrilldownHistory() {
+  history.forEach(releaseSnapshot);
+  history = [];
+}
+function clearNavigationHistory() {
+  clearDrilldownHistory();
+  rootSnapshots.forEach(releaseSnapshot);
+  rootSnapshots.clear();
+}
+function capturePage() {
+  const snapshot = document.createDocumentFragment();
+  const scroll = main.scrollTop;
+  const focused = main.contains(document.activeElement) ?
+    document.activeElement.dataset.focus : null;
+  const alphabet = activeAlphabet;
+  if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
+  main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
+  while (main.firstChild) snapshot.appendChild(main.firstChild);
+  return {route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
+    catalogGeneration:catalogCache.generation};
+}
+function cacheRootPage(entry) {
+  if (!entry || !entry.snapshot || !entry.snapshot.childNodes.length ||
+      entry.sourceApi !== api) { releaseSnapshot(entry); return; }
+  const key = rootKey(entry.route);
+  if (!key) { releaseSnapshot(entry); return; }
+  releaseSnapshot(rootSnapshots.get(key));
+  rootSnapshots.delete(key);
+  rootSnapshots.set(key, entry);
+  // A handful of tabs can stay warm, not arbitrarily many full DOM grids.
+  if (rootSnapshots.size > 8) {
+    const oldest = rootSnapshots.keys().next().value;
+    releaseSnapshot(rootSnapshots.get(oldest));
+    rootSnapshots.delete(oldest);
+  }
+}
+function takeRootPage(key) {
+  const entry = rootSnapshots.get(key);
+  rootSnapshots.delete(key);
+  if (!entry) return null;
+  // Playback and watch-state updates invalidate Home's session-only shelves.
+  if (entry.sourceApi !== api || !entry.snapshot.childNodes.length ||
+      (key === 'home' && entry.catalogGeneration !== catalogCache.generation)) {
+    releaseSnapshot(entry);
+    return null;
+  }
+  return entry;
+}
+// Cached tabs paint immediately, but their first metadata page still gets a
+// background freshness check just as it would on a normal library visit.
+function revalidateRestoredLibrary(expectedRoute, mountedRevision) {
+  if (expectedRoute.type !== 'library') return;
+  const selected = expectedRoute.sort || 'title', filter = expectedRoute.filter || 'all';
+  const view = expectedRoute.view || 'browse', libraryId = expectedRoute.library.id;
+  const currentApi = api;
+  let key, loader;
+  if (view === 'browse') {
+    key = 'browse:' + JSON.stringify([libraryId,selected,filter,expectedRoute.alpha || '',0,null]);
+    loader = () => currentApi.list(libraryId,0,selected,filter,undefined,
+      currentApi instanceof Jellyfin ? expectedRoute.alpha : undefined);
+  } else if (currentApi instanceof Plex && view === 'recommended') {
+    key = 'recommended:' + libraryId;
+    loader = () => currentApi.recommended(libraryId);
+  } else if (currentApi instanceof Plex && view === 'collections') {
+    key = 'collections:' + libraryId + ':0';
+    loader = () => currentApi.collections(libraryId,0);
+  } else if (currentApi instanceof Plex && view === 'playlists') {
+    key = 'playlists:0';
+    loader = () => currentApi.playlists(0);
+  }
+  if (!loader) return;
+  savedPage(key, loader, {priority:true}).then(result => {
+    if (!result.fresh) return;
+    return result.fresh.then(update => {
+      if (!update.changed || revision !== mountedRevision || route !== expectedRoute || api !== currentApi) return;
+      // Only changed server data rebuilds the view; keep the user's position.
+      const focused = main.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+      route = {...route, scroll:main.scrollTop, focus:focused || route.focus};
+      render();
+    });
+  }).catch(() => { /* An offline server must not hide a cached tab. */ });
+}
+function restoreRootPage(entry) {
+  const fromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
-  ++revision;
+  route = entry.route;
+  const mountedRevision = ++revision;
   pendingRailEntryRevision = null;
   lastRailRightRevision = null;
-  cancelAuth();
-  detailMenu = null;
-  main.classList.remove('has-alpha-bar');
+  cancelAuth(); detailMenu = null;
   main.textContent = '';
-  main.appendChild(candidate.snapshot);
-  main.scrollTop = candidate.route.scroll || 0;
+  main.appendChild(entry.snapshot);
+  main.scrollTop = route.scroll || 0;
+  main.classList.toggle('has-alpha-bar', !!entry.alphabet);
   navigation();
+  if (entry.alphabet) {
+    activeAlphabet = entry.alphabet;
+    activeAlphabet.resume(() => revision === mountedRevision);
+  }
+  if (fromRail) focusFirst(main, preferredPaneControl(), true);
+  else {
+    const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
+      node => node.dataset.focus === route.focus);
+    if (focused) focusWithoutJump(focused, false);
+    else focusFirst();
+  }
   schedulePosters();
-  focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
-  return true;
+  revalidateRestoredLibrary(route, mountedRevision);
 }
 // Read saved data/artwork while the current route still covers the screen.
 // IndexedDB and decoding are asynchronous even without any network traffic;
@@ -577,8 +671,10 @@ async function go(next, remember = true) {
   try { await prepareNavigation(next, sourceApi); } catch (_) { /* Cache is optional. */ }
   if (intent !== navigationIntent || sourceApi !== api) return;
 
-  // Re-selecting the current destination must not tear down its page.
-  if (next.type === 'home' && route.type === 'home' && catalogCache.peek('home', {allowExpired:true}))
+  // Re-selecting an active sidebar destination leaves its view untouched.
+  if ((next.type === 'home' && route.type === 'home' &&
+       catalogCache.peek('home', {allowExpired:true})) ||
+      (rootKey(next) && rootKey(next) === rootKey(route) && next.type !== 'library' && !next.forceRefresh))
     return;
   if (next.type === 'library' && route.type === 'library' &&
       next.library.id === route.library.id && (next.view || 'browse') === (route.view || 'browse') &&
@@ -588,28 +684,28 @@ async function go(next, remember = true) {
   const fromRail = nav.contains(document.activeElement);
   enterPaneAfterNavigation = fromRail;
   rememberedPaneFocus = null;
-  if (remember) {
-    // Flutter retains the covered route's subtree. Preserve this rendered
-    // page and its scroll/focus state instead of refetching and repainting it
-    // when a movie/episode detail is dismissed.
-    const snapshot = document.createDocumentFragment();
-    const scroll = main.scrollTop;
-    const focused = main.contains(document.activeElement) ?
-      document.activeElement.dataset.focus : null;
-    const alphabet = activeAlphabet;
-    if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
-    // A restored page must not replay the previous content entrance animation.
-    main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
-    while (main.firstChild) snapshot.appendChild(main.firstChild);
-    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
-      catalogGeneration:catalogCache.generation});
-    if (history.length > 8) {
-      const discarded = history.shift();
-      if (discarded.alphabet) discarded.alphabet.destroy();
+  const destination = rootKey(next);
+  if (destination && (destination !== rootKey(route) || history.length)) {
+    if (rootKey(route)) cacheRootPage(capturePage());
+    else {
+      // A detail view covers a root tab retained in the drilldown stack.
+      // Move that original snapshot to the tab cache before clearing details.
+      const rootIndex = history.findIndex(entry => rootKey(entry.route));
+      if (rootIndex !== -1) cacheRootPage(history.splice(rootIndex,1)[0]);
     }
+    clearDrilldownHistory();
+    const cached = takeRootPage(destination);
+    if (cached) { restoreRootPage(cached); return; }
+    route = next;
+    render();
+    return;
+  }
+  if (remember) {
+    // Pushed details preserve their covered route, including scroll/focus.
+    history.push(capturePage());
+    if (history.length > 8) releaseSnapshot(history.shift());
   }
   route = next;
-  if (next.type === 'home' && restoreSessionHome()) return;
   render();
 }
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
@@ -661,6 +757,8 @@ function back() {
     }
     return;
   }
+  // Native MainScreen Back on a tab goes Home, not through previous tabs.
+  if (api && route.type !== 'home') { go({type:'home'}); return; }
   exitDialogReturnFocus = document.activeElement;
   dialog.classList.add('exit-dialog');
   dialog.textContent = '';
@@ -1930,7 +2028,7 @@ function settings() {
     const panel = el('section', undefined, 'panel'); panel.append(el('h2', server.name), el('p', server.kind.toUpperCase() + ' · ' + server.url, 'muted'));
     const actions = el('div', undefined, 'actions');
     actions.append(button(server.id === (activeServer() || {}).id ? 'Open server' : 'Switch to server', () => {
-      state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
+      state.active = server.id; persist(); setClient(); go({type: 'home'}, false);
     }), button('Remove from this TV', () => {
       // Keep each connection's saved catalog isolated and erase it on removal.
       savedCatalog.removeScope(catalogScope(server)).catch(() => {});
@@ -2136,7 +2234,7 @@ async function plexSignIn() {
         servers.forEach(server => { state.servers = state.servers.filter(s => s.id !== server.id).concat(server); });
         persist();
         if (servers.length === 1) {
-          state.active = servers[0].id; persist(); setClient(); history = []; go({type: 'home'}, false); return;
+          state.active = servers[0].id; persist(); setClient(); go({type: 'home'}, false); return;
         }
         // An account can have multiple owned/shared Plex servers. Let viewers
         // choose instead of silently opening whichever resource was listed first.
@@ -2144,7 +2242,7 @@ async function plexSignIn() {
         status.textContent = 'Choose a Plex server to browse:';
         const choices = el('div', undefined, 'actions');
         servers.forEach(server => choices.append(button(server.name, () => {
-          state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
+          state.active = server.id; persist(); setClient(); go({type: 'home'}, false);
         })));
         main.append(choices); focusFirst(choices); return;
       }
