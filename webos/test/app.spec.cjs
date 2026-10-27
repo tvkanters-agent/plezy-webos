@@ -83,11 +83,11 @@ test('slow library loading fades the first grid without re-fading back navigatio
   await expect(grid).toHaveClass(/content-enter/);
   await expect(grid.locator('.card')).toHaveCount(1);
   expect(await grid.evaluate(node=>getComputedStyle(node).animationName)).toBe('content-enter');
-  // Navigate away via the sidebar and Back: a preserved grid should return
-  // without running the entrance animation for a second time.
+  // Sidebar navigation does not accumulate Back entries; returning to the
+  // library tab restores its snapshot without replaying the entrance fade.
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
   await expect(page.locator('main .grid')).not.toHaveClass(/content-enter/);
   await expect(page.locator('main .grid .card')).toHaveCount(1);
@@ -1467,10 +1467,14 @@ test('changed artwork tags refresh images while unchanged versions stay cached',
   await expect(updated).toHaveClass(/artwork-loaded/);
   expect(new URL(await updated.getAttribute('data-artwork-url')).searchParams.get('tag')).toBe('poster-new');
   const count=requested.length;
-  // A new navigation receives the same tag and reuses the decoded image.
+  await page.evaluate(()=>{window.originalPoster=document.querySelector('main .grid .poster img');});
+  // A tab switch reattaches the SAME decoded image rather than creating a
+  // second image with a new ready/fade-in state.
   await page.getByRole('button',{name:'Search',exact:true}).click();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
-  await expect(page.locator('main .grid .poster img').first()).toHaveClass(/artwork-ready/);
+  const preserved=page.locator('main .grid .poster img').first();
+  await expect(preserved).toHaveClass(/artwork-loaded|artwork-ready/);
+  expect(await page.evaluate(()=>document.querySelector('main .grid .poster img')===window.originalPoster)).toBe(true);
   expect(requested.length).toBe(count);
 });
 
@@ -1509,7 +1513,7 @@ test('previously visited unversioned library paints every cached image on its fi
       if(!grid||grid.querySelectorAll('.card').length!==expected)return;
       const imgs=Array.from(grid.querySelectorAll('.poster img'));
       window.libraryFirstFrame=imgs.map(img=>({
-        ready:img.classList.contains('artwork-ready'),
+        ready:img.classList.contains('artwork-ready') || img.classList.contains('artwork-loaded'),
         opacity:getComputedStyle(img).opacity, src:img.getAttribute('src')
       }));
       window.libraryFrameObserver.disconnect();
@@ -1819,7 +1823,7 @@ test('returning to Home restores identical live DOM before any new page render',
   await page.getByRole('button',{name:'Home',exact:true}).click();
   await expect(page.locator('main .shelf .card').first()).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 test('a visited Series library paints saved metadata while its next request is pending',async({page})=>{
@@ -1994,4 +1998,60 @@ test('changed catalog metadata preserves unchanged card DOM, artwork and focus',
       document.activeElement===after[0]];
   });
   expect(identity).toEqual([true,false,true,true]);
+});
+
+test('sidebar tabs do not build a duplicate Back stack',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('.rail-library-items')).toBeVisible();
+  for (const destination of ['Movies','Home','Search','Movies','Settings','Home','Movies','Search','Movies']) {
+    await page.locator('#nav').getByRole('button',{name:destination,exact:true}).click();
+    await expect(page.locator('#nav .active')).toContainText(destination);
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+test('nested details unwind to their library tab, then Home',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const poster = page.getByRole('button',{name:'The Test Film',exact:true});
+  await expect(poster).toBeVisible();
+  await poster.focus();
+  await poster.click();
+  await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+  await expect(poster).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+test('sidebar change from an open detail discards obsolete drilldown history',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+  await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
+  await expect(page.getByLabel('Title',{exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+});
+
+test('returning to a cached library tab retains the focused poster',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const poster=page.getByRole('button',{name:'The Test Film',exact:true}).first();
+  await expect(poster).toBeVisible();
+  await poster.focus();
+  await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(poster).toBeFocused();
 });

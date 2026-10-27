@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-export const VERSION = '1.5.2';
+export const VERSION = '1.5.3';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
