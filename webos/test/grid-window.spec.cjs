@@ -260,3 +260,146 @@ test('recycling reuses nearby artwork DOM and suspends both scroll listeners',as
   expect(artworkRequests.filter(x=>x==='/Items/0/Images/Primary').length)
     .toBe(initialRequestCount);
 });
+
+const tinyArtwork = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPUsAlgYGBgYmBgYGBgAAAIcgC421576AAAAABJRU5ErkJggg==','base64');
+
+for (const detachTiming of ['resolve-detached','resolve-reattached']) {
+  test('pending artwork recovers after recycling ('+detachTiming+')',async({page})=>{
+    const requests=[];
+    const calls=await mockLongJellyfinLibrary(page);
+    let releaseImage;
+    const held = new Promise(resolve => { releaseImage=resolve; });
+    await page.route('http://media.test/Items/0/Images/Primary**', async route=>{
+      requests.push(route.request().url());
+      if(requests.length===1)await held;
+      await route.fulfill({body:tinyArtwork,contentType:'image/png'});
+    });
+    await page.goto('/');
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await expect.poll(()=>requests.length,{timeout:15000}).toBeGreaterThan(0);
+    await fillFivePages(page,calls);
+    await page.locator('main').evaluate(main=>main.scrollTop=0);
+    await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
+    await page.evaluate(()=>{
+      window.savedImage=document.querySelector('main .grid .card[data-focus="0"] img');
+    });
+    await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.7);
+    await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(0);
+    if(detachTiming==='resolve-detached') {
+      releaseImage();
+      // Allow the pending asynchronous artwork result to complete while its
+      // original node is detached, before the LRU returns that exact node.
+      await page.waitForTimeout(100);
+    }
+    await page.locator('main').evaluate(main=>main.scrollTop=0);
+    await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
+    if(detachTiming==='resolve-reattached')releaseImage();
+    await expect(page.locator('main .grid .card[data-focus="0"] img'))
+      .toHaveClass(/artwork-(loaded|ready)/,{timeout:15000});
+    const result=await page.evaluate(()=>{
+      const image=document.querySelector('main .grid .card[data-focus="0"] img');
+      return {same:image===window.savedImage,naturalWidth:image.naturalWidth,visible:
+        Number(getComputedStyle(image).opacity)};
+    });
+    expect(result.same).toBe(true);
+    expect(result.naturalWidth).toBeGreaterThan(0);
+    expect(result.visible).toBe(1);
+  });
+}
+
+for(const layout of ['grid','flex']) {
+  test('detached '+layout+' library remeasures before Back and cached-tab return',async({page})=>{
+    const calls=await mockLongJellyfinLibrary(page);
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex')await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await fillFivePages(page,calls);
+    await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.55);
+    await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
+    const first=await visibleGridAnchor(page);
+    await page.locator('main .grid .card[data-focus="'+first.focused+'"]').count();
+    // Use an actually visible card and ensure a stable route focus is saved.
+    const focusId=await page.locator('main').evaluate(main=>{
+      const view=main.getBoundingClientRect();
+      const card=Array.from(main.querySelectorAll('.grid .card')).find(node=>{
+        const box=node.getBoundingClientRect();
+        return box.top>=view.top+10 && box.bottom<=view.bottom-10;
+      });
+      if(card)card.focus();
+      return card && card.dataset.focus;
+    });
+    expect(focusId).toBeTruthy();
+    await page.locator('main .grid .card[data-focus="'+focusId+'"]').click();
+    await expect(page.getByRole('heading',{name:'Title '+focusId.padStart(3,'0')})).toBeVisible();
+    await page.setViewportSize({width:1050,height:720});
+    await page.keyboard.press('Escape');
+    await expect(page.locator('main .grid .card[data-focus="'+focusId+'"]')).toBeFocused();
+    const measure=await page.locator('main .grid').evaluate(grid=>{
+      const card=grid.querySelector('.card');
+      const rowTop=card.getBoundingClientRect().top;
+      const actual=Array.from(grid.querySelectorAll('.card')).filter(
+        node=>Math.abs(node.getBoundingClientRect().top-rowTop)<3).length;
+      return {actual,recorded:grid._windowedGrid.columns,
+        focusedIndex:document.activeElement._gridIndex};
+    });
+    expect(measure.recorded).toBe(measure.actual);
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('main .grid .card:focus'))
+      .toHaveAttribute('data-focus',String(Number(focusId)+measure.actual));
+    // Switching tabs retains the same detached recycler; resize while cached.
+    const activeId=await page.locator('main .grid .card:focus').getAttribute('data-focus');
+    await page.locator('nav button[data-nav-id="home"]').click();
+    await page.setViewportSize({width:1280,height:720});
+    await page.locator('nav button[data-nav-id="library:movies"]').click();
+    await expect(page.locator('main .grid .card[data-focus="'+activeId+'"]')).toBeFocused();
+    const second=await page.locator('main .grid').evaluate(grid=>{
+      const first=grid.querySelector('.card'),y=first.getBoundingClientRect().top;
+      return {recorded:grid._windowedGrid.columns,actual:Array.from(grid.querySelectorAll('.card'))
+        .filter(node=>Math.abs(node.getBoundingClientRect().top-y)<3).length};
+    });
+    expect(second.recorded).toBe(second.actual);
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('main .grid .card:focus'))
+      .toHaveAttribute('data-focus',String(Number(activeId)+second.actual));
+  });
+  test('fresh '+layout+' page reorder preserves the focused title identity',async({page})=>{
+    const calls=await mockLongJellyfinLibrary(page);
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex')await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await fillFivePages(page,calls);
+    await page.locator('main').evaluate(main=>main.scrollTop=0);
+    await expect(page.locator('main .grid .card[data-focus="10"]')).toHaveCount(1);
+    await page.locator('main .grid .card[data-focus="10"]').focus();
+    await page.locator('main .grid').evaluate(async grid=>{
+      const entries=Array.from({length:60},(_,index)=>({
+        id:String(index),title:'Title '+String(index).padStart(3,'0'),
+        type:'Movie',subtitle:index%3===0?'2020':'',
+        raw:{Id:String(index),Name:'Title '+String(index).padStart(3,'0'),
+          Type:'Movie',ImageTags:{Primary:'art-'+index}}
+      }));
+      const [moved]=entries.splice(10,1);
+      entries.push(moved);
+      await grid._applyCatalogUpdate(0,{changed:true,value:{items:entries,total:360}});
+    });
+    await expect(page.locator('main .grid .card[data-focus="10"]')).toBeFocused();
+    const state=await page.locator('main .grid .card[data-focus="10"]').evaluate(node=>{
+      const pane=document.querySelector('main').getBoundingClientRect();
+      const box=node.getBoundingClientRect();
+      return {index:node._gridIndex,visible:box.bottom>pane.top && box.top<pane.bottom};
+    });
+    expect(state.index).toBe(59);
+    expect(state.visible).toBe(true);
+  });
+}
