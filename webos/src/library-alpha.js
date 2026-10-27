@@ -11,7 +11,7 @@ export function alphabetTopInset(grid) {
 }
 
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
-  card, schedulePosters, focusWithoutJump, isActive}) {
+  card, schedulePosters, focusWithoutJump, isActive, prewarmPage = async () => {}}) {
   const shell = document.querySelector('#shell');
   const topSpace = document.createElement('div');
   const bottomSpace = document.createElement('div');
@@ -132,6 +132,8 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     try {
       const page = await loader(start, count);
       if (!alive() || id !== generation) return;
+      await prewarmPage(page.items);
+      if (!alive() || id !== generation) return;
       rangeStart = start;
       items = page.items.slice();
       total = page.total;
@@ -184,6 +186,8 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     error.textContent = '';
     try {
       const page = await loader(start, count);
+      if (!alive() || id !== generation) return;
+      await prewarmPage(page.items);
       if (!alive() || id !== generation) return;
       if (before) {
         items = page.items.concat(items);
