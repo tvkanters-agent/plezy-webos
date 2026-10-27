@@ -539,13 +539,20 @@ const MAX_ARTWORK_IN_FLIGHT = 2;
 let posterFrame = 0, artworkInFlight = 0;
 // Native Plezy's OptimizedMediaImage paints decoded memory hits immediately;
 // any image not already ready when its DOM node is created fades over 300ms.
-function artworkImage(url, persistent, failed) {
+function artworkImage(url, persistent, failed, revision = '') {
   const img = el('img');
   img.alt = '';
-  if (persistent) img.setAttribute('data-artwork-cache', '1');
+  // Keep cached images indefinitely until their server-supplied artwork
+  // revision changes. For versionless artwork, fall back to ordinary loading
+  // instead of risking a permanently stale persistent entry.
+  const key = persistent && revision ? url + '|revision=' + encodeURIComponent(revision) : '';
+  if (key) {
+    img.setAttribute('data-artwork-cache', '1');
+    img.setAttribute('data-artwork-key', key);
+  }
   img.setAttribute('data-artwork-url', url);
   img.onload = () => {
-    if (persistent && img.src.indexOf('blob:') === 0) artworkCache.markReady(url);
+    if (key && img.src.indexOf('blob:') === 0) artworkCache.markReady(key);
     if (img.classList.contains('artwork-ready')) return;
     // A second frame guarantees the transparent starting style was painted,
     // even when IndexedDB or the browser cache resolves during initial layout.
@@ -554,15 +561,15 @@ function artworkImage(url, persistent, failed) {
     }));
   };
   img.onerror = () => {
-    if (persistent && img.src.indexOf('blob:') === 0 && !img.hasAttribute('data-artwork-retry')) {
+    if (key && img.src.indexOf('blob:') === 0 && !img.hasAttribute('data-artwork-retry')) {
       // Corrupt or unsupported stored image: remove it and try the normal URL.
       img.setAttribute('data-artwork-retry', '1');
-      artworkCache.invalidate(url);
+      artworkCache.invalidate(key);
       img.classList.remove('artwork-ready', 'artwork-loaded');
       img.src = url;
     } else if (failed) failed(img);
   };
-  const ready = persistent ? artworkCache.peekReady(url) : null;
+  const ready = key ? artworkCache.peekReady(key) : null;
   if (ready) {
     img.classList.add('artwork-ready');
     img.src = ready; // Set before DOM insertion for the first rendered frame.
@@ -605,10 +612,11 @@ function loadVisiblePosters() {
       if (!img.isConnected) { finish(); return; }
       img.src = src;
     };
-    if (img.hasAttribute('data-artwork-cache')) {
+    if (img.hasAttribute('data-artwork-key')) {
       // Memory/disk hits share the same loader. Disk lookups are asynchronous
       // and still fade in; only ready memory hits bypass the loading queue.
-      artworkCache.resolve(url).then(attach, () => attach(url));
+      artworkCache.resolve(img.getAttribute('data-artwork-key'), url)
+        .then(attach, () => attach(url));
     } else attach(url); // Cast photos deliberately stay out of disk storage.
   }
 }
@@ -649,7 +657,7 @@ function poster(item, options = {}) {
   const node = el('div', undefined, 'poster'); const image = api.image(item, options);
   if (image) node.appendChild(artworkImage(image, true, img => {
     img.remove(); unavailablePoster(node);
-  }));
+  }, api.artworkVersion(item, options)));
   else unavailablePoster(node);
   return node;
 }
@@ -997,8 +1005,8 @@ async function render() {
       if (api instanceof Plex && heroMedia) {
         const hero = el('div', undefined, 'detail-backdrop');
         // Server-transcoded low-resolution artwork, not a source-sized image.
-        hero.append(artworkImage(api.backdrop(heroMedia), true),
-          el('div', undefined, 'detail-backdrop-shade'));
+        hero.append(artworkImage(api.backdrop(heroMedia), true, null,
+          api.backdropVersion(heroMedia)), el('div', undefined, 'detail-backdrop-shade'));
         main.append(hero);
       }
       if (parentShow) {

@@ -5,6 +5,15 @@ import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
 const enc = encodeURIComponent;
 const PAGE = 60;
+// Plex stores an artwork timestamp in its /thumb/<timestamp> and /art/<timestamp>
+// paths. Its metadata updatedAt is a fallback ONLY for an item's own image:
+// a child item's timestamp cannot version its parent/series artwork.
+function plexArtworkRevision(path, updatedAt) {
+  const match = /\/(?:thumb|art|poster)\/(\d+)(?:[/?#]|$)/.exec(path || '');
+  if (match) return match[1];
+  return updatedAt !== undefined && updatedAt !== null && updatedAt !== ''
+    ? String(updatedAt) : '';
+}
 const FIELDS = 'Overview,MediaSources,MediaStreams,UserData,PrimaryImageAspectRatio';
 function plexItem(raw) {
   // WatchedIndicator in upstream shows remaining episodes, not a checkmark
@@ -276,9 +285,20 @@ export class Plex {
     return this.url('/photo/:/transcode', {width, height,
       minSize: 1, upscale: 0, url: image});
   }
+  artworkVersion(item, options = {}) {
+    const raw = item.raw || {};
+    const image = options.landscape && item.type === 'episode'
+      ? (raw.thumb || item.poster) : item.poster;
+    return plexArtworkRevision(image, image === raw.thumb ? raw.updatedAt : null);
+  }
   backdrop(item) {
     return item.background ? this.url('/photo/:/transcode',
       {width: 1280, height: 720, minSize: 1, upscale: 0, url: item.background}) : '';
+  }
+  backdropVersion(item) {
+    const raw = item.raw || {};
+    return plexArtworkRevision(item.background,
+      item.background === raw.art ? raw.updatedAt : null);
   }
   async onDeck(showId) {
     const data = (await this.get('/library/metadata/' + enc(showId) + '/onDeck')).MediaContainer;
@@ -478,8 +498,17 @@ export class Jellyfin {
     const width = landscape ? (options.detail ? 960 : 480) : (options.detail ? 600 : 320);
     const imageId = landscape && raw.ImageTags?.Primary ? item.id :
       raw.ImageTags && raw.ImageTags.Primary ? item.id : raw.SeriesId || item.id;
-    const kind = landscape ? 'Primary' : 'Primary';
-    return this.url('/Items/' + enc(imageId) + '/Images/' + kind, {maxWidth: width, quality: 85});
+    const tag = imageId === item.id ? raw.ImageTags?.Primary : raw.SeriesPrimaryImageTag;
+    return this.url('/Items/' + enc(imageId) + '/Images/Primary',
+      {maxWidth: width, quality: 85, tag: tag || undefined});
+  }
+  artworkVersion(item, options = {}) {
+    const raw = item.raw || {};
+    const landscape = !!options.landscape;
+    const imageId = landscape && raw.ImageTags?.Primary ? item.id :
+      raw.ImageTags && raw.ImageTags.Primary ? item.id : raw.SeriesId || item.id;
+    // An episode's updatedAt does not describe the poster of its series.
+    return String((imageId === item.id ? raw.ImageTags?.Primary : raw.SeriesPrimaryImageTag) || '');
   }
   async watched(item, played) {
     await this.call(this.userPath('/PlayedItems/') + enc(item.id), {}, {method: played ? 'POST' : 'DELETE'});

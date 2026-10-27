@@ -4,7 +4,6 @@
 // IndexedDB stores compressed image blobs across app launches.
 export const ARTWORK_DISK_BYTES = 80 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 12 * 1024 * 1024;
-export const ARTWORK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_DISK_ENTRIES = 500;
 const MAX_MEMORY_ENTRIES = 48;
@@ -27,10 +26,6 @@ export class ArtworkCache {
   peek(key) {
     const entry = this.memory.get(key);
     if (!entry) return null;
-    if (entry.expires <= this.now()) {
-      this.drop(key);
-      return null;
-    }
     this.memory.delete(key);
     this.memory.set(key, entry);
     return entry.src;
@@ -50,7 +45,7 @@ export class ArtworkCache {
     this.memoryBytes -= entry.bytes;
     if (this.urls && this.urls.revokeObjectURL) this.urls.revokeObjectURL(entry.src);
   }
-  remember(key, blob, expires = this.now() + ARTWORK_TTL_MS) {
+  remember(key, blob) {
     if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES ||
         !this.urls || !this.urls.createObjectURL) return null;
     const existing = this.peek(key);
@@ -58,7 +53,7 @@ export class ArtworkCache {
     let src;
     try { src = this.urls.createObjectURL(blob); }
     catch (_) { return null; }
-    const entry = {src, bytes: blob.size, expires, ready: false};
+    const entry = {src, bytes: blob.size, ready: false};
     // Keep a decoded image reference alive for the immediate next route paint.
     if (typeof Image !== 'undefined') {
       entry.image = new Image();
@@ -101,8 +96,7 @@ export class ArtworkCache {
         request.onsuccess = () => {
           const entry = request.result;
           if (!entry) { resolve(null); return; }
-          if (entry.expires <= this.now() || !entry.blob ||
-              !entry.blob.size || entry.blob.size > MAX_ENTRY_BYTES) {
+          if (!entry.blob || !entry.blob.size || entry.blob.size > MAX_ENTRY_BYTES) {
             store.delete(key);
             resolve(null);
             return;
@@ -119,13 +113,13 @@ export class ArtworkCache {
       } catch (_) { resolve(null); }
     });
   }
-  async save(key, blob, expires) {
+  async save(key, blob) {
     const db = await this.open();
     if (!db) return;
     const write = () => new Promise((resolve, reject) => {
       try {
         const tx = db.transaction('images', 'readwrite');
-        tx.objectStore('images').put({key, blob, expires, used: this.now(), bytes: blob.size});
+        tx.objectStore('images').put({key, blob, used: this.now(), bytes: blob.size});
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
@@ -158,7 +152,7 @@ export class ArtworkCache {
           const item = cursor.result;
           if (item) {
             rows.push({key: item.key, bytes: Number(item.value.bytes) || 0,
-              used: Number(item.value.used) || 0, expires: Number(item.value.expires) || 0});
+              used: Number(item.value.used) || 0});
             item.continue();
           } else resolve(rows);
         };
@@ -168,11 +162,9 @@ export class ArtworkCache {
     });
     let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
     let count = entries.length;
-    const expired = entries.filter(entry => entry.expires <= this.now());
-    const live = entries.filter(entry => entry.expires > this.now()).sort((a, b) => a.used - b.used);
-    const remove = expired.map(entry => entry.key);
-    expired.forEach(entry => { total -= entry.bytes; count--; });
-    for (const entry of live) {
+    const remove = [];
+    // No time-based expiration: server artwork revisions determine freshness.
+    for (const entry of entries.sort((a, b) => a.used - b.used)) {
       if (total <= maxBytes && count <= maxEntries) break;
       remove.push(entry.key);
       total -= entry.bytes;
@@ -198,24 +190,24 @@ export class ArtworkCache {
     catch (_) { /* Best effort. */ }
   }
   // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
-  resolve(key) {
+  resolve(key, url = key) {
     const hit = this.peek(key);
     if (hit) return Promise.resolve(hit);
     if (this.pending.has(key)) return this.pending.get(key);
-    const task = this.resolveUncached(key).then(src => src || key, () => key);
+    const task = this.resolveUncached(key, url).then(src => src || url, () => url);
     this.pending.set(key, task);
     task.then(() => this.pending.delete(key));
     return task;
   }
-  async resolveUncached(key) {
+  async resolveUncached(key, url) {
     const stored = await this.read(key);
     if (stored) {
-      const src = this.remember(key, stored.blob, stored.expires);
+      const src = this.remember(key, stored.blob);
       if (src) return src;
     }
     let origin = '';
-    try { origin = new URL(key).origin; } catch (_) { return key; }
-    if (this.unsupportedOrigins.has(origin)) return key;
+    try { origin = new URL(url).origin; } catch (_) { return url; }
+    if (this.unsupportedOrigins.has(origin)) return url;
     try {
       // Normal <img> works without CORS; reading bytes for IndexedDB does not.
       // If the TV/server rejects a cross-origin fetch, use <img> directly and
@@ -223,23 +215,22 @@ export class ArtworkCache {
       const controller = typeof AbortController === 'undefined' ? null : new AbortController();
       const timer = controller ? setTimeout(() => controller.abort(), 7000) : null;
       let response;
-      try { response = await this.fetchImage(key, controller ? {signal: controller.signal} : {}); }
+      try { response = await this.fetchImage(url, controller ? {signal: controller.signal} : {}); }
       finally { if (timer) clearTimeout(timer); }
-      if (!response.ok || (response.type === 'opaque')) return key;
+      if (!response.ok || (response.type === 'opaque')) return url;
       const type = response.headers && response.headers.get('content-type') || '';
       if (type && !/^image\//i.test(type) && !/^application\/octet-stream/i.test(type))
-        return key;
+        return url;
       const blob = await response.blob();
-      if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES) return key;
-      const expires = this.now() + ARTWORK_TTL_MS;
-      const src = this.remember(key, blob, expires);
-      if (!src) return key;
+      if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES) return url;
+      const src = this.remember(key, blob);
+      if (!src) return url;
       // Persist without delaying first paint.
-      this.save(key, blob, expires).catch(() => {});
+      this.save(key, blob).catch(() => {});
       return src;
     } catch (_) {
       this.unsupportedOrigins.add(origin);
-      return key;
+      return url;
     }
   }
 }
