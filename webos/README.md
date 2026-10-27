@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, stable version 1.0.0. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, stable version 1.2.0. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -9,11 +9,11 @@ This fork retains [edde746/plezy](https://github.com/edde746/plezy), including i
 1. Install LG's **Developer Mode** app on the TV, sign in, enable Developer Mode and Key Server, and restart when requested.
 2. Install Node.js and the [official webOS CLI](https://webostv.developer.lge.com/develop/tools/cli-installation): `npm install -g @webos-tools/cli`.
 3. Run `ares-setup-device`, add the TV as `myTV` (TV IP, port `9922`, user `prisoner`), then run `ares-novacom --device myTV --getkey` and enter the passphrase displayed by the TV's Developer Mode app.
-4. **Download the [1.0.0 IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v1.0.0)**, build it using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). Older pre-0.2.1 builds **do not contain the webOS boot compatibility fix**.
+4. **Download the [1.2.0 IPK](https://github.com/tvkanters-agent/plezy-webos/releases/tag/v1.2.0)**, build it using the steps below, or download `plezy-webos-ipk` from a successful [webOS TV workflow run](https://github.com/tvkanters-agent/plezy-webos/actions/workflows/webos.yml). Older pre-0.2.1 builds **do not contain the webOS boot compatibility fix**.
 5. Install and launch:
 
 ```sh
-ares-install --device myTV com.tvkdevelopment.plezy_1.0.0_all.ipk
+ares-install --device myTV com.tvkdevelopment.plezy_1.2.0_all.ipk
 ares-launch --device myTV com.tvkdevelopment.plezy
 ```
 
@@ -62,6 +62,19 @@ This is a direct browser-to-Simkl integration. Successful network requests depen
 - Server audio-track and subtitle selection. Selected subtitles are burned in by the server; switching tracks restarts the stream at the current position.
 - D-pad spatial navigation, Magic Remote pointer, Back, transport keys and pause on backgrounding.
 - Installable IPK, locked build dependencies, automated protocol and browser tests, and a webOS-specific CI workflow.
+
+## Artwork caching
+
+Posters, episode thumbnails and detail backdrops are stored in a bounded
+IndexedDB cache (up to 80 MiB / 500 entries, with seven-day expiration and
+least-recently-used eviction). Recently decoded artwork is also kept in a
+small memory cache (12 MiB of compressed images / 48 entries) to avoid
+blank frames when revisiting a page. Cast portraits fade in but are not
+stored persistently. New artwork always fades in over 300 ms; immediately
+available decoded memory hits do not. If the TV disallows IndexedDB or
+the media server does not permit fetching image bytes across origins,
+the app falls back to the existing ordinary image loader. Stored images
+can be removed by clearing this app's TV data.
 
 ## Remote controls
 

@@ -38,7 +38,7 @@ jobs:
           path: webos/test-results/
   release:
     needs: test-and-package
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
