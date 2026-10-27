@@ -509,7 +509,8 @@ test('shared recycler pool stays bounded and clears on snapshot suspension',asyn
   const stats=await page.locator('.grid').evaluate(grid=>grid._windowedGrid.retainedCardStats());
   expect(stats.globalCached).toBeLessThanOrEqual(48);
   expect(stats.localCached).toBeLessThanOrEqual(48);
-  expect(stats.mounted).toBeLessThan(100);
+  expect(stats.mounted).toBeLessThanOrEqual(
+    Math.max(80,stats.columns*(stats.visibleRows+8)));
 });
 
 test('delayed Plex actor facts reflows virtualized person grid',async({page})=>{
@@ -575,4 +576,28 @@ test('delayed Plex actor facts reflows virtualized person grid',async({page})=>{
   await page.keyboard.press('ArrowDown');
   await expect.poll(()=>page.locator('main .grid .card:focus')
     .evaluate(node=>node._gridIndex)).toBe(before.index+before.columns);
+});
+
+test('shared recycler budget covers nine separately cached library pages',async({page})=>{
+  await mockLongJellyfinLibrary(page);
+  await page.route('http://media.test/Users/user/Views**',route=>
+    route.fulfill({json:{Items:Array.from({length:9},(_,index)=>({
+      Id:'movies-'+index,Name:'Movies '+index,CollectionType:'movies'
+    }))}}));
+  await page.goto('/');
+  for(let index=0;index<9;index++){
+    await page.locator('nav button[data-nav-id="library:movies-'+index+'"]').click();
+    await expect(page.locator('main .grid .card')).toHaveCount(60);
+    // Visit enough different rows to populate and then prune per-grid caches.
+    await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight);
+    await expect.poll(()=>page.locator('main .grid').evaluate(grid=>
+      grid._windowedGrid.retainedCardStats().globalCached)).toBeLessThanOrEqual(48);
+  }
+  // Earlier tabs remain restorable, but their detached/recycled artwork nodes
+  // are not retained separately by each of the nine recycler instances.
+  await page.locator('nav button[data-nav-id="library:movies-3"]').click();
+  const stats=await page.locator('main .grid').evaluate(grid=>grid._windowedGrid.retainedCardStats());
+  expect(stats.globalCached).toBeLessThanOrEqual(48);
+  expect(stats.mounted).toBeLessThanOrEqual(
+    Math.max(80,stats.columns*(stats.visibleRows+8)));
 });
