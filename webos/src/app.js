@@ -4,6 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
+import {CatalogCache} from './catalog-cache.js';
 import {fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
@@ -14,6 +15,7 @@ import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 const artworkCache = new ArtworkCache();
+const catalogCache = new CatalogCache();
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
@@ -29,6 +31,8 @@ const player = new Player(document.querySelector('#player'), notify, playbackClo
 // Plezy keeps the detail route beneath playback. Never clear/refetch that
 // page after hiding the player: it flashes blank and discards remote focus.
 function playbackClosed() {
+  // Playback may have changed continue-watching, progress and watched state.
+  catalogCache.clear();
   const previous = playbackReturn;
   playbackReturn = null;
   if (!previous || route !== previous.route || api !== previous.api) return;
@@ -99,6 +103,8 @@ function persist() {
 function activeServer() { return state.servers.find(s => s.id === state.active) || state.servers[0]; }
 let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
 function setClient() {
+  // Never reuse catalog metadata across accounts or server connections.
+  catalogCache.clear();
   const server = activeServer();
   api = server ? client(server, state.deviceId) : null;
   libraryCache = null; libraryCacheFor = null; libraryLoading = false;
@@ -848,7 +854,7 @@ async function render() {
       const contentStartedAt = Date.now();
       // Keep the first frame quiet instead of flashing a temporary text
       // message while the home shelves are fetched.
-      const rows = await api.home(); if (!valid()) return;
+      const rows = await catalogCache.get('home', () => api.home()); if (!valid()) return;
       await prewarmShelves(rows);
       if (!valid()) return;
       if (!rows.length) {
@@ -880,19 +886,22 @@ async function render() {
       main.append(tabs);
       const contentStartedAt = Date.now();
       if (currentApi instanceof Plex && view === 'collections') {
-        await paginated(start => currentApi.collections(route.library.id, start), currentRevision,
+        await paginated(start => catalogCache.get('collections:' + route.library.id + ':' + start,
+          () => currentApi.collections(route.library.id, start)), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
-        await paginated(start => currentApi.playlists(start), currentRevision,
+        await paginated(start => catalogCache.get('playlists:' + start,
+          () => currentApi.playlists(start)), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst();
         return;
       }
       if (currentApi instanceof Plex && view === 'recommended') {
-        const shelves = await currentApi.recommended(route.library.id);
+        const shelves = await catalogCache.get('recommended:' + route.library.id,
+          () => currentApi.recommended(route.library.id));
         if (!valid()) return;
         await prewarmShelves(shelves, currentApi);
         if (!valid()) return;
@@ -949,19 +958,26 @@ async function render() {
         if (open) focusWithoutJump(watchFilters.querySelector('button'));
       }, 'filter', 'library-toolbar-button');
       filterAction.dataset.focus = 'toolbar:filter';
-      const refreshAction = detailButton('Refresh', () => go({...route}, false), 'restart', 'library-toolbar-button');
+      const refreshAction = detailButton('Refresh', () => {
+        // Explicit refresh must fetch a new page and new artwork revisions.
+        catalogCache.clear();
+        go({...route}, false);
+      }, 'restart', 'library-toolbar-button');
       toolbar.append(sortAction, filterAction, refreshAction);
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
-      const libraryLoader = (start, count) =>
-        currentApi.list(route.library.id, start, selected, selectedFilter, count,
-          currentApi instanceof Jellyfin ? route.alpha : undefined);
+      const libraryLoader = (start, count) => catalogCache.get(
+        'browse:' + JSON.stringify([route.library.id, selected, selectedFilter,
+          route.alpha || '', start, count || null]),
+        () => currentApi.list(route.library.id, start, selected, selectedFilter, count,
+          currentApi instanceof Jellyfin ? route.alpha : undefined));
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
         const [pageResult, characters] = await Promise.all([
           libraryLoader(0).catch(error => ({error})),
-          currentApi.firstCharacters(route.library.id, selectedFilter).catch(() => [])
+          catalogCache.get('characters:' + JSON.stringify([route.library.id, selectedFilter]),
+            () => currentApi.firstCharacters(route.library.id, selectedFilter)).catch(() => [])
         ]);
         if (!valid()) return;
         if (pageResult.error) {
@@ -1306,6 +1322,7 @@ async function render() {
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
+          catalogCache.clear();
           render();
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
@@ -1342,6 +1359,7 @@ async function render() {
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
+          catalogCache.clear();
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           render();
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
