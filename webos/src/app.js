@@ -960,7 +960,14 @@ function loadVisiblePosters() {
     img.addEventListener('load', finish);
     img.addEventListener('error', finish);
     const attach = src => {
-      if (!img.isConnected) { finish(); return; }
+      if (!img.isConnected) {
+        // A virtualized card can be detached while a cache lookup/download
+        // resolves. Restore its pending marker so reinsertion can retry the
+        // image, instead of permanently retaining a source-less placeholder.
+        if (!img.getAttribute('src')) img.setAttribute('data-poster-src', url);
+        finish();
+        return;
+      }
       img.src = src;
     };
     if (img.hasAttribute('data-artwork-key')) {
