@@ -1663,3 +1663,103 @@ test('persisted Home and library artwork paint ready on the first DOM frame afte
   expect(library.every(img=>img.ready && img.src.startsWith('blob:') && img.opacity==='1')).toBe(true);
   expect(requests).toBe(before);
 });
+
+async function persistedCatalogRows(page) {
+  return page.evaluate(()=>new Promise(resolve=>{
+    const open=indexedDB.open('plezy-catalog-v1',1);
+    open.onerror=()=>resolve(0);
+    open.onsuccess=()=>{
+      const tx=open.result.transaction('pages','readonly');
+      const req=tx.objectStore('pages').count();
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>resolve(0);
+    };
+  }));
+}
+
+test('saved library renders across restarts before response, then updates with remote focus intact',async({page})=>{
+  await mockServer(page);
+  let changed=false, paused=false, releaseRequest, requests=0;
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    requests++;
+    if(paused)await new Promise(resolve=>{releaseRequest=resolve;});
+    await route.fulfill({json:{Items:[changed?{...item,Name:'The Updated Film'}:item],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>persistedCatalogRows(page)).toBeGreaterThanOrEqual(2);
+  const previousRequests=requests;
+  paused=true; changed=true;
+  await page.reload();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  // The stale snapshot is shown even though the server has not replied.
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect(page.locator('main .grid .card').first()).toHaveAttribute('aria-label','The Test Film');
+  await expect.poll(()=>requests).toBeGreaterThan(previousRequests);
+  await page.locator('main .grid .card').first().focus();
+  expect(typeof releaseRequest).toBe('function');
+  releaseRequest();
+  const updated=page.locator('main .grid .card').first();
+  await expect(updated).toHaveAttribute('aria-label','The Updated Film');
+  await expect(updated).toBeFocused();
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+  expect(await page.locator('main .grid .card').count()).toBe(1);
+});
+
+test('an unchanged library refresh retains existing DOM rather than repainting',async({page})=>{
+  await mockServer(page);
+  let hold=false, releaseRequest, requests=0;
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    requests++;
+    if(hold)await new Promise(resolve=>{releaseRequest=resolve;});
+    await route.fulfill({json:{Items:[item],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>persistedCatalogRows(page)).toBeGreaterThanOrEqual(2);
+  hold=true;
+  await page.reload();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await page.evaluate(()=>{window.savedCard=document.querySelector('main .grid .card');});
+  await expect.poll(()=>typeof releaseRequest).toBe('function');
+  releaseRequest();
+  await expect.poll(()=>requests).toBeGreaterThan(1);
+  await expect.poll(()=>page.evaluate(()=>document.querySelector('main .grid .card')===window.savedCard)).toBe(true);
+});
+
+test('Home is fetched fresh after restart even when libraries were saved',async({page})=>{
+  await mockServer(page);
+  let hold=false, releaseRequest;
+  await page.route('http://media.test/Users/user/Items/Resume**',async route=>{
+    if(hold)await new Promise(resolve=>{releaseRequest=resolve;});
+    await route.fulfill({json:{Items:[item]}});
+  });
+  await page.goto('/');
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>persistedCatalogRows(page)).toBeGreaterThanOrEqual(2);
+  hold=true;
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await expect.poll(()=>typeof releaseRequest).toBe('function');
+  await expect(page.locator('main .shelf .card')).toHaveCount(0);
+  releaseRequest();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+});
+
+test('a cached library remains browsable when server refresh is unavailable',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>persistedCatalogRows(page)).toBeGreaterThanOrEqual(2);
+  await page.route('http://media.test/Users/user/Items?**',route=>route.fulfill({status:503,json:{}}));
+  await page.reload();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card').first()).toHaveAttribute('aria-label','The Test Film');
+  await expect(page.getByText(/Could not load library titles/)).toHaveCount(0);
+});
