@@ -1958,3 +1958,40 @@ test('cold saved library navigation has no frame with an empty content pane',asy
   await expect(page.locator('main .grid .card')).toHaveCount(1);
   expect(await page.evaluate(()=>{window.checkNavigationFrames=false;return window.blankNavigationFrames;})).toBe(0);
 });
+
+test('changed catalog metadata preserves unchanged card DOM, artwork and focus',async({page})=>{
+  await mockServer(page);
+  const items=Array.from({length:3},(_,i)=>({...item,
+    Id:'film-'+i,Name:'Film '+i,ImageTags:{}}));
+  let refresh=false, release, requests=0;
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    requests++;
+    if(refresh) await new Promise(resolve=>{release=resolve;});
+    await route.fulfill({json:{Items:items.map((entry,i)=>
+      refresh && i===1 ? {...entry,Name:'Updated Film 1'} : entry),TotalRecordCount:3}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(3);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf')).toHaveCount(1);
+  refresh=true;
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(3);
+  await page.evaluate(()=>{
+    window.beforeRefreshCards=Array.from(document.querySelectorAll('main .grid .card'));
+    window.beforeRefreshCards[0].focus();
+  });
+  await expect.poll(()=>requests).toBeGreaterThanOrEqual(2);
+  expect(typeof release).toBe('function');
+  release();
+  await expect(page.locator('main .grid .card').nth(1)).toHaveAttribute('aria-label','Updated Film 1');
+  const identity=await page.evaluate(()=>{
+    const after=Array.from(document.querySelectorAll('main .grid .card'));
+    return [after[0]===window.beforeRefreshCards[0],
+      after[1]===window.beforeRefreshCards[1],
+      after[2]===window.beforeRefreshCards[2],
+      document.activeElement===after[0]];
+  });
+  expect(identity).toEqual([true,false,true,true]);
+});
