@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Viewport-bounded DOM for paginated media grids. The catalog remains cached;
-// only card elements outside the viewport and a small focus buffer are removed.
+// DOM windowing for ordinary, uniform-height paginated card grids. The full
+// catalog remains in memory/disk; recycled cards are retained in a bounded
+// LRU so a nearby return keeps decoded artwork, handlers and transition state.
 export function gridWindowRange(count, columns, firstRow, visibleRows, previous = null) {
   const width = Math.max(1, columns);
   const rows = Math.ceil(count / width);
   const visibleStart = Math.max(0, Math.min(rows, firstRow));
   const visibleEnd = Math.min(rows, visibleStart + Math.max(1, visibleRows));
-  // A one-page library is cheaper and safer to leave completely mounted.
   if (count <= Math.max(80, width * (visibleRows + 8)))
     return {start:0, end:count, topRows:0, bottomRows:0};
-  // Two spare rows on each edge permit D-pad movement without a DOM update.
   if (previous && !(previous.end < count && previous.end % width !== 0) &&
       visibleStart >= previous.start / width + 2 &&
       visibleEnd <= Math.ceil(previous.end / width) - 2)
@@ -20,132 +19,186 @@ export function gridWindowRange(count, columns, firstRow, visibleRows, previous 
     topRows:startRow, bottomRows:rows-endRow};
 }
 
+// One synchronous measurement (about two rows), compatible with CSS Grid and
+// the Chromium 53 flexbox fallback. Card subtitles have a reserved line in CSS.
 export function measureGrid(grid) {
   const children = grid.children;
   if (!children.length) return {columns:1, stride:330};
   const first = children[0].getBoundingClientRect();
   let columns = 1;
-  let stride = first.height + (parseFloat(getComputedStyle(children[0]).marginBottom) || 26);
+  const style = getComputedStyle(children[0]);
+  const gridStyle = getComputedStyle(grid);
+  let stride = first.height + (parseFloat(style.marginBottom) ||
+    parseFloat(gridStyle.rowGap) || 26);
   for (let i=1; i<children.length; i++) {
     const y = children[i].getBoundingClientRect().top;
-    if (Math.abs(y - first.top) < 3) columns++;
-    else {stride = y - first.top; break;}
+    if (Math.abs(y-first.top) < 3) columns++;
+    else { stride = y-first.top; break; }
   }
-  return {columns, stride:Math.max(1, stride)};
+  return {columns, stride:Math.max(1,stride)};
 }
 
 export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedulePosters}) {
-  const top = document.createElement('div');
-  const bottom = document.createElement('div');
+  const top = document.createElement('div'), bottom = document.createElement('div');
   top.className = bottom.className = 'grid-window-spacer';
   main.insertBefore(top, grid);
   main.insertBefore(bottom, grid.nextSibling);
   let items = [], columns = 0, stride = 0, range = null;
-  let live = true, listening = false;
+  let live = true, listening = false, paginationCleanup = null;
+  let gridOffset = 0, gridPadding = 0;
+  const cached = new Map(), CACHE_LIMIT = 160;
+  const rect = node => node.getBoundingClientRect();
+
+  function save(node) {
+    const id = node.dataset.focus;
+    if (!id) return;
+    cached.delete(id);
+    cached.set(id, node);
+    while (cached.size > CACHE_LIMIT) cached.delete(cached.keys().next().value);
+  }
   function paint(start, end) {
     const previous = new Map();
-    Array.from(grid.children).forEach(node => previous.set(String(node.dataset.focus), node));
+    Array.from(grid.children).forEach(node => {
+      if (node.dataset.focus !== undefined) previous.set(node.dataset.focus, node);
+    });
     const focused = grid.contains(document.activeElement) ? document.activeElement : null;
-    // Do not unmount an active focus node without transferring focus out of it.
-    // This can happen after a large Magic Remote wheel scroll.
-    if (focused && (focused._gridIndex < start || focused._gridIndex >= end)) {
-      main.tabIndex = -1;
-      focusWithoutJump(main, false);
-    }
+    const focusedColumn = focused ? focused._gridIndex % columns : 0;
     const desired = [];
     for (let index=start; index<end; index++) {
-      const item = items[index], signature = JSON.stringify(item);
-      let node = previous.get(String(item.id));
+      const item = items[index], id = String(item.id), signature = JSON.stringify(item);
+      let node = previous.get(id);
+      if (!node) node = cached.get(id);
       if (!node || node._catalogSignature !== signature) node = makeCard(item);
+      cached.delete(id);
       node._gridIndex = index;
       desired.push(node);
     }
     const retained = new Set(desired);
-    // Remove only cards outside the window or genuinely changed. In
-    // particular, never detach a focused card merely to reorder its siblings.
+    // Moving focus off a card that is about to be detached avoids the browser
+    // sending focus to the document body (or scrolling while reparenting).
+    if (focused && !retained.has(focused)) {
+      main.tabIndex = -1;
+      focusWithoutJump(main, false);
+    }
     Array.from(grid.children).forEach(node => {
-      if (!retained.has(node)) grid.removeChild(node);
+      if (!retained.has(node)) { grid.removeChild(node); save(node); }
     });
-    desired.forEach((node, index) => {
+    desired.forEach((node,index) => {
       if (grid.children[index] !== node)
         grid.insertBefore(node, grid.children[index] || null);
     });
-    if (focused && !grid.contains(focused)) {
-      // Wheel scrolling can move well beyond the old focused card. Keep the
-      // focus zone usable instead of leaving focus on the browser body.
-      const pane = main.getBoundingClientRect();
-      const visible = desired.find(node => {
-        const rect = node.getBoundingClientRect();
-        return rect.bottom > pane.top && rect.top < pane.bottom;
+    if (focused && !retained.has(focused)) {
+      // Spacer geometry is already updated; choose the closest visible card
+      // in the same column, not a buffered row above the viewport.
+      const pane = rect(main);
+      const visible = desired.filter(node => {
+        const box = rect(node);
+        return box.bottom > pane.top + 2 && box.top < pane.bottom - 2;
       });
-      if (visible) focusWithoutJump(visible, false);
+      const replacement = visible.find(node => node._gridIndex % columns === focusedColumn) ||
+        visible[0] || desired[Math.min(desired.length-1, Math.max(0,focusedColumn))];
+      if (replacement) focusWithoutJump(replacement, false);
     }
     schedulePosters();
+  }
+  function measureOffset() {
+    return main.scrollTop + rect(top).top - rect(main).top;
+  }
+  function applyRange(next, force = false) {
+    if (force || !range || range.start !== next.start || range.end !== next.end ||
+        range.topRows !== next.topRows || range.bottomRows !== next.bottomRows) {
+      // Set top BEFORE mounting/focus recovery; reading geometry with stale
+      // spacers can otherwise strand focus on <main> after a wheel jump.
+      top.style.height = next.topRows * stride + 'px';
+      bottom.style.height = next.bottomRows * stride + 'px';
+      paint(next.start,next.end);
+    }
+    range = next;
+  }
+  function show(firstRow, force = false) {
+    const visibleRows = Math.ceil((main.clientHeight + Math.max(0,
+      main.scrollTop - gridOffset - gridPadding - firstRow*stride) % stride) / stride) + 1;
+    applyRange(gridWindowRange(items.length,columns,firstRow,visibleRows,
+      force ? null : range),force);
   }
   function sync(force = false) {
     if (!live || !grid.isConnected || !items.length) return;
     if (!columns) {
-      paint(0, Math.min(items.length, 80));
-      ({columns, stride} = measureGrid(grid));
+      paint(0, Math.min(items.length,80));
+      ({columns,stride} = measureGrid(grid));
     }
-    const pane = main.getBoundingClientRect();
-    const origin = top.getBoundingClientRect().top;
-    const pad = parseFloat(getComputedStyle(grid).paddingTop) || 0;
-    const viewTop = Math.max(0, pane.top - origin - pad);
-    const firstRow = Math.floor(viewTop / stride);
-    const visibleRows = Math.ceil((main.clientHeight + (viewTop % stride)) / stride) + 1;
-    const next = gridWindowRange(items.length, columns, firstRow, visibleRows,
-      force ? null : range);
-    if (force || !range || range.start !== next.start || range.end !== next.end ||
-        range.topRows !== next.topRows || range.bottomRows !== next.bottomRows) {
-      paint(next.start, next.end);
-      top.style.height = next.topRows * stride + 'px';
-      bottom.style.height = next.bottomRows * stride + 'px';
-    }
-    range = next;
+    gridOffset = measureOffset();
+    gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
+    const local = Math.max(0,main.scrollTop-gridOffset-gridPadding);
+    show(Math.floor(local/stride),force);
   }
   function resize() {
-    if (!live || !grid.isConnected || !items.length) return;
-    // Preserve the first visible *item* rather than a pixel offset when the
-    // number of columns changes. Measure only the first two rows.
-    const oldColumns = columns, oldStride = stride;
-    const origin = top.getBoundingClientRect().top;
-    const viewTop = Math.max(0, main.getBoundingClientRect().top - origin);
-    const firstItem = Math.floor(viewTop / oldStride) * oldColumns;
-    ({columns, stride} = measureGrid(grid));
-    if (columns !== oldColumns) {
-      main.scrollTop += Math.floor(firstItem / columns) * stride -
-        Math.floor(firstItem / oldColumns) * oldStride;
-    }
-    sync(true);
+    if (!live || !grid.isConnected || !items.length || !columns) return;
+    const oldColumns = columns, oldStride = stride, oldOffset = gridOffset;
+    const oldPadding = gridPadding;
+    const local = Math.max(0,main.scrollTop-oldOffset-oldPadding);
+    const row = Math.floor(local/oldStride), within = local-row*oldStride;
+    const firstItem = row*oldColumns;
+    // Measure with a temporarily complete first-row sample when our window
+    // is near the end and responsive CSS changes the number of columns.
+    ({columns,stride} = measureGrid(grid));
+    gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
+    gridOffset = measureOffset();
+    const newRow = Math.floor(firstItem/columns);
+    const target = gridOffset + gridPadding + newRow*stride +
+      Math.min(within,stride-1);
+    // Apply correct new spacer sizes before scrolling to the anchor row.
+    show(newRow,true);
+    main.scrollTop = Math.max(0,target);
+    sync();
   }
   const onScroll = () => sync();
   function resume() {
-    if (listening) return;
+    if (!live || listening) return;
     listening = true;
-    main.addEventListener('scroll', onScroll);
-    window.addEventListener('resize', resize);
+    main.addEventListener('scroll',onScroll);
+    window.addEventListener('resize',resize);
     sync(true);
   }
   function suspend() {
-    if (!listening) return;
-    listening = false;
-    main.removeEventListener('scroll', onScroll);
-    window.removeEventListener('resize', resize);
+    if (listening) {
+      listening = false;
+      main.removeEventListener('scroll',onScroll);
+      window.removeEventListener('resize',resize);
+    }
+    if (paginationCleanup) paginationCleanup();
+  }
+  function focusNeighbor(current,direction) {
+    if (!live || !grid.contains(current) || !Number.isInteger(current._gridIndex) ||
+        (direction !== 'up' && direction !== 'down')) return false;
+    const targetIndex = current._gridIndex + (direction === 'down' ? columns : -columns);
+    if (targetIndex < 0 || targetIndex >= items.length) return false;
+    if (!range || targetIndex < range.start || targetIndex >= range.end) {
+      const row = Math.floor(targetIndex/columns);
+      applyRange(gridWindowRange(items.length,columns,Math.max(0,row-1),3),true);
+    }
+    const next = Array.from(grid.children).find(node=>node._gridIndex===targetIndex);
+    if (!next) return false;
+    focusWithoutJump(next);
+    return true;
   }
   resume();
   return {
+    get columns() { return columns; },
+    get grid() { return grid; },
+    focusNeighbor,
+    setPaginationCleanup(fn) { paginationCleanup=fn; },
     setItems(nextItems) {
-      items = nextItems;
+      items=nextItems;
       if (!items.length) {
-        grid.textContent = '';
-        top.style.height = bottom.style.height = '0px';
-        range = null;
+        grid.textContent='';
+        top.style.height=bottom.style.height='0px';
+        range=null;cached.clear();
         return;
       }
       sync(true);
     },
-    suspend, resume,
-    destroy() { suspend(); live = false; items = []; }
+    suspend,resume,
+    destroy() { suspend(); live=false; items=[]; cached.clear(); }
   };
 }
