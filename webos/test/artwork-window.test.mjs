@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {artworkWindowCount, artworkWindowStart, shelfWindow} from '../src/artwork-window.js';
+import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from '../src/artwork-window.js';
 
 test('library page preparation never decodes an entire long page offscreen', () => {
   assert.equal(artworkWindowCount(1140, 700), 30);
@@ -28,4 +28,10 @@ test('alphabet jump prewarms the targeted row rather than offscreen page start',
   assert.ok(warmed.includes(offset));
   assert.ok(!warmed.includes(0));
   assert.equal(artworkWindowStart(2,5),0);
+});
+
+test('scroll prefetch covers three rows in either direction without unbounded decoding', () => {
+  assert.equal(artworkPrefetchMargin(330), 990);
+  assert.equal(artworkPrefetchMargin(140), 420);
+  assert.equal(artworkPrefetchMargin(0), 200);
 });

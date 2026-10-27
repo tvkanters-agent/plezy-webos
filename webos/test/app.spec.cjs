@@ -528,6 +528,62 @@ test('offscreen library posters are deferred until reaching the viewport',async(
   expect(pending).toBeGreaterThan(0);
 });
 
+test('library artwork fills three rows before and after the viewport while distant art waits',async({page})=>{
+  await mockServer(page);
+  // Exercise real server-backed card data. Synthetic DOM clones can be removed
+  // by normal catalog refresh, producing timing-dependent false negatives.
+  const titles=Array.from({length:180},(_,i)=>({...item,
+    Id:'prefetch-'+i,Name:'Prefetch Film '+i,ImageTags:{Primary:'cover-'+i}}));
+  await page.route('http://media.test/Users/user/Items?**',route=>
+    route.fulfill({json:{Items:titles,TotalRecordCount:titles.length}}));
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/XZYAAAAASUVORK5CYII=','base64');
+  await page.route('http://media.test/**/Images/**',route=>
+    route.fulfill({status:200,contentType:'image/png',body:png,
+      headers:{'Access-Control-Allow-Origin':'*'}}));
+  await page.goto('/');
+  await expect(page.locator('.rail-library-items')).toBeVisible();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(titles.length);
+  const ids=await page.evaluate(()=>{
+    const main=document.querySelector('main');
+    const cards=Array.from(main.querySelectorAll('.grid .card'));
+    const target=cards[Math.floor(cards.length/2)];
+    main.scrollTop+=target.getBoundingClientRect().top-main.getBoundingClientRect().top-30;
+    const view=main.getBoundingClientRect();
+    const positioned=cards.map((card,id)=>{
+      const rect=card.querySelector('.poster img').getBoundingClientRect();
+      return {id,top:rect.top,bottom:rect.bottom};
+    });
+    function rows(candidates,backwards) {
+      candidates.sort((a,b)=>backwards ? b.top-a.top : a.top-b.top);
+      const seen=new Set(), result=[];
+      for(const card of candidates) {
+        const row=Math.round(card.top);
+        if(seen.has(row))continue;
+        seen.add(row);
+        result.push(card.id);
+      }
+      return result;
+    }
+    const above=rows(positioned.filter(x=>x.bottom<view.top),true);
+    const below=rows(positioned.filter(x=>x.top>view.bottom),false);
+    return {above:above[1],below:below[1],far:below[6]};
+  });
+  expect(ids.above).toBeDefined();
+  expect(ids.below).toBeDefined();
+  expect(ids.far).toBeDefined();
+  await expect.poll(()=>page.evaluate(markers=>{
+    const cards=document.querySelectorAll('main .grid .card');
+    return ['above','below'].map(side=>{
+      const img=cards[markers[side]]?.querySelector('.poster img');
+      return !!img && !img.hasAttribute('data-poster-src') && !!img.getAttribute('src');
+    });
+  },ids)).toEqual([true,true]);
+  const stillDeferred=await page.locator('main .grid .card').nth(ids.far)
+    .locator('.poster img').getAttribute('data-poster-src');
+  expect(stillDeferred).toContain('prefetch-');
+});
+
 test('navigation follows Plezy rail layout without invented webOS branding',async({page})=>{
   await page.goto('/');
   await expect(page.locator('.brand')).toHaveText('Plezy');

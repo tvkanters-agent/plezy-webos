@@ -280,3 +280,16 @@ alphabet rails on eviction/account changes. Re-entered library tabs revalidate
 first-page server data without blocking the first frame; changed responses
 repaint while preserving scroll and focus. Browser tests cover repeated tab
 switches, detail returns and switching tabs while a detail is open.
+
+### Scroll-direction artwork buffering
+
+The native `LibraryBrowseTab._prefetchImages` prefetches card images beyond
+the visible range. The webOS `loadVisiblePosters` queue now also hydrates
+three off-screen card rows above and below the pane during library scrolling.
+Since Chromium 53 does not support reliable native lazy loading, it measures
+the current card height and grid row gap (or flex row margin), prioritizes
+visible images, then favors the scroll direction while keeping six network
+downloads in flight. Already persisted artwork is probed independently of
+those slots. Other images, such as Home shelves, keep their previous bounded
+window. This mirrors the original intent, with an additional backward buffer
+for remote navigation, without inflating the entire library.

@@ -5,7 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
-import {artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
+import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
 import {CatalogCache} from './catalog-cache.js';
 import {cardLabels} from './card-labels.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
@@ -826,12 +826,12 @@ function card(item) {
   return node;
 }
 // Flutter's sliver-based library lists inflate artwork near the viewport.
-// Chromium 53 ignores <img loading="lazy">, so queue only visible posters
-// and their nearby prefetch region instead of decoding entire library pages.
-// Match native Plezy's full-tier six-request limit instead of two; the browser
-// and media server may still enforce stricter limits.
+ // Chromium 53 ignores <img loading="lazy">. Prefetch a few library rows
+ // on both sides of the viewport without decoding entire catalog pages.
+// Respect the six-request artwork limit in Plezy's full-performance tier.
 const MAX_ARTWORK_IN_FLIGHT = 6;
 let posterFrame = 0, artworkInFlight = 0;
+let previousPosterScrollTop = main.scrollTop, posterScrollDirection = 0;
 // A loading slot becoming free must not remeasure all offscreen images.
 // Rebuild geometry only on scroll or DOM layout changes.
 let posterQueueDirty = true, posterCandidates = [];
@@ -893,19 +893,46 @@ function loadVisiblePosters() {
     posterCandidates = [];
     const view = main.getBoundingClientRect();
     const images = main.querySelectorAll('img[data-poster-src]');
-    const visible = [], nearby = [];
+    const margins = new Map();
+    const visible = [], sideways = [], above = [], below = [];
+    // Measure each library layout once per scroll/layout change. Use the real
+    // card height and CSS row gap (or flex fallback margins), not a fixed px
+    // threshold that stops short on large or landscape TV rows.
+    function verticalMargin(img) {
+      const container = img.closest('.grid, .episode-list');
+      if (!container) return 200; // Keep Home shelves and detail images bounded.
+      if (margins.has(container)) return margins.get(container);
+      const card = container.querySelector(container.classList.contains('episode-list')
+        ? '.episode-row' : '.card');
+      let margin = 200;
+      if (card) {
+        const layout = getComputedStyle(container);
+        const cardStyle = getComputedStyle(card);
+        const gap = parseFloat(layout.rowGap) || parseFloat(layout.gridRowGap) || 0;
+        const cardBottom = parseFloat(cardStyle.marginBottom) || 0;
+        margin = artworkPrefetchMargin(card.getBoundingClientRect().height + gap + cardBottom);
+      }
+      margins.set(container, margin);
+      return margin;
+    }
     // Read all geometry before writing src/classes, and only when the viewport
     // or card layout changed. Finishing a download reuses this measured queue.
-    // On-screen cards take priority over neighboring prefetch cards in DOM order.
     for (let i = 0; i < images.length; i++) {
       const img = images[i], rect = img.getBoundingClientRect();
-      if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
+      const margin = verticalMargin(img);
+      if (rect.bottom < view.top - margin || rect.top > view.bottom + margin ||
           rect.right < view.left - 180 || rect.left > view.right + 180) continue;
-      const onScreen = rect.bottom > view.top && rect.top < view.bottom &&
-        rect.right > view.left && rect.left < view.right;
-      (onScreen ? visible : nearby).push(img);
+      if (rect.bottom >= view.top && rect.top <= view.bottom) {
+        if (rect.right >= view.left && rect.left <= view.right) visible.push(img);
+        else sideways.push(img);
+      } else if (rect.bottom < view.top) above.push(img);
+      else below.push(img);
     }
-    posterCandidates = visible.concat(nearby);
+    // Visible images must not queue behind a screenful of speculative reads.
+    // Outside the viewport, start with the nearest row in scroll direction;
+    // above[] is in document order so its nearest entries come last.
+    posterCandidates = visible.concat(sideways, posterScrollDirection < 0
+      ? above.reverse().concat(below) : below.concat(above.reverse()));
   }
   const ready = posterCandidates;
   posterCandidates = [];
@@ -966,6 +993,9 @@ function schedulePosters() {
   if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
 }
 main.addEventListener('scroll', () => {
+  const delta = main.scrollTop - previousPosterScrollTop;
+  if (Math.abs(delta) > 2) posterScrollDirection = delta > 0 ? 1 : -1;
+  previousPosterScrollTop = main.scrollTop;
   posterQueueDirty = true;
   schedulePosters();
 }, true);
