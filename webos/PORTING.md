@@ -232,3 +232,33 @@ on physical LG TVs remain hardware-verification tasks.
 
 Unit tests cover parser and fallback precedence and browser tests cover
 appearance, manual/automatic skip, preferences and remote cancellation.
+
+### Viewport-bounded artwork and incremental catalog updates
+
+Native LibraryBrowseTab uses lazily built sliver rows. Since Chromium 53 does
+not support reliable native image lazy loading, WebOS predecodes only the first
+viewport and two following rows, or visible Home shelves and nearby shelf rows.
+On-page scroll loads remaining artwork through the existing bounded queue.
+The window is estimated from TV card geometry before the cards are mounted;
+the real visible-image queue measures DOM bounds after mount on scroll or
+content changes, not after each completed image.
+
+Like LibraryBrowseTab.performLiveLibraryRefresh, the webOS normal and sparse
+alphabetical grids reconcile changes by stable ID and item metadata, retaining
+DOM, decoded images and focus for unchanged cards. A changed page length still
+invalidates the offsets of all subsequent loaded pages.
+
+Plex title loading proceeds independently of first-character lookup.
+The sparse grid mounts without an alphabet rail; when the index becomes
+available and meets Plezy's threshold, the rail is attached without rebuilding
+the grid. Overlapping persistent-catalog loads coalesce per account/key;
+forced refresh supersedes stale requests, and generation checks preserve
+account isolation and newer responses.
+
+The image cache remembers disk misses and coalesces concurrent probes.
+Merged Plex collections reuse an account-scoped disk-backed collection index
+that serves cached data before background revalidation. Partial server failures
+retain the last complete discovery index.
+
+Browser tests and Chromium 53 compilation do not substitute for real LG TV
+performance and disk-quota verification.

@@ -1,5 +1,15 @@
 # webOS changelog
 
+## 1.5.1 — Faster cached navigation and incremental library refresh
+
+- Predecode only viewport artwork and nearby rows, rather than entire library pages and Home shelves.
+- Reconcile changed cards in regular and alphabetically indexed grids, retaining unchanged poster DOM, focus and cached artwork.
+- Render Plex titles immediately, without waiting for missing first-character index data.
+- Coalesce simultaneous catalog requests while supporting explicit forced refresh and invalidation.
+- Skip redundant artwork disk reads and repeated offscreen layout measurements.
+- Persist and share an account-scoped collection discovery index with background revalidation and offline fallback.
+- Add unit and browser regression tests for request and cache behavior, artwork windows, focus and collection discovery.
+
 ## 1.5.0 — Port Plezy skip markers and playback controls
 
 - Port Plex intro/credits markers, nonstandard marker classification and chapter-title fallback with the same matching rules and false-positive safeguards as original Plezy.
