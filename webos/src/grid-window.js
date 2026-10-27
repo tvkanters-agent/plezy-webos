@@ -242,6 +242,9 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       window.removeEventListener('resize',resize);
       clearCached();
       compactMounted();
+      // Compaction's removed buffered cards must not remain in the shared LRU
+      // while this route is inactive. Its mounted nearby rows remain warm.
+      clearCached();
     }
     if (paginationCleanup) paginationCleanup();
   }
