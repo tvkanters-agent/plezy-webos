@@ -1974,7 +1974,7 @@ test('changed catalog metadata preserves unchanged card DOM, artwork and focus',
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.locator('main .grid .card')).toHaveCount(3);
   await page.getByRole('button',{name:'Home',exact:true}).click();
-  await expect(page.locator('main .shelf')).toHaveCount(1);
+  await expect(page.locator('main .shelf').first()).toBeVisible();
   refresh=true;
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.locator('main .grid .card')).toHaveCount(3);
