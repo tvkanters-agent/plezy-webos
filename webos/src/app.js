@@ -541,7 +541,10 @@ let posterFrame = 0, artworkInFlight = 0;
 // Native Plezy's OptimizedMediaImage paints decoded memory hits immediately;
 // any image not already ready when its DOM node is created fades over 300ms.
 function artworkImage(url, persistent, failed, revision = '') {
-  const img = el('img');
+  // All media artwork uses the same image class, so newly introduced
+  // rounded frames inherit clipping rather than leaking square image corners
+  // when Chromium 53 composites the opacity fade.
+  const img = el('img', undefined, 'artwork-image');
   img.alt = '';
   // Revisioned artwork persists until metadata changes. Artwork without a
   // revision can still be reused immediately in RAM for this session, but
