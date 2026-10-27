@@ -94,9 +94,17 @@ let navigationIntent = 0;
 let pendingRailEntryRevision = null, libraryRenderRevision = null;
 let activeGridWindow = null;
 let lastRailRightRevision = null;
+function cardWithinPane(node) {
+  if (!node || !main.contains(node)) return false;
+  const view = main.getBoundingClientRect(), box = node.getBoundingClientRect();
+  return box.bottom > view.top + 8 && box.top < view.bottom - 8;
+}
 function preferredPaneControl() {
-  // Enter media before the toolbar when coming from the remote's side rail.
-  return main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
+  // Buffered rows are mounted but not visible. Rail RIGHT should never
+  // rewind scroll to the first buffered card after Magic Remote scrolling.
+  const media = Array.from(main.querySelectorAll(
+    '.grid .card, .shelf .card, .episode-list .episode-row, .cards .card'));
+  return media.find(cardWithinPane) || media[0] ||
     main.querySelector('button:not(:disabled),input,select');
 }
 function el(tag, text, className) {
@@ -1171,6 +1179,7 @@ async function paginated(loader, pageRevision, options = {}) {
   const onScroll = () => check();
   const observer = typeof IntersectionObserver !== 'undefined'
     ? new IntersectionObserver(check, {root: main, rootMargin: '700px'}) : null;
+  if (windowedGrid) windowedGrid.setPaginationCleanup(cleanup);
   listen();
   await load();
   if (completed) cleanup();
@@ -2314,7 +2323,10 @@ window.addEventListener('keydown', event => {
     }
     const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
       main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
-    const target = restored || preferredPaneControl();
+    // Respect the remembered target only if still visible in the current
+    // scroll position. Otherwise enter at the first visible media card.
+    const target = (restored && (activeGridWindow?.grid.contains(restored) ?
+      cardWithinPane(restored) : true) ? restored : null) || preferredPaneControl();
     if (target) focusWithoutJump(target);
     else { main.tabIndex = -1; focusWithoutJump(main); }
     return;
@@ -2365,8 +2377,9 @@ window.addEventListener('keydown', event => {
       // The first poster in a media row has no left-hand peer. Never
       // diagonally select a toolbar/tab from the row above it.
       const card = current.closest('.grid .card, .cards .card');
-      const firstPoster = card && card.parentNode && card ===
-        card.parentNode.querySelector('.card');
+      const firstPoster = card && (activeGridWindow?.grid.contains(card) ?
+        card._gridIndex % activeGridWindow.columns === 0 :
+        card.parentNode && card === card.parentNode.querySelector('.card'));
       if (firstPoster) {
         focusLastRailItem();
         return;
@@ -2382,6 +2395,11 @@ window.addEventListener('keydown', event => {
       focusLastRailItem();
       return;
     }
+    // Spatial search sees only mounted controls. For a virtualized grid,
+    // resolve Up/Down by logical index and synchronously mount the target
+    // row before moving focus, including rapid repeat keys at boundaries.
+    if (inMain && current.matches('.grid .card') &&
+        activeGridWindow?.focusNeighbor(current,direction)) return;
     const local = choose(validControls(source), direction);
     if (local) { focusWithoutJump(local); return; }
     if (inMain && (direction === 'up' || direction === 'down')) {
