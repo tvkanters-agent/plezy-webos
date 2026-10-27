@@ -34,7 +34,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   let columns = 1, rowHeight = 1, loading = false, destroyed = false;
   let generation = 0, pending = null, scrollTimer = null, pinnedIndex = null;
   let previousScrollTop = main.scrollTop;
-  const helper = alphaIndex(characters);
+  let helper = alphaIndex(characters);
   let activeCheck = isActive;
   const alive = () => !destroyed && activeCheck() && grid.isConnected;
   const loadedEnd = () => rangeStart + items.length;
@@ -102,10 +102,11 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     }
     if (target) focusWithoutJump(target, false);
   };
-  const rail = createAlphaJumpBar(characters, {
+  const railOptions = {
     onJump(index) { jump(index); },
     onExit: focusGrid
-  });
+  };
+  let rail = createAlphaJumpBar(characters, railOptions);
   shell.append(rail.element);
   paint(items, 'replace');
   measure();
@@ -259,7 +260,41 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   window.addEventListener('resize', resize);
   requestAnimationFrame(check);
   return {
-    element: rail.element, handleKey: rail.handleKey, focus: rail.focus,
+    get element() { return rail.element; },
+    handleKey: code => rail.handleKey(code), focus: () => rail.focus(),
+    updateCharacters(next) {
+      if (!alive() || JSON.stringify(next) === JSON.stringify(characters)) return;
+      const wasFocused = rail.isFocused();
+      const previous = rail;
+      helper = alphaIndex(next);
+      rail = createAlphaJumpBar(next, railOptions);
+      shell.append(rail.element);
+      previous.destroy();
+      rail.draw();
+      rail.update(helper.currentLetter(firstVisibleIndex()));
+      if (wasFocused) rail.focus();
+    },
+    updateRange(offset, page) {
+      if (!alive() || offset !== rangeStart) return;
+      const oldFocus = grid.contains(document.activeElement) ?
+        document.activeElement.dataset.focus : null;
+      const scroll = main.scrollTop;
+      // Only retain adjacent rows when the refreshed offset boundaries agree.
+      const previousCount = Math.min(page.items.length, items.length);
+      items = page.items.length === previousCount
+        ? page.items.concat(items.slice(previousCount)) : page.items.slice();
+      total = page.total;
+      paint(items, 'replace');
+      measure();
+      spacers();
+      main.scrollTop = scroll;
+      rail.update(helper.currentLetter(firstVisibleIndex()));
+      if (oldFocus) {
+        const selected = allCards().find(node => node.dataset.focus === oldFocus);
+        if (selected) focusWithoutJump(selected, false);
+      }
+      requestAnimationFrame(check);
+    },
     suspend() {
       clearTimeout(scrollTimer);
       rail.element.hidden = true;
