@@ -331,7 +331,7 @@ test('Plex Next episode navigates to the next episode across seasons',async({pag
     return route.fulfill({json:data});
   });
   await page.goto('/');
-  await page.getByRole('button',{name:'Pilot, Test Show'}).click();
+  await page.getByRole('button',{name:'Test Show, S1 E1 · Pilot'}).click();
   await page.getByRole('button',{name:'Next episode',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Finale'})).toBeVisible();
 });
