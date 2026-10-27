@@ -3,6 +3,7 @@ import './compat.js';
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
+import {ArtworkCache} from './artwork-cache.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
@@ -10,6 +11,7 @@ import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl
 import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
+const artworkCache = new ArtworkCache();
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
@@ -535,17 +537,47 @@ function card(item) {
  // (with one screen of prefetch) instead of decoding all 60 per library page.
 const MAX_ARTWORK_IN_FLIGHT = 2;
 let posterFrame = 0, artworkInFlight = 0;
+// Native Plezy's OptimizedMediaImage paints decoded memory hits immediately;
+// any image not already ready when its DOM node is created fades over 300ms.
+function artworkImage(url, persistent, failed) {
+  const img = el('img');
+  img.alt = '';
+  if (persistent) img.setAttribute('data-artwork-cache', '1');
+  img.setAttribute('data-artwork-url', url);
+  img.onload = () => {
+    if (persistent && img.src.indexOf('blob:') === 0) artworkCache.markReady(url);
+    if (img.classList.contains('artwork-ready')) return;
+    requestAnimationFrame(() => {
+      if (img.isConnected && img.naturalWidth > 0) img.classList.add('artwork-loaded');
+    });
+  };
+  img.onerror = () => {
+    if (persistent && img.src.indexOf('blob:') === 0 && !img.hasAttribute('data-artwork-retry')) {
+      // Corrupt or unsupported stored image: remove it and try the normal URL.
+      img.setAttribute('data-artwork-retry', '1');
+      artworkCache.invalidate(url);
+      img.classList.remove('artwork-ready', 'artwork-loaded');
+      img.src = url;
+    } else if (failed) failed(img);
+  };
+  const ready = persistent ? artworkCache.peekReady(url) : null;
+  if (ready) {
+    img.classList.add('artwork-ready');
+    img.src = ready; // Set before DOM insertion for the first rendered frame.
+  } else {
+    img.setAttribute('data-poster-src', url);
+  }
+  return img;
+}
 function loadVisiblePosters() {
   posterFrame = 0;
   if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) return;
   const view = main.getBoundingClientRect();
   const images = main.querySelectorAll('img[data-poster-src]');
   const ready = [], capacity = MAX_ARTWORK_IN_FLIGHT - artworkInFlight;
-  // Finish geometry reads before changing src/classes. Cached artwork may
-  // invalidate style/layout immediately; interleaving forces another layout.
+  // Collect geometry first: changing src/classes while measuring forces layout.
   for (let i = 0; i < images.length && ready.length < capacity; i++) {
     const img = images[i], rect = img.getBoundingClientRect();
-    // One row of prefetch, not a full extra TV screen of full-size posters.
     if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
         rect.right < view.left - 180 || rect.left > view.right + 180) continue;
     ready.push(img);
@@ -554,18 +586,28 @@ function loadVisiblePosters() {
     const url = img.getAttribute('data-poster-src');
     img.removeAttribute('data-poster-src');
     ++artworkInFlight;
-    const finish = () => {
+    let done = false;
+    const timer = setTimeout(finish, 16000);
+    function finish() {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       img.removeEventListener('load', finish);
       img.removeEventListener('error', finish);
       artworkInFlight = Math.max(0, artworkInFlight - 1);
       schedulePosters();
-    };
+    }
     img.addEventListener('load', finish);
     img.addEventListener('error', finish);
-    img.src = url;
-    // Flutter's OptimizedMediaImage shows synchronously cached frames without
-    // fading; only artwork arriving asynchronously transitions over 300ms.
-    if (img.complete && img.naturalWidth > 0) img.classList.add('artwork-ready');
+    const attach = src => {
+      if (!img.isConnected) { finish(); return; }
+      img.src = src;
+    };
+    if (img.hasAttribute('data-artwork-cache')) {
+      // Memory/disk hits share the same loader. Disk lookups are asynchronous
+      // and still fade in; only ready memory hits bypass the loading queue.
+      artworkCache.resolve(url).then(attach, () => attach(url));
+    } else attach(url); // Cast photos deliberately stay out of disk storage.
   }
 }
 function schedulePosters() {
@@ -581,16 +623,10 @@ function personPortrait(imageUrl, className) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 24 24');
   const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-  path.setAttribute('d','M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.66-5.33-4-8-4z');
+  path.setAttribute('d','M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4 1.79-4 4 4zm0 2c-2.67 0-8 1.34-8 4v1c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-1c0-2.66-5.33-4-8-4z');
   path.setAttribute('fill','currentColor');
   svg.appendChild(path);fallback.appendChild(svg);node.appendChild(fallback);
-  if (imageUrl) {
-    const img=el('img');img.alt='';img.style.visibility='hidden';
-    img.onload=()=>{img.style.visibility='visible';};
-    img.onerror=()=>{img.remove();};
-    img.setAttribute('data-poster-src',imageUrl);
-    node.appendChild(img);
-  }
+  if (imageUrl) node.appendChild(artworkImage(imageUrl, false, img => img.remove()));
   return node;
 }
 // Plezy's OptimizedMediaImage uses an opaque surface while waiting and a
@@ -609,16 +645,10 @@ function unavailablePoster(node) {
 }
 function poster(item, options = {}) {
   const node = el('div', undefined, 'poster'); const image = api.image(item, options);
-  if (image) {
-    const img = el('img'); img.alt = ''; img.setAttribute('data-poster-src', image);
-    // A src-less <img> draws Chromium's white broken-image box even while
-    // queued for lazy loading. Reveal only a successfully decoded image.
-    img.onload = () => {
-      if (!img.classList.contains('artwork-ready')) img.classList.add('artwork-loaded');
-    };
-    img.onerror = () => { img.remove(); unavailablePoster(node); };
-    node.append(img);
-  } else unavailablePoster(node);
+  if (image) node.appendChild(artworkImage(image, true, img => {
+    img.remove(); unavailablePoster(node);
+  }));
+  else unavailablePoster(node);
   return node;
 }
 function cards(items, grid = false) {
@@ -965,8 +995,8 @@ async function render() {
       if (api instanceof Plex && heroMedia) {
         const hero = el('div', undefined, 'detail-backdrop');
         // Server-transcoded low-resolution artwork, not a source-sized image.
-        hero.style.backgroundImage = 'linear-gradient(to right, #0e0f12 2%, rgba(14,15,18,.86) 48%, rgba(14,15,18,.2)), linear-gradient(to top, #0e0f12, transparent 65%), url("' +
-          api.backdrop(heroMedia).replace(/"/g, '%22') + '")';
+        hero.append(artworkImage(api.backdrop(heroMedia), true),
+          el('div', undefined, 'detail-backdrop-shade'));
         main.append(hero);
       }
       if (parentShow) {
