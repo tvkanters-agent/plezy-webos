@@ -57,6 +57,21 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     cached.set(id, node);
     while (cached.size > CACHE_LIMIT) cached.delete(cached.keys().next().value);
   }
+  function reactivateCard(node) {
+    // onload's delayed opacity callback intentionally skips detached images.
+    // When the exact card is recycled back, an already-decoded image must be
+    // visible on that very frame (without a new load or another fade).
+    const images = node.querySelectorAll('img.artwork-image');
+    for (let i=0; i<images.length; i++) {
+      const img = images[i];
+      if (img.getAttribute('src') && img.complete && img.naturalWidth > 0)
+        img.classList.add('artwork-loaded');
+      else if (!img.getAttribute('src') && !img.hasAttribute('data-poster-src')) {
+        const url = img.getAttribute('data-artwork-url');
+        if (url) img.setAttribute('data-poster-src', url);
+      }
+    }
+  }
   function paint(start, end) {
     const previous = new Map();
     Array.from(grid.children).forEach(node => {
@@ -72,6 +87,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       if (!node || node._catalogSignature !== signature) node = makeCard(item);
       cached.delete(id);
       node._gridIndex = index;
+      reactivateCard(node);
       desired.push(node);
     }
     const retained = new Set(desired);
@@ -164,7 +180,11 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     listening = true;
     main.addEventListener('scroll',onScroll);
     window.addEventListener('resize',resize);
-    sync(true);
+    // A cached route cannot receive resize while detached. Re-measure every
+    // time it is restored; resize() uses the saved logical anchor from before
+    // suspension, even when the number of columns stayed the same.
+    if (grid.isConnected && items.length && columns) resize();
+    else sync(true);
   }
   function suspend() {
     if (listening) {
@@ -195,6 +215,18 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     focusNeighbor,
     setPaginationCleanup(fn) { paginationCleanup=fn; },
     setItems(nextItems) {
+      // Preserve the title's identity across a fresh metadata page reorder.
+      // The focused ID can move outside the mounted slice even when every
+      // page still contains the same number of records.
+      const focused = grid.contains(document.activeElement) ? document.activeElement : null;
+      const oldIndex = focused && Number.isInteger(focused._gridIndex) ?
+        focused._gridIndex : -1;
+      const focusedId = oldIndex >= 0 ? focused.dataset.focus : null;
+      const newIndex = focusedId == null ? -1 :
+        nextItems.findIndex(item => String(item.id) === focusedId);
+      const nextScroll = oldIndex >= 0 && newIndex >= 0 && columns ?
+        Math.max(0,main.scrollTop +
+          (Math.floor(newIndex/columns)-Math.floor(oldIndex/columns))*stride) : null;
       items=nextItems;
       if (!items.length) {
         grid.textContent='';
@@ -202,7 +234,22 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
         range=null;cached.clear();
         return;
       }
+      if (nextScroll != null) main.scrollTop=nextScroll;
       sync(true);
+      if (newIndex >= 0) {
+        // Scroll anchoring or a focused node replaced due to metadata changes
+        // must not redirect the remote to another title.
+        let target = Array.from(grid.children).find(node => node._gridIndex === newIndex);
+        if (!target && columns) {
+          const row = Math.floor(newIndex/columns);
+          applyRange(gridWindowRange(items.length,columns,Math.max(0,row-1),3),true);
+          target = Array.from(grid.children).find(node => node._gridIndex === newIndex);
+        }
+        if (target) {
+          focusWithoutJump(target,false);
+          if (nextScroll != null) main.scrollTop=nextScroll;
+        }
+      }
     },
     suspend,resume,
     destroy() { suspend(); live=false; items=[]; cached.clear(); }
