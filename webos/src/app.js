@@ -785,8 +785,9 @@ async function render() {
     else if (route.type === 'simkl') { await simklSignIn(); return; }
     else if (route.type === 'home') {
       title('Your next watch', activeServer().name);
-      const loading = el('p', 'Loading your library…', 'muted'); main.append(loading);
-      const rows = await api.home(); if (!valid()) return; loading.remove();
+      // Keep the first frame quiet instead of flashing a temporary text
+      // message while the home shelves are fetched.
+      const rows = await api.home(); if (!valid()) return;
       if (!rows.length) {
         main.append(el('p', 'No recommendations yet. Browse a library to find something to watch.'));
         main.append(button('Browse libraries', () => go({type: 'libraries'}), 'primary'));
