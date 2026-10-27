@@ -31,6 +31,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   fadeDelayedContent(grid, startedAt);
   main.append(topSpace, grid, bottomSpace, error, retry);
   let rangeStart = 0, items = firstPage.items.slice(), total = firstPage.total;
+  let leadingPageLength = firstPage.items.length;
   let columns = 1, rowHeight = 1, loading = false, destroyed = false;
   let generation = 0, pending = null, scrollTimer = null, pinnedIndex = null;
   let previousScrollTop = main.scrollTop;
@@ -140,6 +141,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
       if (!alive() || id !== generation) return;
       rangeStart = start;
       items = page.items.slice();
+      leadingPageLength = page.items.length;
       total = page.total;
       paint(items, 'replace');
       spacers();
@@ -169,6 +171,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
       removed.forEach(n => n.remove());
       items.splice(0, trim);
       rangeStart += trim;
+      leadingPageLength = Math.min(leadingPageLength, items.length);
     } else {
       const removed = allCards().slice(items.length - trim);
       if (removed.some(n => n === document.activeElement)) return;
@@ -196,6 +199,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
       if (before) {
         items = page.items.concat(items);
         rangeStart = start;
+        leadingPageLength = page.items.length;
         paint(page.items, 'prepend');
       } else {
         items = items.concat(page.items);
@@ -263,7 +267,11 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     get element() { return rail.element; },
     handleKey: code => rail.handleKey(code), focus: () => rail.focus(),
     updateCharacters(next) {
-      if (!alive() || JSON.stringify(next) === JSON.stringify(characters)) return;
+      if (!alive() || JSON.stringify(next) === JSON.stringify(helper.letters.map(letter => ({title:letter,size:helper.sizes[letter]})))) {
+        // Compare canonical bucket data rather than the initial parameter:
+        // Plex may refresh this index more than once during a session.
+        return;
+      }
       const wasFocused = rail.isFocused();
       const previous = rail;
       helper = alphaIndex(next);
@@ -280,9 +288,9 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
         document.activeElement.dataset.focus : null;
       const scroll = main.scrollTop;
       // Only retain adjacent rows when the refreshed offset boundaries agree.
-      const previousCount = Math.min(page.items.length, items.length);
-      items = page.items.length === previousCount
-        ? page.items.concat(items.slice(previousCount)) : page.items.slice();
+      const sameBoundary = leadingPageLength === page.items.length;
+      items = sameBoundary ? page.items.concat(items.slice(leadingPageLength)) : page.items.slice();
+      leadingPageLength = page.items.length;
       total = page.total;
       paint(items, 'replace');
       measure();
