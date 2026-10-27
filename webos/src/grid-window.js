@@ -180,13 +180,21 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   }
   function resize(measured = null) {
     if (!live || !grid.isConnected || !items.length || !columns) return;
+    const nextMetrics = measured || measureGrid(grid);
+    // Height-only resizes change how many existing cards are visible, not
+    // their logical row positions. Re-measure visibility without modifying
+    // scrollTop or re-anchoring from an older scroll event.
+    if (nextMetrics.columns === columns && Math.abs(nextMetrics.stride-stride) < .5) {
+      sync(true);
+      return;
+    }
     // Use the last measured pre-resize anchor, not the browser's current
     // scrollTop: Chromium can apply scroll anchoring as CSS changes before
     // the resize event fires, producing an entire row of drift.
     const {firstItem,within,stride:previousStride} = scrollAnchor;
     // Measure with a temporarily complete first-row sample when our window
     // is near the end and responsive CSS changes the number of columns.
-    ({columns,stride} = measured || measureGrid(grid));
+    ({columns,stride} = nextMetrics);
     gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
     gridOffset = measureOffset();
     const newRow = Math.floor(firstItem/columns);
