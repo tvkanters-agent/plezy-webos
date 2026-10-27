@@ -1,0 +1,232 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Bounded artwork cache for Chromium 53 / webOS 4.x.
+// In-memory object URLs keep recently decoded frames available across routes;
+// IndexedDB stores compressed image blobs across app launches.
+export const ARTWORK_DISK_BYTES = 80 * 1024 * 1024;
+export const ARTWORK_MEMORY_BYTES = 12 * 1024 * 1024;
+export const ARTWORK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
+const MAX_DISK_ENTRIES = 500;
+const MAX_MEMORY_ENTRIES = 48;
+
+export class ArtworkCache {
+  constructor(options = {}) {
+    this.factory = options.indexedDB === undefined
+      ? (typeof indexedDB === 'undefined' ? null : indexedDB) : options.indexedDB;
+    this.fetchImage = options.fetch || ((url) => fetch(url));
+    this.urls = options.urls || (typeof URL === 'undefined' ? null : URL);
+    this.now = options.now || (() => Date.now());
+    this.memory = new Map();
+    this.memoryBytes = 0;
+    this.pending = new Map();
+    this.unsupportedOrigins = new Set();
+    this.dbPromise = null;
+    this.writes = 0;
+    this.pruning = null;
+  }
+  peek(key) {
+    const entry = this.memory.get(key);
+    if (!entry) return null;
+    if (entry.expires <= this.now()) {
+      this.drop(key);
+      return null;
+    }
+    this.memory.delete(key);
+    this.memory.set(key, entry);
+    return entry.src;
+  }
+  drop(key) {
+    const entry = this.memory.get(key);
+    if (!entry) return;
+    this.memory.delete(key);
+    this.memoryBytes -= entry.bytes;
+    if (this.urls && this.urls.revokeObjectURL) this.urls.revokeObjectURL(entry.src);
+  }
+  remember(key, blob, expires = this.now() + ARTWORK_TTL_MS) {
+    if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES ||
+        !this.urls || !this.urls.createObjectURL) return null;
+    const existing = this.peek(key);
+    if (existing) return existing;
+    let src;
+    try { src = this.urls.createObjectURL(blob); }
+    catch (_) { return null; }
+    const entry = {src, bytes: blob.size, expires};
+    // Keep a decoded image reference alive for the immediate next route paint.
+    if (typeof Image !== 'undefined') {
+      entry.image = new Image();
+      entry.image.src = src;
+    }
+    this.memory.set(key, entry);
+    this.memoryBytes += blob.size;
+    while (this.memory.size > MAX_MEMORY_ENTRIES ||
+           this.memoryBytes > ARTWORK_MEMORY_BYTES) {
+      this.drop(this.memory.keys().next().value);
+    }
+    return src;
+  }
+  open() {
+    if (!this.factory) return Promise.resolve(null);
+    if (this.dbPromise) return this.dbPromise;
+    this.dbPromise = new Promise(resolve => {
+      let request;
+      try { request = this.factory.open('plezy-artwork-v1', 1); }
+      catch (_) { resolve(null); return; }
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('images')) db.createObjectStore('images', {keyPath: 'key'});
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+    return this.dbPromise;
+  }
+  async read(key) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise(resolve => {
+      try {
+        const tx = db.transaction('images', 'readwrite');
+        const store = tx.objectStore('images');
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const entry = request.result;
+          if (!entry) { resolve(null); return; }
+          if (entry.expires <= this.now() || !entry.blob ||
+              !entry.blob.size || entry.blob.size > MAX_ENTRY_BYTES) {
+            store.delete(key);
+            resolve(null);
+            return;
+          }
+          // Avoid excessive flash writes for repeatedly visited pages.
+          if (this.now() - entry.used > 60000) {
+            entry.used = this.now();
+            store.put(entry);
+          }
+          resolve(entry);
+        };
+        request.onerror = () => resolve(null);
+        tx.onabort = () => resolve(null);
+      } catch (_) { resolve(null); }
+    });
+  }
+  async save(key, blob, expires) {
+    const db = await this.open();
+    if (!db) return;
+    const write = () => new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction('images', 'readwrite');
+        tx.objectStore('images').put({key, blob, expires, used: this.now(), bytes: blob.size});
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      } catch (error) { reject(error); }
+    });
+    try {
+      await write();
+      if (++this.writes % 12 === 0) this.prune();
+    } catch (_) {
+      // Quota can be much smaller on older LG TVs. Evict aggressively once,
+      // then let normal image loading continue even if storage still fails.
+      await this.prune(ARTWORK_DISK_BYTES / 2, MAX_DISK_ENTRIES / 2);
+      try { await write(); } catch (_) { /* Storage optional. */ }
+    }
+  }
+  async prune(maxBytes = ARTWORK_DISK_BYTES, maxEntries = MAX_DISK_ENTRIES) {
+    if (this.pruning) return this.pruning;
+    this.pruning = this.pruneEntries(maxBytes, maxEntries).catch(() => {});
+    try { await this.pruning; } finally { this.pruning = null; }
+  }
+  async pruneEntries(maxBytes, maxEntries) {
+    const db = await this.open();
+    if (!db) return;
+    const entries = await new Promise(resolve => {
+      const rows = [];
+      try {
+        const tx = db.transaction('images', 'readonly');
+        const cursor = tx.objectStore('images').openCursor();
+        cursor.onsuccess = () => {
+          const item = cursor.result;
+          if (item) {
+            rows.push({key: item.key, bytes: Number(item.value.bytes) || 0,
+              used: Number(item.value.used) || 0, expires: Number(item.value.expires) || 0});
+            item.continue();
+          } else resolve(rows);
+        };
+        cursor.onerror = () => resolve(rows);
+        tx.onabort = () => resolve([]);
+      } catch (_) { resolve([]); }
+    });
+    let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+    let count = entries.length;
+    const expired = entries.filter(entry => entry.expires <= this.now());
+    const live = entries.filter(entry => entry.expires > this.now()).sort((a, b) => a.used - b.used);
+    const remove = expired.map(entry => entry.key);
+    expired.forEach(entry => { total -= entry.bytes; count--; });
+    for (const entry of live) {
+      if (total <= maxBytes && count <= maxEntries) break;
+      remove.push(entry.key);
+      total -= entry.bytes;
+      count--;
+    }
+    if (!remove.length) return;
+    await new Promise(resolve => {
+      try {
+        const tx = db.transaction('images', 'readwrite');
+        const store = tx.objectStore('images');
+        remove.forEach(key => store.delete(key));
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+        tx.onabort = resolve;
+      } catch (_) { resolve(); }
+    });
+  }
+  async invalidate(key) {
+    this.drop(key);
+    const db = await this.open();
+    if (!db) return;
+    try { db.transaction('images', 'readwrite').objectStore('images').delete(key); }
+    catch (_) { /* Best effort. */ }
+  }
+  // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
+  resolve(key) {
+    const hit = this.peek(key);
+    if (hit) return Promise.resolve(hit);
+    if (this.pending.has(key)) return this.pending.get(key);
+    const task = this.resolveUncached(key).then(src => src || key, () => key);
+    this.pending.set(key, task);
+    task.then(() => this.pending.delete(key));
+    return task;
+  }
+  async resolveUncached(key) {
+    const stored = await this.read(key);
+    if (stored) {
+      const src = this.remember(key, stored.blob, stored.expires);
+      if (src) return src;
+    }
+    let origin = '';
+    try { origin = new URL(key).origin; } catch (_) { return key; }
+    if (this.unsupportedOrigins.has(origin)) return key;
+    try {
+      // Normal <img> works without CORS; reading bytes for IndexedDB does not.
+      // If the TV/server rejects a cross-origin fetch, use <img> directly and
+      // stop retrying the unsupported origin for the remainder of this launch.
+      const response = await this.fetchImage(key);
+      if (!response.ok || (response.type === 'opaque')) return key;
+      const type = response.headers && response.headers.get('content-type') || '';
+      if (type && !/^image\//i.test(type) && !/^application\/octet-stream/i.test(type))
+        return key;
+      const blob = await response.blob();
+      if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES) return key;
+      const expires = this.now() + ARTWORK_TTL_MS;
+      const src = this.remember(key, blob, expires);
+      if (!src) return key;
+      // Persist without delaying first paint.
+      this.save(key, blob, expires).catch(() => {});
+      return src;
+    } catch (_) {
+      this.unsupportedOrigins.add(origin);
+      return key;
+    }
+  }
+}
