@@ -54,16 +54,25 @@ for (const layout of ['grid','flex']) {
     }
     await expect.poll(()=>page.locator('main .grid .card').count())
       .toBeLessThan(100);
-    const before=await page.evaluate(()=>{
-      const main=document.querySelector('main'), pane=main.getBoundingClientRect();
-      const visible=Array.from(main.querySelectorAll('.grid .card')).find(node=>{
-        const rect=node.getBoundingClientRect();
-        return rect.top>=pane.top && rect.bottom<=pane.bottom;
+    let before=null;
+    for(let attempt=0;attempt<4 && !before;attempt++){
+      before=await page.evaluate(()=>{
+        const main=document.querySelector('main'), pane=main.getBoundingClientRect();
+        const visible=Array.from(main.querySelectorAll('.grid .card')).find(node=>{
+          const rect=node.getBoundingClientRect();
+          return rect.top>=pane.top && rect.bottom<=pane.bottom;
+        });
+        if(!visible)return null;
+        visible.focus();
+        return {id:visible.dataset.focus,scroll:main.scrollTop};
       });
-      if(!visible) return null;
-      visible.focus();
-      return {id:visible.dataset.focus,scroll:main.scrollTop};
-    });
+      // A bottom-aligned partial row (plus the pagination sentinel) is not
+      // fully visible in a short viewport, especially in the flex fallback.
+      if(!before){
+        await page.locator('main').evaluate(main=>main.scrollTop=Math.max(0,main.scrollTop-250));
+        await page.waitForTimeout(25);
+      }
+    }
     expect(before).not.toBeNull();
     await page.locator('main .grid .card[data-focus="'+before.id+'"]').click();
     await expect(page.getByRole('heading',{name:'Title '+before.id.padStart(3,'0')})).toBeVisible();
