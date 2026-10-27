@@ -262,3 +262,7 @@ retain the last complete discovery index.
 
 Browser tests and Chromium 53 compilation do not substitute for real LG TV
 performance and disk-quota verification.
+
+### Native webOS launch splash
+
+LG displays `splashBackground` before starting the web app, so an HTML loading screen cannot replace the grey pre-launch background. The app declares a 1920×1080 PNG generated during the build from Plezy's unchanged `assets/plezy.svg` with the actual dark `webos/public/app.css` background. The already-required Playwright Chromium renders the vector; no browser, renderer or startup delay is added to the TV application. LG's `splashColor` setting applies only to StanbyME models, so the dark color is embedded in the PNG for normal TVs.
