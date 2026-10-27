@@ -460,7 +460,7 @@ function navigation() {
     if (libraryCacheFor !== api && !libraryLoading) {
       const currentApi = api;
       libraryLoading = true;
-      savedPage('libraries', () => currentApi.libraries()).then(result => {
+      savedPage('libraries', () => currentApi.libraries(), {priority:true}).then(result => {
         if (currentApi !== api) return;
         const install = libraries => {
           if (currentApi !== api) return;
@@ -768,9 +768,21 @@ async function prewarmPosters(items, sourceApi = api, options = {}) {
     const key = artworkCacheKey(url, sourceApi.artworkVersion(item, options));
     if (key) keys.push(key);
   }
+  if (options.protectFirst) artworkCache.protect(keys.slice(0, options.protectFirst));
   await artworkCache.prewarm(keys);
 }
 async function prewarmShelves(shelves, sourceApi = api) {
+  const landing = [];
+  // A shelf has many items but only its first few appear at page entry.
+  // Keep those decoded across deep library scrolling and later Home visits.
+  shelves.forEach(shelf => shelf.items.slice(0, 8).forEach(item => {
+    const url = sourceApi.image(item);
+    if (url) {
+      const key = artworkCacheKey(url, sourceApi.artworkVersion(item));
+      if (key) landing.push(key);
+    }
+  }));
+  artworkCache.protect(landing);
   await prewarmPosters(shelves.reduce((all, shelf) => all.concat(shelf.items), []), sourceApi);
 }
 function cards(items, grid = false) {
@@ -878,7 +890,7 @@ async function paginated(loader, currentRevision, options = {}) {
       if (!update || !update.changed || currentRevision !== revision ||
           !grid.isConnected || !loadedPages.has(offset)) return;
       await prewarmPosters(update.value.items, api,
-        options.episodes ? {landscape:true} : {});
+        {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
       if (currentRevision !== revision || !grid.isConnected ||
           !loadedPages.has(offset)) return;
       loadedPages.set(offset, update.value);
@@ -911,7 +923,8 @@ async function paginated(loader, currentRevision, options = {}) {
         ? response.value : response;
       const fresh = response && response.fresh;
       if (currentRevision !== revision || !grid.isConnected) return;
-      await prewarmPosters(page.items, api, options.episodes ? {landscape:true} : {});
+      await prewarmPosters(page.items, api,
+        {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
       if (currentRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       addPage(grid, page);
@@ -1005,21 +1018,24 @@ async function render() {
       const contentStartedAt = beginContentEntrance();
       if (currentApi instanceof Plex && view === 'collections') {
         await paginated(start => savedPage('collections:' + route.library.id + ':' + start,
-          () => currentApi.collections(route.library.id, start), {force:forceRefresh}), currentRevision,
+          () => currentApi.collections(route.library.id, start),
+          {force:forceRefresh, priority:start === 0}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
         await paginated(start => savedPage('playlists:' + start,
-          () => currentApi.playlists(start), {force:forceRefresh}), currentRevision,
+          () => currentApi.playlists(start),
+          {force:forceRefresh, priority:start === 0}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst();
         return;
       }
       if (currentApi instanceof Plex && view === 'recommended') {
         const result = await savedPage('recommended:' + route.library.id,
-          () => currentApi.recommended(route.library.id), {force:forceRefresh});
+          () => currentApi.recommended(route.library.id),
+          {force:forceRefresh, priority:true});
         if (!valid()) return;
         const anchor = document.createComment('recommended-shelves');
         main.append(anchor);
@@ -1119,7 +1135,8 @@ async function render() {
         'browse:' + JSON.stringify([route.library.id, selected, selectedFilter,
           route.alpha || '', start, count || null]),
         () => currentApi.list(route.library.id, start, selected, selectedFilter, count,
-          currentApi instanceof Jellyfin ? route.alpha : undefined), {force:forceRefresh});
+          currentApi instanceof Jellyfin ? route.alpha : undefined),
+        {force:forceRefresh, priority:start === 0 && !route.alpha});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -1127,14 +1144,14 @@ async function render() {
           libraryLoader(0).catch(error => ({error})),
           savedPage('characters:' + JSON.stringify([route.library.id, selectedFilter]),
             () => currentApi.firstCharacters(route.library.id, selectedFilter),
-            {force:forceRefresh}).catch(() => ({value:[],fresh:null}))
+            {force:forceRefresh, priority:true}).catch(() => ({value:[],fresh:null}))
         ]);
         if (!valid()) return;
         if (firstResult.error) {
           await paginated(start => libraryLoader(start), currentRevision,
             {startedAt:contentStartedAt});
         } else if (showPlexAlphaBar(firstResult.value.total, firstCharacters.value, selected)) {
-          await prewarmPosters(firstResult.value.items, currentApi);
+          await prewarmPosters(firstResult.value.items, currentApi, {protectFirst:24});
           if (!valid()) return;
           main.classList.add('has-alpha-bar');
           // Further pages can be restored from disk too, but alpha navigation
@@ -1158,7 +1175,7 @@ async function render() {
           });
           if (firstResult.fresh) firstResult.fresh.then(async update => {
             if (!update.changed || !valid() || !activeAlphabet) return;
-            await prewarmPosters(update.value.items, currentApi);
+            await prewarmPosters(update.value.items, currentApi, {protectFirst:24});
             if (valid() && activeAlphabet) activeAlphabet.updateRange(0, update.value);
           }).catch(() => {});
           if (firstCharacters.fresh) firstCharacters.fresh.then(update => {
