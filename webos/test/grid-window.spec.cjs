@@ -707,9 +707,11 @@ for(const layout of ['grid','flex']) {
       const second=cards.find(node=>Math.abs(node.getBoundingClientRect().top-first.top)>3);
       const stride=second?second.getBoundingClientRect().top-first.top:340;
       const columns=grid._windowedGrid.columns;
-      const top=main.scrollTop+grid.getBoundingClientRect().top-
+      // The grid already has a virtual top spacer. Its current position is
+      // not the origin of the entire catalog: the spacer's position is.
+      const top=main.scrollTop+grid.previousElementSibling.getBoundingClientRect().top-
         main.getBoundingClientRect().top;
-      main.scrollTop=top+(Math.floor(59/columns)-2)*stride;
+      main.scrollTop=top+Math.floor(59/columns)*stride;
     });
     await expect(page.locator('.grid .card[data-focus="59"]')).toHaveCount(2);
     const duplicateState=await page.locator('.grid').evaluate(grid=>{
