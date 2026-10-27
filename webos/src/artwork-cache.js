@@ -164,7 +164,7 @@ export class ArtworkCache {
           request.onsuccess = () => {
             const entry = request.result;
             if (entry && entry.blob && entry.blob.size &&
-                entry.blob.size <= MAX_ENTRY_BYTES) found.push({key, blob: entry.blob});
+                entry.blob.size <= MAX_ENTRY_BYTES) found.push({key, blob: entry.blob, stored: entry});
           };
         }
         tx.oncomplete = () => resolve(found);
@@ -172,6 +172,18 @@ export class ArtworkCache {
         tx.onerror = () => resolve([]);
       } catch (_) { resolve([]); }
     });
+    // Update disk LRU once per day at most, in one background transaction.
+    // Rehydrated artwork is actively used and should not be evicted first just
+    // because it bypasses resolve()'s single-item read/touch path.
+    const now = this.now();
+    const stale = rows.filter(row => now - (Number(row.stored.used) || 0) > 86400000);
+    if (stale.length) {
+      try {
+        const tx = db.transaction('images', 'readwrite');
+        const store = tx.objectStore('images');
+        stale.forEach(row => store.put({...row.stored, used: now}));
+      } catch (_) { /* Persistence is optional. */ }
+    }
     // The image decoder can fail or be slow on older webOS versions. Never
     // block the screen indefinitely waiting for a malformed cached image.
     const decoding = rows.map(row => {
