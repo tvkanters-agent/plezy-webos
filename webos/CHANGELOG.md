@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.2.9 — Remember sidebar focus
+
+- Return to the last focused navigation destination when pressing Left from the main content area, including cast rows.
+- Default to Home before a sidebar item has been focused, or when the remembered destination is unavailable.
+- Preserve focus history through sidebar re-renders and cover the behavior with browser regression tests.
+
+
 ## 1.2.1 — Stable cast heading while loading
 
 - Reserve the cast member's title-count line using the same text metrics as the eventual count, with no fixed line-height or pixel reservation.
