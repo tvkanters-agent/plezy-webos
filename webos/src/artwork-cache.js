@@ -2,7 +2,7 @@
 // Bounded artwork cache for Chromium 53 / webOS 4.x.
 // In-memory object URLs keep recently decoded frames available across routes;
 // IndexedDB stores compressed image blobs across app launches.
-import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
+import {diskPressure, evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
 export const ARTWORK_DISK_BYTES = 768 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
@@ -255,7 +255,11 @@ export class ArtworkCache {
     });
     try {
       await write();
-      if (++this.writes % 96 === 0) this.prune().catch(() => {});
+      if (++this.writes % 96 === 0) {
+        diskPressure(1024 * 1024 * 1024).then(pressure => {
+          if (pressure) this.prune().catch(() => {});
+        }).catch(() => {});
+      }
     } catch (_) {
       // Quota can be much smaller on older LG TVs. Evict aggressively once,
       // then let normal image loading continue even if storage still fails.
