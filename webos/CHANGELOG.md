@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.5.5 — Faster parallel artwork loading
+
+- Raise cold-artwork concurrency from two to six, matching Plezy's native full-performance image request limit.
+- Prioritize currently visible posters over nearby prefetch images; preserve existing cache-hit, disk prewarm and offscreen deferral behavior.
+- Keep a bounded queue and regression coverage for request limits and cached image loading while downloads are stalled.
+
 ## 1.5.4 — Plezy On Deck episode captions
 
 - Identify Plex Continue Watching hubs as On Deck, including global hub results and fallback shelf results.

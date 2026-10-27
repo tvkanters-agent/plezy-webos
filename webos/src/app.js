@@ -826,9 +826,11 @@ function card(item) {
   return node;
 }
 // Flutter's sliver-based library lists inflate artwork near the viewport.
- // Chromium 53 ignores <img loading="lazy">, so queue only visible posters
- // (with one screen of prefetch) instead of decoding all 60 per library page.
-const MAX_ARTWORK_IN_FLIGHT = 2;
+// Chromium 53 ignores <img loading="lazy">, so queue only visible posters
+// and their nearby prefetch region instead of decoding entire library pages.
+// Match native Plezy's full-tier six-request limit instead of two; the browser
+// and media server may still enforce stricter limits.
+const MAX_ARTWORK_IN_FLIGHT = 6;
 let posterFrame = 0, artworkInFlight = 0;
 // A loading slot becoming free must not remeasure all offscreen images.
 // Rebuild geometry only on scroll or DOM layout changes.
@@ -891,14 +893,19 @@ function loadVisiblePosters() {
     posterCandidates = [];
     const view = main.getBoundingClientRect();
     const images = main.querySelectorAll('img[data-poster-src]');
+    const visible = [], nearby = [];
     // Read all geometry before writing src/classes, and only when the viewport
     // or card layout changed. Finishing a download reuses this measured queue.
+    // On-screen cards take priority over neighboring prefetch cards in DOM order.
     for (let i = 0; i < images.length; i++) {
       const img = images[i], rect = img.getBoundingClientRect();
       if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
           rect.right < view.left - 180 || rect.left > view.right + 180) continue;
-      posterCandidates.push(img);
+      const onScreen = rect.bottom > view.top && rect.top < view.bottom &&
+        rect.right > view.left && rect.left < view.right;
+      (onScreen ? visible : nearby).push(img);
     }
+    posterCandidates = visible.concat(nearby);
   }
   const ready = posterCandidates;
   posterCandidates = [];
@@ -1013,7 +1020,7 @@ function poster(item, options = {}) {
 }
 // Page preparation is disk-only. Cached artwork becomes decoded memory hits
 // before cards are inserted, including across full app restarts. Uncached art
-// still loads lazily through the existing two-slot network queue and fades in.
+// still loads lazily through the bounded network queue and fades in.
 async function prewarmPosters(items, sourceApi = api, options = {}) {
   // Prewarm only the opening viewport and two adjacent rows, as Plezy's
   // sliver prefetch does. The rest is decoded on demand by the scroll queue.
