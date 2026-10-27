@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.5.0 — Port Plezy skip markers and playback controls
+
+- Port Plex intro/credits markers, nonstandard marker classification and chapter-title fallback with the same matching rules and false-positive safeguards as original Plezy.
+- Port Jellyfin native intro/outro media-segment lookup with chapter fallback; use chapter fallback directly on Emby and older servers.
+- Match Plezy's separate Off, Button and Auto settings for introductions and credits, the configurable countdown and chapter-pattern preferences.
+- Use Plezy's floating skip prompt, progress countdown, 7-second inactivity dismissal and remote-control focus handling. Preserve seek/progress reporting and finalize end-of-title credits through completion rather than an unreliable EOF seek.
+- Cover native/chapter marker precedence, pattern matching, TV playback, auto-skip cancellation, decoder resume and Chromium 53 compatibility with automated tests. TV hardware validation is still required.
+
 ## 1.4.4 — Reuse cached content without navigation blanks
 
 - Separate compressed artwork retention from decoded bitmap eviction; reserve room for current scrolling alongside landing pages.

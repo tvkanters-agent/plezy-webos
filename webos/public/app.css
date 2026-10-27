@@ -650,9 +650,10 @@ main.has-alpha-bar { padding-right:56px; }
 #player .player-skip .skip-progress { position:absolute; left:0; top:0; bottom:0;
   width:0; background:rgba(80,80,80,.16); pointer-events:none; }
 #player .player-skip .skip-label, #player .player-skip svg { position:relative; }
+#player .player-skip svg { margin-left:8px; }
 #player .player-skip svg { width:20px; height:20px; flex:0 0 20px; }
 .skip-pref-row { display:flex; align-items:center; gap:12px; margin:12px 0; }
-.skip-pref-row select, .skip-pref-row input { color:inherit; background:#242731;
+.skip-pref-row select, .skip-pref-row input { margin-left:12px; color:inherit; background:#242731;
   border:1px solid #626670; border-radius:8px; padding:9px; font-size:16px; }
 .skip-pref-row input[type=text] { flex:1; min-width:0; }
 .skip-pref-row input[type=number] { width:84px; }

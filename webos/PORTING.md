@@ -207,3 +207,28 @@ restart detail reuse and background changes, cached artwork behind blocked
 network slots, session Home behavior and frame-by-frame cached navigation.
 Browser simulations and Chromium 53 bundle validation do not establish physical
 LG TV disk latency, decoder behavior or server CORS support.
+
+### Skip intro, outro and credits markers
+
+The webOS marker pipeline translates `MediaMarker` and
+`PlaybackExtras.withChapterFallback` from `lib/media/media_source_info.dart`,
+including the same intro/credits regex defaults, 180-second synthetic intro cap,
+75%-of-chapter-timeline minimum for synthetic credits, Plex-marker precedence,
+and the chapter-fallback override. Jellyfin first attempts
+`/MediaSegments/{itemId}` as in `lib/services/jellyfin_client/parts/playback.dart`;
+Emby and older Jellyfin servers use chapter names instead. Segment failure
+does not stop video playback.
+
+`Player` translates `video_controls/parts/markers.dart` and
+`widgets/skip_marker_button.dart`: off/button/auto modes per marker kind,
+5-second default countdown, cancellation on user remote input, 7-second
+dismissal, prompt focus, and a floating white progress button independent of
+the playback chrome. The browser video `timeupdate` / `loadeddata` events
+stand in for the Flutter MPV position and first-frame listeners. Near-EOF
+credits trigger title completion rather than seeking to EOF; the original
+"Next episode" prompt cannot be invoked because webOS has no equivalent
+episode queue yet. Remote/decoder timing and native media-segment transport
+on physical LG TVs remain hardware-verification tasks.
+
+Unit tests cover parser and fallback precedence and browser tests cover
+appearance, manual/automatic skip, preferences and remote cancellation.
