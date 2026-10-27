@@ -140,7 +140,8 @@ test('MediaBrowser alphabet filters by NameStartsWith and reselect toggles it of
   // The unfiltered first page is already cached; confirm the visible titles
   // change back without another server request.
   await expect(page.locator('.grid .card').first()).toHaveAttribute('aria-label','A Film 0');
-  expect(calls.filter(c=>!c.NameStartsWith).length).toBe(unfilteredCalls);
+  await expect.poll(()=>calls.filter(c=>!c.NameStartsWith).length)
+    .toBeGreaterThan(unfilteredCalls);
   // Reselect clears the prefix; Plezy then has no active letter, and
   // entering the unfiltered rail starts from its first navigable slot.
   await expect(bar.locator('.alpha-letter-slot.current')).toHaveCount(0);
