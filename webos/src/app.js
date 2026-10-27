@@ -711,7 +711,7 @@ async function go(next, remember = true) {
   // Re-selecting an active sidebar destination leaves its view untouched.
   if ((next.type === 'home' && route.type === 'home' &&
        catalogCache.peek('home', {allowExpired:true})) ||
-      (rootKey(next) && rootKey(next) === rootKey(route) && next.type !== 'library' && !next.forceRefresh))
+      (rootKey(next) && rootKey(next) === rootKey(route) && !['home','library'].includes(next.type) && !next.forceRefresh))
     return;
   if (next.type === 'library' && route.type === 'library' &&
       next.library.id === route.library.id && (next.view || 'browse') === (route.view || 'browse') &&
