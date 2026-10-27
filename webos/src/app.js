@@ -739,65 +739,125 @@ function episodeCard(item) {
   return node;
 }
 async function paginated(loader, currentRevision, options = {}) {
-  // Plezy loads sparse pages automatically as the grid approaches the viewport.
-  // There is no manually activated "Load more" button.
-  let start = 0, loading = false, completed = false;
+  // The first page may be a persisted snapshot. Refresh callbacks replace
+  // only the grid, preserving focus and scroll; unchanged pages never repaint.
+  let start = 0, loading = false, completed = false, listening = false;
+  const loadedPages = new Map();
   const grid = options.grouped ? el('div', undefined, 'collection-sections') :
     options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
   const sentinel = el('div', undefined, 'page-sentinel');
   const errorMessage = el('p', '', 'error');
   errorMessage.setAttribute('role', 'alert');
-  // Keep an explicit recovery action only for failed requests. Normal
-  // pagination remains automatic, like upstream Plezy.
   const retry = button('Retry loading', () => load(), 'library-retry');
   retry.hidden = true;
   main.append(grid, sentinel, errorMessage, retry);
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
+  function addPage(target, page) {
+    const fragment = document.createDocumentFragment();
+    if (options.grouped) {
+      let lastSection = target.lastElementChild;
+      for (const group of page.groups) {
+        if (!group.items.length) continue;
+        if (!lastSection || lastSection.dataset.libraryId !== String(group.libraryId)) {
+          lastSection = el('section', undefined, 'collection-library-section');
+          lastSection.dataset.libraryId = String(group.libraryId);
+          lastSection.append(el('h2', group.libraryTitle, 'detail-children-title'),
+            cards([], true));
+          fragment.appendChild(lastSection);
+        }
+        const cardsFragment = document.createDocumentFragment();
+        group.items.forEach(item => cardsFragment.appendChild(card(item)));
+        lastSection.querySelector('.grid').appendChild(cardsFragment);
+      }
+    } else {
+      page.items.forEach(item =>
+        fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+    }
+    target.appendChild(fragment);
+  }
+  function repaintPages() {
+    const oldFocus = grid.contains(document.activeElement) ?
+      document.activeElement.dataset.focus : null;
+    const scroll = main.scrollTop;
+    // Build the complete replacement off-DOM; never reveal incomplete rows
+    // or replay entrance animation when the server returns updated metadata.
+    const fresh = el('div');
+    for (const page of loadedPages.values()) addPage(fresh, page);
+    const fragment = document.createDocumentFragment();
+    while (fresh.firstChild) fragment.appendChild(fresh.firstChild);
+    grid.textContent = '';
+    grid.appendChild(fragment);
+    if (!grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
+    main.scrollTop = scroll;
+    if (oldFocus) {
+      const selected = Array.from(grid.querySelectorAll('[data-focus]')).find(
+        node => node.dataset.focus === oldFocus);
+      if (selected) focusWithoutJump(selected, false);
+    }
+    schedulePosters();
+  }
+  function listen() {
+    if (listening) return;
+    listening = true;
+    main.addEventListener('scroll', onScroll);
+    if (observer) observer.observe(sentinel);
+  }
+  function cleanup() {
+    if (!listening) return;
+    listening = false;
+    main.removeEventListener('scroll', onScroll);
+    if (observer) observer.disconnect();
+  }
+  function watchFresh(offset, initialPage, pending) {
+    if (!pending) return;
+    pending.then(async update => {
+      if (!update || !update.changed || currentRevision !== revision ||
+          !grid.isConnected || !loadedPages.has(offset)) return;
+      await prewarmPosters(update.value.items, api,
+        options.episodes ? {landscape:true} : {});
+      if (currentRevision !== revision || !grid.isConnected ||
+          !loadedPages.has(offset)) return;
+      loadedPages.set(offset, update.value);
+      // A changed page length invalidates offsets of its successors.
+      // Discard those pages and load them again from the correct offset.
+      if (initialPage.items.length !== update.value.items.length) {
+        for (const key of Array.from(loadedPages.keys()))
+          if (key > offset) loadedPages.delete(key);
+      }
+      let next = 0;
+      for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
+      start = next;
+      completed = !update.value.items.length || start >= update.value.total;
+      repaintPages();
+      if (completed) cleanup();
+      else { listen(); requestAnimationFrame(check); }
+    }).catch(() => { /* Offline updates keep the saved view usable. */ });
+  }
   async function load() {
     if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
     try {
-      const page = options.initialPage && start === 0 ? options.initialPage : await loader(start);
+      const offset = start;
+      const response = options.initialPage && start === 0
+        ? options.initialPage : await loader(start);
       options.initialPage = null;
+      const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
+        ? response.value : response;
+      const fresh = response && response.fresh;
       if (currentRevision !== revision || !grid.isConnected) return;
       await prewarmPosters(page.items, api, options.episodes ? {landscape:true} : {});
       if (currentRevision !== revision || !grid.isConnected) return;
-      // Build the page off-DOM, then commit it in one operation. Yielding
-      // every eight cards made previously visited libraries visibly appear
-      // row-by-row even when every poster was already decoded in memory.
-      // The viewport loader still prevents decoding offscreen artwork.
-      const fragment = document.createDocumentFragment();
-      if (options.grouped) {
-        // A library heading belongs to its own grid, not to an arbitrary
-        // pagination page. Subsequent pages append to that grid unchanged.
-        let lastSection = grid.lastElementChild;
-        for (const group of page.groups) {
-          if (!group.items.length) continue;
-          if (!lastSection || lastSection.dataset.libraryId !== String(group.libraryId)) {
-            lastSection = el('section', undefined, 'collection-library-section');
-            lastSection.dataset.libraryId = String(group.libraryId);
-            lastSection.append(el('h2', group.libraryTitle, 'detail-children-title'),
-              cards([], true));
-            fragment.appendChild(lastSection);
-          }
-          const cardsFragment = document.createDocumentFragment();
-          group.items.forEach(item => cardsFragment.appendChild(card(item)));
-          lastSection.querySelector('.grid').appendChild(cardsFragment);
-        }
-      } else {
-        page.items.forEach(item =>
-          fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
-      }
       if (start === 0) fadeDelayedContent(grid, startedAt);
-      grid.appendChild(fragment);
-      schedulePosters();
+      addPage(grid, page);
+      loadedPages.set(offset, page);
       start += page.items.length;
       completed = !page.items.length || start >= page.total;
       if (completed) cleanup();
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
       schedulePosters();
+      watchFresh(offset, page, fresh);
     } catch (error) {
       if (currentRevision === revision && grid.isConnected) {
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
@@ -805,10 +865,8 @@ async function paginated(loader, currentRevision, options = {}) {
       }
     } finally {
       loading = false;
-      if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent) {
-        // Let the DOM paint before measuring, and keep filling short libraries.
+      if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
         requestAnimationFrame(check);
-      }
     }
   }
   function check() {
@@ -819,15 +877,9 @@ async function paginated(loader, currentRevision, options = {}) {
     if (rect.top <= pane.bottom + pane.height * 0.8) load();
   }
   const onScroll = () => check();
-  main.addEventListener('scroll', onScroll);
   const observer = typeof IntersectionObserver !== 'undefined'
     ? new IntersectionObserver(check, {root: main, rootMargin: '700px'}) : null;
-  if (observer) observer.observe(sentinel);
-  const cleanup = () => {
-    main.removeEventListener('scroll', onScroll);
-    if (observer) observer.disconnect();
-  };
-  // Destroy the observer once a different page replaces the grid.
+  listen();
   await load();
   if (completed) cleanup();
   else requestAnimationFrame(check);
