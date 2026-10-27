@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from '../src/cache-budget.js';
+import {diskPressure, evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from '../src/cache-budget.js';
 
 test('thousands of small entries remain cached while total bytes fit', () => {
   const rows = Array.from({length: 20000}, (_, i) =>
@@ -26,4 +26,8 @@ test('quota retry can reclaim disk space when actual quota is smaller than the f
   assert.equal(quotaRecoveryTarget(100,1000,10),75);
   assert.equal(quotaRecoveryTarget(100,1000,50),50);
   assert.equal(quotaRecoveryTarget(10,1000,32),0);
+});
+
+test('storage quota checks are optional on older webOS Chromium engines', async () => {
+  assert.equal(await diskPressure(1024*1024*1024),false);
 });
