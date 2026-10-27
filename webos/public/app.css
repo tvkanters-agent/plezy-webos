@@ -636,3 +636,23 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 main.has-alpha-bar { padding-right:56px; }
 .alpha-window-grid { margin-right:0; }
 .alpha-window-spacer { width:100%; padding:0; margin:0; pointer-events:none; }
+
+/* Plezy SkipMarkerButton: floating tonal prompt, independently visible when
+   transport chrome hides; shared square radius and progress tint. */
+#player .player-skip { position:absolute; z-index:7; right:24px; bottom:24px;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:12px 16px; min-height:44px; border:0; border-radius:8px;
+  font-size:16px; font-weight:600; color:#000; background:rgba(255,255,255,.9);
+  box-shadow:0 2px 8px rgba(0,0,0,.3); overflow:hidden; }
+#player .player-skip[hidden] { display:none; }
+#player .player-skip.with-chrome { bottom:115px; }
+#player .player-skip:focus { outline:3px solid #fff; outline-offset:3px; background:#fff; }
+#player .player-skip .skip-progress { position:absolute; left:0; top:0; bottom:0;
+  width:0; background:rgba(80,80,80,.16); pointer-events:none; }
+#player .player-skip .skip-label, #player .player-skip svg { position:relative; }
+#player .player-skip svg { width:20px; height:20px; flex:0 0 20px; }
+.skip-pref-row { display:flex; align-items:center; gap:12px; margin:12px 0; }
+.skip-pref-row select, .skip-pref-row input { color:inherit; background:#242731;
+  border:1px solid #626670; border-radius:8px; padding:9px; font-size:16px; }
+.skip-pref-row input[type=text] { flex:1; min-width:0; }
+.skip-pref-row input[type=number] { width:84px; }

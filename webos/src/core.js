@@ -88,13 +88,22 @@ export function readState(storage) {
     return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
       servers, active: typeof state.active === 'string' ? state.active : '',
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
+      skipIntroMode: ['off','button','auto'].includes(state.skipIntroMode) ? state.skipIntroMode : 'button',
+      skipCreditsMode: ['off','button','auto'].includes(state.skipCreditsMode) ? state.skipCreditsMode : 'button',
+      autoSkipDelay: Number.isInteger(state.autoSkipDelay) && state.autoSkipDelay >= 1 && state.autoSkipDelay <= 30
+        ? state.autoSkipDelay : 5,
+      forceSkipMarkerFallback: state.forceSkipMarkerFallback === true,
+      introPattern: typeof state.introPattern === 'string' && state.introPattern.trim() ? state.introPattern : '',
+      creditsPattern: typeof state.creditsPattern === 'string' && state.creditsPattern.trim() ? state.creditsPattern : '',
       simkl: state.simkl && typeof state.simkl === 'object' ? state.simkl : null,
       mdblistApiKey: typeof state.mdblistApiKey==='string' ? state.mdblistApiKey : '',
       librariesHidden: state.librariesHidden === true,
       sidebarCollapsed: state.sidebarCollapsed === true,
       hiddenLibraryIds: Array.isArray(state.hiddenLibraryIds)
         ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : []};
-  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: []}; }
+  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', skipIntroMode: 'button', skipCreditsMode: 'button',
+    autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
+    simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: []}; }
 }
 export function saveState(storage, state) {
   storage.setItem('plezy.webos', JSON.stringify(state));

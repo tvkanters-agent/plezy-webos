@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {clamp, time} from './core.js';
 export class Player {
-  constructor(root, notify, onClose, tracker = null) {
+  constructor(root, notify, onClose, tracker = null, preferences = () => ({})) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
+    this.preferences = preferences;
+    this.skipButton = root.querySelector('[data-action="skip"]');
+    this.marker = null; this.hasFirstFrame = false;
+    this.skipDismissed = false; this.skipTimer = null; this.skipDismissTimer = null;
+    this.autoSkipProgress = 0; this.skipCountdownStarted = 0;
     this.video = root.querySelector('video');
     this.controls = root.querySelector('.controls');
     this.sheet = root.querySelector('.player-sheet');
@@ -23,6 +28,7 @@ export class Player {
       this.startAfterInitialSeek();
     });
     this.video.addEventListener('loadeddata', () => {
+      if (!this.initialSeekPending) { this.hasFirstFrame = true; this.update(); }
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
@@ -35,6 +41,8 @@ export class Player {
       this.status.textContent = '';
       this.resume();
       this.startAfterInitialSeek();
+      if (!this.initialSeekPending && this.video.readyState >= 2) this.hasFirstFrame = true;
+      this.update();
       if(!this.initialSeekPending) this.showBuffering(false);
       this.report('playing');
       this.track('start');
@@ -42,7 +50,7 @@ export class Player {
       this.reveal();
       // Video.load() and decoder buffering may move focus to <body>.
       // Restore the active transport control, but not over user choices.
-      if (this.controls.contains(document.activeElement)) return;
+      if (this.controls.contains(document.activeElement) || document.activeElement === this.skipButton) return;
       if (this.root.contains(document.activeElement) &&
           document.activeElement !== this.video && document.activeElement !== this.root) return;
       if (!this.controls.classList.contains('hidden-controls'))
@@ -70,7 +78,8 @@ export class Player {
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
     root.querySelector('[data-action="stop"]').onclick = () => this.close();
-    root.querySelector('[data-action="skip"]').onclick = () => { if (this.marker) this.seekTo(this.marker.end); };
+    this.skipButton.onclick = () => this.activateSkipMarker();
+    root.addEventListener('pointerdown', () => this.cancelAutoSkipFromInteraction());
     this.seekBar = root.querySelector('[data-action="seek"]');
     this.scrubbing = false;
     this.seekBar.addEventListener('input', () => {
@@ -107,6 +116,107 @@ export class Player {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
   }
   get active() { return !this.root.hidden; }
+  skipMode(marker) {
+    const prefs = this.preferences();
+    return marker?.type === 'credits' ? prefs.skipCreditsMode || 'button'
+      : prefs.skipIntroMode || 'button';
+  }
+  cancelSkipTimers() {
+    clearInterval(this.skipTimer); clearTimeout(this.skipDismissTimer);
+    this.skipTimer = null; this.skipDismissTimer = null;
+    this.autoSkipProgress = 0;
+  }
+  clearSkipMarker() {
+    this.cancelSkipTimers();
+    this.marker = null; this.skipDismissed = false;
+    if (document.activeElement === this.skipButton)
+      (this.controls.classList.contains('hidden-controls') ? this.video :
+        this.root.querySelector('[data-action="pause"]')).focus();
+    this.skipButton.hidden = true;
+  }
+  startSkipDismissTimer() {
+    clearTimeout(this.skipDismissTimer);
+    this.skipDismissTimer = setTimeout(() => {
+      if (!this.marker || !this.active) return;
+      this.skipDismissed = true;
+      this.renderSkipMarker();
+    }, 7000);
+  }
+  cancelAutoSkipFromInteraction() {
+    if (!this.skipTimer) return false;
+    clearInterval(this.skipTimer); this.skipTimer = null;
+    this.autoSkipProgress = 0;
+    if (this.marker && !this.skipDismissed) this.startSkipDismissTimer();
+    this.renderSkipMarker();
+    return true;
+  }
+  startAutoSkip(marker) {
+    const delay = Number(this.preferences().autoSkipDelay) || 5;
+    if (this.skipMode(marker) !== 'auto' || delay <= 0) {
+      this.startSkipDismissTimer(); return;
+    }
+    this.skipCountdownStarted = Date.now();
+    this.skipTimer = setInterval(() => {
+      if (!this.active || this.marker !== marker) { this.cancelSkipTimers(); return; }
+      this.autoSkipProgress = clamp((Date.now() - this.skipCountdownStarted) / (delay * 1000), 0, 1);
+      if (this.autoSkipProgress >= 1) {
+        clearInterval(this.skipTimer); this.skipTimer = null;
+        this.activateSkipMarker(true);
+      } else this.renderSkipMarker();
+    }, 200);
+  }
+  syncSkipMarker(position) {
+    const found = this.hasFirstFrame && this.session
+      ? (this.session.markers || []).find(m => ['intro','credits'].includes(m.type) &&
+        this.skipMode(m) !== 'off' && position >= m.start && position < m.end) : null;
+    if (found !== this.marker) {
+      this.clearSkipMarker();
+      this.marker = found || null;
+      if (found) {
+        this.startAutoSkip(found);
+        // Native Plezy assigns focus on TV only when no sheet or higher
+        // overlay owns the remote. Desktop preview retains current focus.
+        if (this.sheet.hidden && (typeof window.PalmSystem !== 'undefined' ||
+          /web0s|webos|netcast/i.test(navigator.userAgent))) this.skipButton.focus();
+      }
+    }
+    this.renderSkipMarker();
+  }
+  renderSkipMarker() {
+    const marker = this.marker;
+    const chromeVisible = !this.controls.classList.contains('hidden-controls');
+    const visible = !!marker && (!this.skipDismissed || chromeVisible);
+    this.skipButton.hidden = !visible;
+    this.skipButton.classList.toggle('with-chrome', chromeVisible);
+    if (!visible && document.activeElement === this.skipButton)
+      (chromeVisible ? this.root.querySelector('[data-action="pause"]') : this.video).focus();
+    if (!marker) return;
+    const base = marker.type === 'credits' ? 'Skip credits' : 'Skip intro';
+    const delay = Number(this.preferences().autoSkipDelay) || 5;
+    const remaining = this.skipTimer ? Math.max(0, Math.ceil(delay * (1 - this.autoSkipProgress))) : 0;
+    this.skipButton.querySelector('.skip-label').textContent = remaining ? base + ' (' + remaining + ')' : base;
+    this.skipButton.setAttribute('aria-label', base);
+    this.skipButton.querySelector('.skip-progress').style.width =
+      this.skipTimer ? Math.round(this.autoSkipProgress * 100) + '%' : '0%';
+  }
+  activateSkipMarker(auto = false) {
+    if (!this.marker || !this.session || !this.hasFirstFrame) return;
+    const marker = this.marker;
+    this.clearSkipMarker();
+    const duration = this.timelineDuration();
+    // Native Plezy hands end-of-video credits to the completion path rather
+    // than seeking to an EOF that may never report another position update.
+    // WebOS has no Play Next prompt yet, so complete the current title.
+    if (marker.type === 'credits' && duration > 0 && duration - marker.end <= 1) {
+      this.video.pause(); this.close(true);
+    } else this.seekTo(marker.end);
+  }
+  dismissSkipMarker() {
+    if (!this.marker) return;
+    this.cancelSkipTimers();
+    this.skipDismissed = true;
+    this.renderSkipMarker();
+  }
   openSheet(action) {
     const kind = {options:'settings', 'audio-options':'audio',
       'subtitle-options':'subtitle', 'chapter-options':'chapter'}[action];
@@ -179,15 +289,20 @@ export class Player {
     this.scrubbing = false;
     this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
-    this.root.querySelector('[data-action="skip"]').hidden = true; this.marker = null;
+    this.clearSkipMarker(); this.hasFirstFrame = false;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
     this.root.querySelector('[data-action="pause"]').focus();
     let session;
     try {
-      session = await api.playback(item, options);
+      session = await api.playback(item, {...options, skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
+      if (session.markerPromise) session.markerPromise.then(markers => {
+        if (generation !== this.generation || this.session !== session || !markers) return;
+        session.markers = markers;
+        this.update();
+      });
       this.pendingStart = session.start;
       this.initialSeekTarget = Number(session.start) || 0;
       // Keep the spinner until a frame at the requested position is ready.
@@ -286,7 +401,9 @@ export class Player {
     if(this.video.seeking || this.video.readyState<2 ||
        Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
     this.initialSeekPending=false;
+    this.hasFirstFrame = this.video.readyState >= 2;
     this.video.style.visibility='visible';
+    this.update();
     clearTimeout(this.startTimeout);
     this.showBuffering(false);
   }
@@ -295,11 +412,7 @@ export class Player {
   }
   update() {
     const position=this.position();
-    const marker = (this.session?.markers || []).find(m => position >= m.start && position < m.end);
-    const skip = this.root.querySelector('[data-action="skip"]');
-    if (!marker && document.activeElement === skip) this.root.querySelector('[data-action="pause"]').focus();
-    skip.hidden = !marker; skip.textContent = marker?.type === 'credits' ? 'Skip credits' : 'Skip intro';
-    this.marker = marker;
+    this.syncSkipMarker(position);
     const played = position;
     const total = this.timelineDuration();
     this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
@@ -343,6 +456,7 @@ export class Player {
     // Tracking belongs to the viewing, not a particular decoder session. A
     // failed/replaced decoder must still finish the started Simkl viewing.
     if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
+    this.clearSkipMarker(); this.hasFirstFrame = false;
     this.session = null; this.pendingStart = 0;
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
@@ -406,7 +520,8 @@ export class Player {
     this.controls.classList.add('hidden-controls');
     this.root.querySelector('.player-top').classList.add('hidden-controls');
     this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
-    this.video.focus();
+    this.renderSkipMarker();
+    if (document.activeElement !== this.skipButton || this.skipButton.hidden) this.video.focus();
   }
   adjustSeek(delta) {
     this.hideAfterSeek = false;
@@ -475,6 +590,7 @@ export class Player {
     this.controls.classList.remove('hidden-controls');
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
+    this.renderSkipMarker();
     this.hideTimer = setTimeout(() => {
       if (this.session && this.sheet.hidden && !this.video.paused && document.activeElement !== this.seekBar && !['SELECT'].includes(document.activeElement.tagName)) {
         this.hideControls();
@@ -483,6 +599,13 @@ export class Player {
   }
   key(event) {
     const code = event.keyCode;
+    this.cancelAutoSkipFromInteraction();
+    if (document.activeElement === this.skipButton && code === 40) {
+      event.preventDefault(); this.root.querySelector('[data-action="pause"]').focus(); return true;
+    }
+    if (document.activeElement === this.skipButton && [461, 27, 413].includes(code)) {
+      event.preventDefault(); this.dismissSkipMarker(); return true;
+    }
     if (!this.sheet.hidden && [461, 27, 413].includes(code)) {
       event.preventDefault(); this.closeSheet(); return true;
     }
