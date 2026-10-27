@@ -728,5 +728,77 @@ for(const layout of ['grid','flex']) {
     await page.keyboard.press('ArrowDown');
     await expect.poll(()=>page.locator('.grid .card:focus').evaluate(node=>node._gridIndex))
       .toBe(59+columns);
+    // Returning from detail must restore the second occurrence, not the
+    // first card with the same data-focus/title ID.
+    await page.locator('.grid .card[data-focus="59"]').nth(1).click();
+    await expect(page.getByRole('heading',{name:'Title 059'})).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect.poll(()=>page.locator('.grid .card:focus').evaluate(node=>({
+      key:node._gridKey,index:node._gridIndex
+    }))).toEqual({key:JSON.stringify(['59',1]),index:60});
+    // A freshness update removes the first occurrence from page 0 while
+    // retaining the same title at page 60, now occurrence zero.
+    await page.locator('.grid').evaluate(async grid=>{
+      const entries=Array.from({length:60},(_,i)=>({
+        id:String(i),title:'Title '+String(i).padStart(3,'0'),
+        type:'Movie',subtitle:i%3===0?'2020':'',
+        raw:{Id:String(i),Name:'Title '+String(i).padStart(3,'0'),
+          Type:'Movie',ImageTags:{Primary:'art-'+i}}
+      }));
+      entries[59]={id:'replacement-59',title:'Replacement title',type:'Movie',
+        raw:{Id:'replacement-59',Name:'Replacement title',Type:'Movie'}};
+      await grid._applyCatalogUpdate(0,{changed:true,value:{items:entries,total:360}});
+    });
+    await expect(page.locator('.grid .card[data-focus="59"]')).toHaveCount(1);
+    await expect.poll(()=>page.locator('.grid .card:focus').evaluate(node=>({
+      key:node._gridKey,id:node.dataset.focus,index:node._gridIndex
+    }))).toEqual({key:JSON.stringify(['59',0]),id:'59',index:60});
+  });
+}
+
+for(const layout of ['grid','flex']) {
+  test('resizing taller loads newly visible artwork without child-list mutation ('+layout+')',async({page})=>{
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPUsAlgYGBgYmBgYGBgAAAIcgC421576AAAAABJRU5ErkJggg==','base64');
+    await mockLongJellyfinLibrary(page);
+    await page.route('http://media.test/Items/*/Images/Primary**',route=>
+      route.fulfill({body:png,contentType:'image/png'}));
+    await page.setViewportSize({width:1280,height:550});
+    await page.goto('/');
+    if(layout==='flex') await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await expect(page.locator('.grid .card')).toHaveCount(60);
+    const target=await page.locator('main').evaluate(main=>{
+      const view=main.getBoundingClientRect();
+      const img=Array.from(main.querySelectorAll('img[data-poster-src]')).find(node=>{
+        const box=node.getBoundingClientRect();
+        return box.top>view.bottom+230 && box.top<view.bottom+850;
+      });
+      if(!img)return null;
+      window.resizeTargetImage=img;
+      window.resizeTargetCard=img.closest('.card');
+      return {src:img.getAttribute('src'),pending:img.getAttribute('data-poster-src')};
+    });
+    expect(target).not.toBeNull();
+    expect(target.src).toBeNull();
+    expect(target.pending).toBeTruthy();
+    const scroll=await page.locator('main').evaluate(main=>main.scrollTop);
+    await page.setViewportSize({width:1280,height:1550});
+    const resized=await page.evaluate(()=>({
+      connected:window.resizeTargetImage.isConnected,
+      sameCard:window.resizeTargetImage.closest('.card')===window.resizeTargetCard,
+      src:window.resizeTargetImage.getAttribute('src'),
+      pending:window.resizeTargetImage.getAttribute('data-poster-src')
+    }));
+    expect(resized.connected).toBe(true);
+    expect(resized.sameCard).toBe(true);
+    await expect.poll(()=>page.evaluate(()=>{
+      const img=window.resizeTargetImage;
+      return img.getAttribute('src')!==null && img.complete && img.naturalWidth>0;
+    }),{timeout:15000}).toBe(true);
+    expect(await page.locator('main').evaluate(main=>main.scrollTop)).toBe(scroll);
   });
 }
