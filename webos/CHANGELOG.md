@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.4.4 — Reuse cached content without navigation blanks
+
+- Separate compressed artwork retention from decoded bitmap eviction; reserve room for current scrolling alongside landing pages.
+- Let disk artwork bypass blocked download slots and recover persistent downloads after transient server failures.
+- Prepare cached routes before replacing the visible page, including after restart.
+- Persist detail metadata, child lists and cast pages with background revalidation.
+- Keep Home for the session; refresh on restart or invalidation, including Back navigation.
+
+
 ## 1.4.3 — Larger, quota-aware library and artwork caches
 
 - Replace artificial title/page/image-count eviction with byte-aware retention. Catalog disk fallback grows to 256 MiB and artwork to 768 MiB, adapting downward only when the browser reports a smaller quota.
