@@ -200,8 +200,10 @@ for(const layout of ['grid','flex']) {
     await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
     const finalAnchor=await visibleGridAnchor(page);
     expect(finalAnchor).not.toBeNull();
+    // At a responsive breakpoint the first partly visible item can shift
+    // by one logical row while retaining the same nearby scroll anchor.
     expect(Math.abs(finalAnchor.index-altered.index))
-      .toBeLessThan(Math.max(finalAnchor.columns,altered.columns));
+      .toBeLessThanOrEqual(Math.max(finalAnchor.columns,altered.columns));
     // Mixed empty and populated subtitles must not produce uneven row strides.
     const strides=await page.locator('main .grid').evaluate(grid=>{
       const cards=Array.from(grid.querySelectorAll('.card')), rows=[];
