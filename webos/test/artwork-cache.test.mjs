@@ -198,3 +198,27 @@ test('protected landing files cannot starve newly scrolled compressed artwork',(
   assert.equal(cache.peek('scroll'),scrolled);
   assert.ok(cache.memoryBytes<=12);
 });
+
+test('a probed disk miss proceeds directly to network without reading disk again', async () => {
+  let reads=0, fetches=0;
+  const cache=new ArtworkCache({indexedDB:null,
+    urls:{createObjectURL:()=> 'blob:single',revokeObjectURL:()=>{}},
+    fetch:async()=>{fetches++;return new Response(blob());}});
+  cache.read=async()=>{reads++;return null;};
+  assert.equal(await cache.cachedSource('k'),null);
+  assert.equal(await cache.resolve('k','https://art.test/one',true),'blob:single');
+  assert.equal(reads,1);
+  assert.equal(fetches,1);
+});
+
+test('simultaneous poster probes share one disk lookup', async () => {
+  let reads=0, done;
+  const cache=new ArtworkCache({indexedDB:null});
+  cache.read=()=>{reads++;return new Promise(resolve=>{done=resolve;});};
+  const a=cache.cachedSource('same'),b=cache.cachedSource('same');
+  assert.equal(reads,1);
+  done(null);
+  assert.deepEqual(await Promise.all([a,b]),[null,null]);
+  assert.equal(await cache.cachedSource('same'),null);
+  assert.equal(reads,1);
+});

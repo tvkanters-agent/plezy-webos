@@ -37,6 +37,7 @@ export class ArtworkCache {
     this.memoryBytes = 0;
     this.pending = new Map();
     this.diskMisses = new Set();
+    this.diskPending = new Map();
     this.unsupportedOrigins = new Map();
     this.dbPromise = null;
     this.writes = 0;
@@ -349,9 +350,24 @@ export class ArtworkCache {
   async cachedSource(key, persistent = true) {
     const hit = this.peek(key);
     if (hit) return hit;
-    if (!persistent) return null;
-    const stored = await this.read(key);
-    return stored ? this.remember(key, stored.blob) : null;
+    if (!persistent || this.diskMisses.has(key)) return null;
+    // Multiple cards in a shelf can refer to the same poster. Probe it once,
+    // and remember a confirmed miss for the rest of the session.
+    if (this.diskPending.has(key)) return this.diskPending.get(key);
+    const read = this.read(key).then(stored => {
+      if (!stored) {
+        this.diskMisses.add(key);
+        return null;
+      }
+      return this.remember(key, stored.blob);
+    });
+    this.diskPending.set(key, read);
+    read.then(() => {
+      if (this.diskPending.get(key) === read) this.diskPending.delete(key);
+    }, () => {
+      if (this.diskPending.get(key) === read) this.diskPending.delete(key);
+    });
+    return read;
   }
   // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
   resolve(key, url = key, persistent = true) {
@@ -366,12 +382,9 @@ export class ArtworkCache {
   async resolveUncached(key, url, persistent) {
     // Server images without a trustworthy revision may stay in RAM during this
     // app session, but must never survive a restart as stale IndexedDB rows.
-    if (persistent) {
-      const stored = await this.read(key);
-      if (stored) {
-        const src = this.remember(key, stored.blob);
-        if (src) return src;
-      }
+    if (persistent && !this.diskMisses.has(key)) {
+      const src = await this.cachedSource(key);
+      if (src) return src;
     }
     let origin = '';
     try { origin = new URL(url).origin; } catch (_) { return url; }
