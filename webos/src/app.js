@@ -686,7 +686,17 @@ async function prepareNavigation(next, sourceApi) {
 }
 async function go(next, remember = true) {
   const intent = ++navigationIntent, sourceApi = api;
-  try { await prepareNavigation(next, sourceApi); } catch (_) { /* Cache is optional. */ }
+  const destinationKey = rootKey(next);
+  // A detached view already has its decoded images and metadata. Prewarming
+  // IndexedDB on the way to it would needlessly delay the instant tab switch.
+  const readyRoot = destinationKey && (rootSnapshots.get(destinationKey) ||
+    history.find(entry => rootKey(entry.route) === destinationKey));
+  const usableRoot = readyRoot && readyRoot.sourceApi === sourceApi &&
+    readyRoot.snapshot && readyRoot.snapshot.childNodes.length &&
+    (destinationKey !== 'home' || readyRoot.catalogGeneration === catalogCache.generation);
+  if (!usableRoot) {
+    try { await prepareNavigation(next, sourceApi); } catch (_) { /* Cache is optional. */ }
+  }
   if (intent !== navigationIntent || sourceApi !== api) return;
 
   // Re-selecting an active sidebar destination leaves its view untouched.
