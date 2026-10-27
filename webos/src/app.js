@@ -564,15 +564,35 @@ function capturePage(previousPaneFocus = null) {
   const scroll = main.scrollTop;
   const remembered = previousPaneFocus && previousPaneFocus.isConnected &&
     main.contains(previousPaneFocus) ? previousPaneFocus : null;
-  const focused = main.contains(document.activeElement) ?
-    document.activeElement.dataset.focus : remembered ? remembered.dataset.focus : route.focus || null;
+  const active = main.contains(document.activeElement) ? document.activeElement : remembered;
+  const focused = active ? active.dataset.focus : route.focus || null;
+  // Overlapping offset pages may mount two nodes with the same server ID.
+  // Store the occurrence-aware recycler key as well as the title ID so Back
+  // restores the exact card the remote was on, not the first duplicate.
+  const focusKey = active && active._gridKey !== undefined ?
+    active._gridKey : (active ? null : route.focusKey || null);
+  const focusIndex = active && Number.isInteger(active._gridIndex) ?
+    active._gridIndex : (active ? null : route.focusIndex);
   const alphabet = activeAlphabet;
   if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
   forEachPagedGrid(main, node => node._suspendCatalog());
   main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
   while (main.firstChild) snapshot.appendChild(main.firstChild);
-  return {route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
+  return {route:{...route,scroll,focus:focused,focusKey,focusIndex},snapshot,sourceApi:api,alphabet,
     catalogGeneration:catalogCache.generation};
+}
+function snapshotFocus(container, savedRoute) {
+  const candidates = Array.from(container.querySelectorAll('[data-focus]'));
+  if (savedRoute.focusKey != null) {
+    const exact = candidates.find(node => node._gridKey === savedRoute.focusKey);
+    if (exact) return exact;
+  }
+  const matches = candidates.filter(node => node.dataset.focus === savedRoute.focus);
+  if (!matches.length) return null;
+  if (!Number.isInteger(savedRoute.focusIndex)) return matches[0];
+  return matches.reduce((nearest,node) =>
+    Math.abs(node._gridIndex - savedRoute.focusIndex) <
+      Math.abs(nearest._gridIndex - savedRoute.focusIndex) ? node : nearest);
 }
 function cacheRootPage(entry) {
   if (!entry || !entry.snapshot || !entry.snapshot.childNodes.length ||
@@ -669,8 +689,7 @@ function restoreRootPage(entry) {
     activeAlphabet = entry.alphabet;
     activeAlphabet.resume(() => revision === mountedRevision);
   }
-  const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
-    node => node.dataset.focus === route.focus);
+  const focused = snapshotFocus(main,route);
   if (focused) focusWithoutJump(focused, false);
   else focusFirst(main, fromRail ? preferredPaneControl() : null, fromRail);
   schedulePosters();
@@ -810,8 +829,7 @@ function back() {
         activeAlphabet = previous.alphabet;
         activeAlphabet.resume(() => revision === restoredRevision);
       }
-      const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
-        node => node.dataset.focus === route.focus);
+      const focused = snapshotFocus(main,route);
       if (focused) focusWithoutJump(focused, false);
       else focusFirst();
       schedulePosters();
@@ -985,9 +1003,13 @@ function loadVisiblePosters() {
     } else attach(url); // Cast photos deliberately stay out of disk storage.
   }
 }
-function schedulePosters() {
+function schedulePosters(layoutChanged = false) {
+  if (layoutChanged) posterQueueDirty = true;
   if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
 }
+// Changing viewport dimensions can bring already-mounted, previously offscreen
+// posters into view without a scroll event or any child-list mutation.
+window.addEventListener('resize', () => schedulePosters(true));
 main.addEventListener('scroll', () => {
   posterQueueDirty = true;
   schedulePosters();
@@ -1129,7 +1151,8 @@ async function paginated(loader, currentRevision, options = {}) {
   // Keep metadata pages and their cache intact; only bounded poster DOM is
   // recycled. Grouped sections/variable-height episode rows remain unwindowed.
   const windowedGrid = !options.grouped && !options.episodes ? createGridWindow({
-    main, grid, makeCard, focusWithoutJump, schedulePosters
+    main, grid, makeCard, focusWithoutJump,
+    schedulePosters: () => schedulePosters(true)
   }) : null;
   if (windowedGrid) grid._windowedGrid = windowedGrid;
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
