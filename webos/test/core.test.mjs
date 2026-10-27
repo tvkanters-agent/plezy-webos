@@ -180,12 +180,37 @@ test('Plex home falls back to continue watching and recently added when global h
   });
   try {
     const rows=await new Plex(server,'device').home();
-    assert.deepEqual(rows.map(row=>row.title),['Continue watching','Recently added · Movies']);
+    assert.deepEqual(rows.map(row=>row.title),['On Deck','Recently added · Movies']);
     assert.equal(rows[0].items[0].resume,1);
     assert.equal(rows[1].items[0].title,'New film');
     assert.ok(calls.includes('/prefix/library/sections/5/recentlyAdded'));
     assert.ok(!calls.includes('/prefix/library/sections/6/recentlyAdded'));
   }finally{restore();}
+});
+test('Plex home names Continue Watching hubs On Deck without renaming unrelated hubs',async()=>{
+  const restore=mock(async url=>{
+    assert.equal(new URL(url).pathname,'/prefix/hubs');
+    return json({MediaContainer:{Hub:[
+      {title:'Continue Watching',hubIdentifier:'home.continue',Metadata:[
+        {ratingKey:'ep',title:'Pilot',type:'episode',grandparentTitle:'The Series',parentIndex:1,index:2}]},
+      {title:'Recommended For You',key:'/hubs/movies/recommended',Metadata:[
+        {ratingKey:'film',title:'The Film',type:'movie'}]}
+    ]}});
+  });
+  try {
+    const rows=await new Plex(server,'device').home();
+    assert.deepEqual(rows.map(row=>row.title),['On Deck','Recommended For You']);
+    assert.equal(rows[0].items[0].raw.grandparentTitle,'The Series');
+    assert.equal(rows[0].items[0].raw.parentIndex,1);
+    assert.equal(rows[0].items[0].raw.index,2);
+  }finally{restore();}
+});
+test('Plex home recognizes on-deck keys when hub titles differ',async()=>{
+  const restore=mock(async()=>json({MediaContainer:{Hub:[{
+    title:'In Progress',key:'/hubs/continueWatching',Metadata:[{ratingKey:1,title:'Film',type:'movie'}]
+  }]}}));
+  try{assert.equal((await new Plex(server,'device').home())[0].title,'On Deck');}
+  finally{restore();}
 });
 test('Plex home preserves sign-in errors without probing unrelated endpoints',async()=>{
   const calls=[];

@@ -16,6 +16,15 @@ function plexArtworkRevision(path, updatedAt) {
     ? String(updatedAt) : '';
 }
 const FIELDS = 'Overview,MediaSources,MediaStreams,UserData,PrimaryImageAspectRatio';
+// Plezy identifies Plex's Continue Watching / On Deck hub semantically,
+// even when the server supplies a different display title.
+function plexHomeHubTitle(hub) {
+  const title = (hub.title || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const keys = [hub.hubIdentifier, hub.identifier, hub.key, hub.type].filter(Boolean);
+  const onDeck = title === 'continuewatching' || title === 'ondeck' ||
+    keys.some(value => /(?:^|[./_-])(?:continuewatching|ondeck|inprogress|continue)(?=$|[./_-])/i.test(String(value)));
+  return onDeck ? 'On Deck' : hub.title || 'Recommended';
+}
 function plexItem(raw) {
   // WatchedIndicator in upstream shows remaining episodes, not a checkmark
   // until all show/season leaves are watched.
@@ -141,7 +150,7 @@ export class Plex {
     try {
       const data = await this.get('/hubs', {count: 20});
       const rows = ((data.MediaContainer || {}).Hub || []).map(h => ({
-        title: h.title || 'Recommended',
+        title: plexHomeHubTitle(h),
         items: (h.Metadata || []).filter(x => ['movie', 'show', 'season', 'episode'].includes(x.type)).map(plexItem)
       })).filter(row => row.items.length);
       if (rows.length) return rows;
@@ -157,7 +166,7 @@ export class Plex {
       const container = continueResult.value.MediaContainer || {};
       const entries = container.Metadata || (container.Hub || []).reduce((acc, h) => acc.concat(h.Metadata || []), []);
       const items = entries.filter(x => ['movie', 'episode'].includes(x.type)).map(plexItem);
-      if (items.length) rows.push({title: 'Continue watching', items});
+      if (items.length) rows.push({title: 'On Deck', items});
     }
     if (sectionsResult.status === 'fulfilled') {
       // Cap parallel fan-out for users with dozens of libraries.

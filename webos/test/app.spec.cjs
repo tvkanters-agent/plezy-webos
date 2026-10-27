@@ -2055,3 +2055,31 @@ test('returning to a cached library tab retains the focused poster',async({page}
   await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
   await expect(poster).toBeFocused();
 });
+
+test('Plex Home On Deck displays original Plezy episode card captions',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',name:'Plex server',url:'http://plex.test',token:'test-token'}]
+  })));
+  await page.route('http://plex.test/**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{
+      title:'Continue Watching',hubIdentifier:'home.continue',Metadata:[
+        {ratingKey:'ep',type:'episode',title:'Episode Four',grandparentTitle:'Series Title',
+          parentIndex:2,index:4,duration:1800000,viewOffset:200000},
+        {ratingKey:'movie',type:'movie',title:'A Movie',year:2025}]
+    }]}}});
+    if(path==='/library/sections')return route.fulfill({json:{MediaContainer:{Directory:[]}}});
+    return route.fulfill({status:404,json:{}});
+  });
+  await page.goto('/');
+  const row=page.locator('main .shelf').first();
+  await expect(row.locator('h2')).toHaveText('On Deck');
+  const episode=row.locator('.card').first();
+  await expect(episode.locator('strong')).toHaveText('Series Title');
+  await expect(episode.locator('small')).toHaveText('S2 E4 · Episode Four');
+  await expect(episode).toHaveAttribute('aria-label','Series Title, S2 E4 · Episode Four');
+  const movie=row.locator('.card').nth(1);
+  await expect(movie.locator('strong')).toHaveText('A Movie');
+  await expect(movie.locator('small')).toHaveText('2025');
+});
