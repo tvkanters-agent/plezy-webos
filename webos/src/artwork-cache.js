@@ -8,6 +8,19 @@ const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_DISK_ENTRIES = 500;
 const MAX_MEMORY_ENTRIES = 48;
 
+// Plex photo URLs include X-Plex-Version (our app release number); this is
+// unrelated to the server's artwork version and must not bust the disk cache.
+export function artworkCacheKey(url, revision) {
+  if (!revision) return '';
+  try {
+    const normalized = new URL(url);
+    normalized.searchParams.delete('X-Plex-Version');
+    return normalized.href + '|revision=' + encodeURIComponent(revision);
+  } catch (_) {
+    return url + '|revision=' + encodeURIComponent(revision);
+  }
+}
+
 export class ArtworkCache {
   constructor(options = {}) {
     this.factory = options.indexedDB === undefined
