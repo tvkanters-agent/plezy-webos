@@ -33,6 +33,14 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 48px 48px 80px; }
 .eyebrow { text-transform: uppercase; letter-spacing: 3px; color: #a2a5ae; font-size: 15px; margin-bottom: 12px; }
 .intro { max-width: 780px; margin-bottom: 36px; color: #a2a5ae; }
 .shelf { margin-bottom: 36px; }
+/* Soften delayed data at the container level, not individual cached posters. */
+.content-enter { -webkit-animation: content-enter 180ms ease-out both;
+  animation: content-enter 180ms ease-out both; }
+@-webkit-keyframes content-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes content-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .content-enter { -webkit-animation: none; animation: none; }
+}
 .cards { display: flex; overflow-x: auto; padding: 10px 8px 20px; margin-left: -8px; -webkit-overflow-scrolling: touch; }
 /* Flutter shelves on TV do not show desktop Chromium's miniature scrollbars.
    Keep the row scrollable to D-pad and Magic Remote wheel input. */

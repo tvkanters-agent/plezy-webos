@@ -4,6 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
+import {fadeDelayedContent} from './content-entrance.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
@@ -473,6 +474,8 @@ function go(next, remember = true) {
       document.activeElement.dataset.focus : null;
     const alphabet = activeAlphabet;
     if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
+    // A restored page must not replay the previous content entrance animation.
+    main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
     while (main.firstChild) snapshot.appendChild(main.firstChild);
     history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet});
     if (history.length > 8) {
@@ -734,6 +737,7 @@ async function paginated(loader, currentRevision, options = {}) {
   const retry = button('Retry loading', () => load(), 'library-retry');
   retry.hidden = true;
   main.append(grid, sentinel, errorMessage, retry);
+  const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   async function load() {
     if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
     loading = true;
@@ -752,6 +756,7 @@ async function paginated(loader, currentRevision, options = {}) {
       const fragment = document.createDocumentFragment();
       page.items.forEach(item =>
         fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+      if (start === 0) fadeDelayedContent(grid, startedAt);
       grid.appendChild(fragment);
       schedulePosters();
       start += page.items.length;
@@ -812,22 +817,26 @@ async function render() {
     else if (route.type === 'simkl') { await simklSignIn(); return; }
     else if (route.type === 'home') {
       title('Your next watch', activeServer().name);
+      const contentStartedAt = Date.now();
       // Keep the first frame quiet instead of flashing a temporary text
       // message while the home shelves are fetched.
       const rows = await api.home(); if (!valid()) return;
       await prewarmShelves(rows);
       if (!valid()) return;
       if (!rows.length) {
-        main.append(el('p', 'No recommendations yet. Browse a library to find something to watch.'));
-        main.append(button('Browse libraries', () => go({type: 'libraries'}), 'primary'));
+        const empty = el('section');
+        empty.append(el('p', 'No recommendations yet. Browse a library to find something to watch.'),
+          button('Browse libraries', () => go({type: 'libraries'}), 'primary'));
+        main.append(fadeDelayedContent(empty, contentStartedAt));
       }
-      rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(section); });
+      rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(fadeDelayedContent(section, contentStartedAt)); });
     } else if (route.type === 'libraries') {
       title('Libraries', activeServer().name);
+      const contentStartedAt = Date.now();
       const libraries = libraryCacheFor === api ? libraryCache : await api.libraries(); if (!valid()) return;
       if (libraryCacheFor !== api) { libraryCacheFor = api; libraryCache = libraries; navigation(); }
-      if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
-      else main.append(el('p', 'Select a library from the navigation rail to browse its recommended titles, collections and playlists.', 'muted'));
+      if (!libraries.length) main.append(fadeDelayedContent(el('p', 'No video libraries are available for this account.'), contentStartedAt));
+      else main.append(fadeDelayedContent(el('p', 'Select a library from the navigation rail to browse its recommended titles, collections and playlists.', 'muted'), contentStartedAt));
     } else if (route.type === 'library') {
       libraryRenderRevision = currentRevision;
       title(route.library.title); const currentApi = api;
@@ -841,13 +850,16 @@ async function render() {
         tabs.append(control);
       });
       main.append(tabs);
+      const contentStartedAt = Date.now();
       if (currentApi instanceof Plex && view === 'collections') {
-        await paginated(start => currentApi.collections(route.library.id, start), currentRevision);
+        await paginated(start => currentApi.collections(route.library.id, start), currentRevision,
+          {startedAt:contentStartedAt});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
-        await paginated(start => currentApi.playlists(start), currentRevision);
+        await paginated(start => currentApi.playlists(start), currentRevision,
+          {startedAt:contentStartedAt});
         if (valid()) focusFirst();
         return;
       }
@@ -856,9 +868,9 @@ async function render() {
         if (!valid()) return;
         await prewarmShelves(shelves, currentApi);
         if (!valid()) return;
-        if (!shelves.length) main.append(el('p','No recommendations for this library.', 'muted'));
+        if (!shelves.length) main.append(fadeDelayedContent(el('p','No recommendations for this library.', 'muted'), contentStartedAt));
         shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
-          section.append(el('h2', shelf.title), cards(shelf.items)); main.append(section); });
+          section.append(el('h2', shelf.title), cards(shelf.items)); main.append(fadeDelayedContent(section, contentStartedAt)); });
         schedulePosters();
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
@@ -925,7 +937,7 @@ async function render() {
         ]);
         if (!valid()) return;
         if (pageResult.error) {
-          await paginated(start => libraryLoader(start), currentRevision);
+          await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
         } else if (showPlexAlphaBar(pageResult.total, characters, selected)) {
           await prewarmPosters(pageResult.items, currentApi);
           if (!valid()) return;
@@ -934,10 +946,12 @@ async function render() {
             main, firstPage: pageResult, characters,
             loader: (start, count) => libraryLoader(start, count),
             card, schedulePosters, focusWithoutJump, isActive: valid,
+            startedAt:contentStartedAt,
             prewarmPage: items => prewarmPosters(items, currentApi)
           });
         } else {
-          await paginated(start => libraryLoader(start), currentRevision, {initialPage: pageResult});
+          await paginated(start => libraryLoader(start), currentRevision,
+            {initialPage:pageResult, startedAt:contentStartedAt});
         }
       } else if (currentApi instanceof Jellyfin) {
         // Native MediaBrowserAlphaBarStrategy uses a synthetic 27-letter
@@ -945,20 +959,22 @@ async function render() {
         const firstPage = await libraryLoader(0).catch(error => ({error}));
         if (!valid()) return;
         if (firstPage.error) {
-          await paginated(start => libraryLoader(start), currentRevision);
+          await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
         } else if (firstPage.total >= 80 || route.alpha) {
           main.classList.add('has-alpha-bar');
-          await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
+          await paginated(start => libraryLoader(start), currentRevision,
+            {initialPage:firstPage, startedAt:contentStartedAt});
           if (!valid()) return;
           activeAlphabet = mountMediaBrowserAlphabet({
             main, selected:route.alpha, focusWithoutJump,
             onPrefixChange: next => go({...route, alpha:next, alphaFocus:true}, false)
           });
         } else {
-          await paginated(start => libraryLoader(start), currentRevision, {initialPage:firstPage});
+          await paginated(start => libraryLoader(start), currentRevision,
+            {initialPage:firstPage, startedAt:contentStartedAt});
         }
       } else {
-        await paginated(start => libraryLoader(start), currentRevision);
+        await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
       }
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {
@@ -982,6 +998,7 @@ async function render() {
       const facts=el('div',undefined,'actor-facts');
       const bio=el('div',undefined,'actor-biography');
       header.append(facts,bio);main.append(header);
+      const contentStartedAt=Date.now();
       // The catalog lookup must survive unavailable Plex Discover details.
       currentApi.personDetails(route.id).then(details=>{
         if(!valid()||!header.isConnected||!details)return;
@@ -999,11 +1016,13 @@ async function render() {
             label==='Birthplace'?value:formatDate(value)));
           facts.append(line);
         }
+        if(facts.childNodes.length)fadeDelayedContent(facts,contentStartedAt);
         if(details.biography){
           const text=el('p',details.biography,'actor-biography-text');
           const long=details.biography.length>320;
           if(long)text.classList.add('collapsed');
           bio.append(text);
+          fadeDelayedContent(bio,contentStartedAt);
           if(long){
             const expand=button('Show more',()=>{
               const open=text.classList.toggle('collapsed');
@@ -1016,10 +1035,12 @@ async function render() {
       }).catch(()=>{});
       await paginated(async start=>{
         const page=await currentApi.personMedia(route.id,start,route.actor);
-        if(!start&&valid()&&header.isConnected) count.textContent=
-          page.total+' '+(page.total===1?'title':'titles');
+        if(!start&&valid()&&header.isConnected){
+          fadeDelayedContent(count,contentStartedAt);
+          count.textContent=page.total+' '+(page.total===1?'title':'titles');
+        }
         return page;
-      },currentRevision);
+      },currentRevision,{startedAt:contentStartedAt});
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const item = await api.detail(route.id, route.kind); if (!valid()) return;
@@ -1336,7 +1357,8 @@ async function render() {
         main.append(heading);
         const currentApi = api;
         await paginated(start => currentApi.children(item.id, start, item.type),
-          currentRevision, {episodes: item.type === 'season' || item.type === 'Season'});
+          currentRevision, {episodes: item.type === 'season' || item.type === 'Season',
+            startedAt:Date.now()});
       }
       // Port CastMemberStrip: one locked-focus D-pad row, internal horizontal
       // scroll with no browser scrollbar, placed AFTER seasons/episodes.
@@ -1555,10 +1577,14 @@ function searchForm() {
   form.onsubmit = async event => {
     event.preventDefault(); const current = ++searchRevision, expected = revision, currentApi = api;
     route.query = query.value.trim(); if (!route.query) return;
+    results.classList.remove('content-enter');
     results.textContent = 'Searching…';
+    const contentStartedAt=Date.now();
     try {
       const items = await currentApi.search(route.query); if (current !== searchRevision || revision !== expected) return;
-      results.textContent = ''; results.append(el('h2', items.length + ' results'), cards(items, true)); focusFirst(results);
+      results.textContent = ''; results.append(el('h2', items.length + ' results'), cards(items, true));
+      fadeDelayedContent(results,contentStartedAt);
+      focusFirst(results);
     } catch (error) { if (revision === expected && current === searchRevision) results.textContent = error.message; }
   };
   if (route.query) form.dispatchEvent(new Event('submit', {cancelable: true}));

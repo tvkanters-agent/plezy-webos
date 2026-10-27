@@ -3,6 +3,7 @@
 // Keep only a bounded window of cards: an alpha jump requests the real Plex
 // cumulative offset without loading all titles before it.
 import {alphaIndex, alphaPageStart, createAlphaJumpBar} from './alpha-bar.js';
+import {fadeDelayedContent} from './content-entrance.js';
 
 // Use the grid's decoration clearance, not the outer page/header padding.
 // Shared by jump placement and D-pad reveal so focusing cannot move the row.
@@ -11,7 +12,8 @@ export function alphabetTopInset(grid) {
 }
 
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
-  card, schedulePosters, focusWithoutJump, isActive, prewarmPage = async () => {}}) {
+  card, schedulePosters, focusWithoutJump, isActive, startedAt = Date.now(),
+  prewarmPage = async () => {}}) {
   const shell = document.querySelector('#shell');
   const topSpace = document.createElement('div');
   const bottomSpace = document.createElement('div');
@@ -26,6 +28,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   retry.className = 'library-retry';
   retry.textContent = 'Retry loading';
   retry.hidden = true;
+  fadeDelayedContent(grid, startedAt);
   main.append(topSpace, grid, bottomSpace, error, retry);
   let rangeStart = 0, items = firstPage.items.slice(), total = firstPage.total;
   let columns = 1, rowHeight = 1, loading = false, destroyed = false;

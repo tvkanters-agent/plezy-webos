@@ -71,6 +71,34 @@ test('libraries, details, watch-state and back restore focus',async({page})=>{
   await page.keyboard.press('Escape');await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
 });
+test('slow library loading fades the first grid without re-fading back navigation',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    await new Promise(resolve=>setTimeout(resolve,220));
+    await route.fulfill({json:{Items:[item],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  const grid=page.locator('main .grid');
+  await expect(grid).toHaveClass(/content-enter/);
+  await expect(grid.locator('.card')).toHaveCount(1);
+  expect(await grid.evaluate(node=>getComputedStyle(node).animationName)).toBe('content-enter');
+  await page.getByRole('button',{name:'The Test Film',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'The Test Film'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('main .grid')).not.toHaveClass(/content-enter/);
+  await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
+});
+test('slow home shelves fade in together instead of popping in',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Users/user/Items/Resume**',async route=>{
+    await new Promise(resolve=>setTimeout(resolve,220));
+    await route.fulfill({json:{Items:[item]}});
+  });
+  await page.goto('/');
+  await expect(page.locator('main .shelf').first()).toHaveClass(/content-enter/);
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+});
 test('search renders results and focuses the first match',async({page})=>{
   await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByLabel('Title',{exact:true}).fill('film');
   await page.locator('form').getByRole('button',{name:'Search',exact:true}).click();await expect(page.getByRole('heading',{name:'1 results'})).toBeVisible();
