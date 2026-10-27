@@ -2,11 +2,10 @@
 // Bounded artwork cache for Chromium 53 / webOS 4.x.
 // In-memory object URLs keep recently decoded frames available across routes;
 // IndexedDB stores compressed image blobs across app launches.
-export const ARTWORK_DISK_BYTES = 80 * 1024 * 1024;
-export const ARTWORK_MEMORY_BYTES = 12 * 1024 * 1024;
+export const ARTWORK_DISK_BYTES = 192 * 1024 * 1024;
+export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
-const MAX_DISK_ENTRIES = 500;
-const MAX_MEMORY_ENTRIES = 128; // Enough for a previously browsed library page, bounded by bytes.
+const MAX_PRIORITY_KEYS = 96; // About four library landing viewports.
 
 // Plex photo URLs include X-Plex-Version (our app release number); this is
 // unrelated to the server's artwork version and must not bust the disk cache.
@@ -28,7 +27,10 @@ export class ArtworkCache {
     this.fetchImage = options.fetch || ((url) => fetch(url));
     this.urls = options.urls || (typeof URL === 'undefined' ? null : URL);
     this.now = options.now || (() => Date.now());
+    this.memoryLimit = options.memoryBytes ?? ARTWORK_MEMORY_BYTES;
+    this.diskLimit = options.diskBytes ?? ARTWORK_DISK_BYTES;
     this.memory = new Map();
+    this.protectedKeys = new Set();
     this.memoryBytes = 0;
     this.pending = new Map();
     this.unsupportedOrigins = new Set();
@@ -51,6 +53,22 @@ export class ArtworkCache {
     this.directLoaded.set(url, true);
     // Bounded metadata only; Chromium remains responsible for decoded bytes.
     if (this.directLoaded.size > 512) this.directLoaded.delete(this.directLoaded.keys().next().value);
+  }
+  // Prioritize first-viewport artwork across navigations, not every image in
+  // an arbitrarily long library. Repeated visits refresh the protection order.
+  protect(keys) {
+    for (const key of keys) {
+      if (!key) continue;
+      this.protectedKeys.delete(key);
+      this.protectedKeys.add(key);
+      while (this.protectedKeys.size > MAX_PRIORITY_KEYS)
+        this.protectedKeys.delete(this.protectedKeys.values().next().value);
+    }
+  }
+  memoryVictim() {
+    for (const key of this.memory.keys())
+      if (!this.protectedKeys.has(key)) return key;
+    return this.memory.keys().next().value;
   }
   peek(key) {
     const entry = this.memory.get(key);
@@ -93,9 +111,10 @@ export class ArtworkCache {
     });
     this.memory.set(key, entry);
     this.memoryBytes += blob.size;
-    while (this.memory.size > MAX_MEMORY_ENTRIES ||
-           this.memoryBytes > ARTWORK_MEMORY_BYTES) {
-      this.drop(this.memory.keys().next().value);
+    // The compressed-blob budget, not the number of titles viewed, bounds
+    // storage. Keep first-screen art even after scrolling thousands of titles.
+    while (this.memoryBytes > this.memoryLimit) {
+      this.drop(this.memoryVictim());
     }
     return src;
   }
@@ -176,12 +195,15 @@ export class ArtworkCache {
     // Rehydrated artwork is actively used and should not be evicted first just
     // because it bypasses resolve()'s single-item read/touch path.
     const now = this.now();
-    const stale = rows.filter(row => now - (Number(row.stored.used) || 0) > 86400000);
+    const stale = rows.filter(row =>
+      now - (Number(row.stored.used) || 0) > 86400000 ||
+      this.protectedKeys.has(row.key) && !row.stored.priority);
     if (stale.length) {
       try {
         const tx = db.transaction('images', 'readwrite');
         const store = tx.objectStore('images');
-        stale.forEach(row => store.put({...row.stored, used: now}));
+        stale.forEach(row => store.put({...row.stored, used: now,
+          priority: !!row.stored.priority || this.protectedKeys.has(row.key)}));
       } catch (_) { /* Persistence is optional. */ }
     }
     // The image decoder can fail or be slow on older webOS versions. Never
@@ -206,7 +228,8 @@ export class ArtworkCache {
     const write = () => new Promise((resolve, reject) => {
       try {
         const tx = db.transaction('images', 'readwrite');
-        tx.objectStore('images').put({key, blob, used: this.now(), bytes: blob.size});
+        tx.objectStore('images').put({key, blob, used: this.now(), bytes: blob.size,
+          priority: this.protectedKeys.has(key)});
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
@@ -214,20 +237,20 @@ export class ArtworkCache {
     });
     try {
       await write();
-      if (++this.writes % 12 === 0) this.prune();
+      if (++this.writes % 24 === 0) this.prune();
     } catch (_) {
       // Quota can be much smaller on older LG TVs. Evict aggressively once,
       // then let normal image loading continue even if storage still fails.
-      await this.prune(ARTWORK_DISK_BYTES / 2, MAX_DISK_ENTRIES / 2);
+      await this.prune(this.diskLimit / 2);
       try { await write(); } catch (_) { /* Storage optional. */ }
     }
   }
-  async prune(maxBytes = ARTWORK_DISK_BYTES, maxEntries = MAX_DISK_ENTRIES) {
+  async prune(maxBytes = this.diskLimit) {
     if (this.pruning) return this.pruning;
-    this.pruning = this.pruneEntries(maxBytes, maxEntries).catch(() => {});
+    this.pruning = this.pruneEntries(maxBytes).catch(() => {});
     try { await this.pruning; } finally { this.pruning = null; }
   }
-  async pruneEntries(maxBytes, maxEntries) {
+  async pruneEntries(maxBytes) {
     const db = await this.open();
     if (!db) return;
     const entries = await new Promise(resolve => {
@@ -239,7 +262,8 @@ export class ArtworkCache {
           const item = cursor.result;
           if (item) {
             rows.push({key: item.key, bytes: Number(item.value.bytes) || 0,
-              used: Number(item.value.used) || 0});
+              used: Number(item.value.used) || 0,
+              priority: !!item.value.priority || this.protectedKeys.has(item.key)});
             item.continue();
           } else resolve(rows);
         };
@@ -248,14 +272,14 @@ export class ArtworkCache {
       } catch (_) { resolve([]); }
     });
     let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
-    let count = entries.length;
     const remove = [];
-    // No time-based expiration: server artwork revisions determine freshness.
-    for (const entry of entries.sort((a, b) => a.used - b.used)) {
-      if (total <= maxBytes && count <= maxEntries) break;
+    // No count or age expiration: versions determine freshness. Protect the
+    // landing viewports on disk as well as in memory, while respecting quotas.
+    for (const entry of entries.sort((a, b) =>
+      Number(a.priority) - Number(b.priority) || a.used - b.used)) {
+      if (total <= maxBytes) break;
       remove.push(entry.key);
       total -= entry.bytes;
-      count--;
     }
     if (!remove.length) return;
     await new Promise(resolve => {
@@ -271,6 +295,7 @@ export class ArtworkCache {
   }
   async invalidate(key) {
     this.drop(key);
+    this.protectedKeys.delete(key);
     const db = await this.open();
     if (!db) return;
     try { db.transaction('images', 'readwrite').objectStore('images').delete(key); }
