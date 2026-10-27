@@ -693,6 +693,9 @@ function card(item) {
  // (with one screen of prefetch) instead of decoding all 60 per library page.
 const MAX_ARTWORK_IN_FLIGHT = 2;
 let posterFrame = 0, artworkInFlight = 0;
+// A loading slot becoming free must not remeasure all offscreen images.
+// Rebuild geometry only on scroll or DOM layout changes.
+let posterQueueDirty = true, posterCandidates = [];
 // Native Plezy's OptimizedMediaImage paints decoded memory hits immediately;
 // any image not already ready when its DOM node is created fades over 300ms.
 function artworkImage(url, persistent, failed, revision = '') {
@@ -746,17 +749,24 @@ function artworkImage(url, persistent, failed, revision = '') {
 }
 function loadVisiblePosters() {
   posterFrame = 0;
-  const view = main.getBoundingClientRect();
-  const images = main.querySelectorAll('img[data-poster-src]');
-  const ready = [];
-  // Collect geometry first: changing src/classes while measuring forces layout.
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i], rect = img.getBoundingClientRect();
-    if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
-        rect.right < view.left - 180 || rect.left > view.right + 180) continue;
-    ready.push(img);
+  if (posterQueueDirty) {
+    posterQueueDirty = false;
+    posterCandidates = [];
+    const view = main.getBoundingClientRect();
+    const images = main.querySelectorAll('img[data-poster-src]');
+    // Read all geometry before writing src/classes, and only when the viewport
+    // or card layout changed. Finishing a download reuses this measured queue.
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i], rect = img.getBoundingClientRect();
+      if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
+          rect.right < view.left - 180 || rect.left > view.right + 180) continue;
+      posterCandidates.push(img);
+    }
   }
+  const ready = posterCandidates;
+  posterCandidates = [];
   for (const img of ready) {
+    if (!img.isConnected || !img.hasAttribute('data-poster-src')) continue;
     const url = img.getAttribute('data-poster-src');
     const key = img.getAttribute('data-artwork-key');
     if (key && !img.hasAttribute('data-artwork-probed')) {
@@ -767,11 +777,20 @@ function loadVisiblePosters() {
       artworkCache.cachedSource(key, img.hasAttribute('data-artwork-cache')).then(src => {
         if (!img.isConnected) { img.setAttribute('data-poster-src', url); return; }
         if (src) img.src = src;
-        else { img.setAttribute('data-poster-src', url); schedulePosters(); }
+        else {
+          img.setAttribute('data-poster-src', url);
+          // The disk miss is now known; put it directly back in the measured
+          // queue without measuring other offscreen posters a second time.
+          if (!posterQueueDirty) posterCandidates.push(img);
+          schedulePosters();
+        }
       });
       continue;
     }
-    if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) continue;
+    if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) {
+      posterCandidates.push(img);
+      continue;
+    }
     img.removeAttribute('data-poster-src');
     ++artworkInFlight;
     let done = false;
@@ -802,7 +821,18 @@ function loadVisiblePosters() {
 function schedulePosters() {
   if (!posterFrame) posterFrame = requestAnimationFrame(loadVisiblePosters);
 }
-main.addEventListener('scroll', schedulePosters, true);
+main.addEventListener('scroll', () => {
+  posterQueueDirty = true;
+  schedulePosters();
+}, true);
+// Chromium 53 supports MutationObserver even when lazy loading and modern
+// intersection observers are unavailable. Observe structure, not img.src,
+// to avoid invalidating geometry after each individual image completion.
+const posterLayoutObserver = new MutationObserver(() => {
+  posterQueueDirty = true;
+  schedulePosters();
+});
+posterLayoutObserver.observe(main, {childList:true, subtree:true});
 // OptimizedMediaImage uses Symbols.person_rounded in Plezy's cast strip and actor screen.
 // Use the same filled person fallback for absent, pending and failed images on Chromium 53.
 function personPortrait(imageUrl, className) {
