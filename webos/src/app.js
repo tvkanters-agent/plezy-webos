@@ -594,7 +594,20 @@ function revalidateRestoredLibrary(expectedRoute, mountedRevision) {
     if (!result.fresh) return;
     return result.fresh.then(update => {
       if (!update.changed || revision !== mountedRevision || route !== expectedRoute || api !== currentApi) return;
-      // Only changed server data rebuilds the view; keep the user's position.
+      if (view === 'browse' && activeAlphabet && currentApi instanceof Plex) {
+        prewarmPosters(update.value.items, currentApi, {protectFirst:24}).then(() => {
+          if (revision === mountedRevision && route === expectedRoute && activeAlphabet)
+            activeAlphabet.updateRange(0, update.value);
+        }).catch(() => {});
+        return;
+      }
+      const paged = Array.from(main.querySelectorAll('.grid,.collection-sections'))
+        .find(node => node._applyCatalogUpdate);
+      if (paged && view !== 'recommended') {
+        paged._applyCatalogUpdate(0, update);
+        return;
+      }
+      // Recommended shelves have their own renderer; rebuild only if changed.
       const focused = main.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
       route = {...route, scroll:main.scrollTop, focus:focused || route.focus};
       render();
@@ -614,6 +627,12 @@ function restoreRootPage(entry) {
   main.scrollTop = route.scroll || 0;
   main.classList.toggle('has-alpha-bar', !!entry.alphabet);
   navigation();
+  const libraryTabs = main.querySelector('.library-tabs');
+  if (libraryTabs && libraryTabs._resumeLibraryView)
+    libraryTabs._resumeLibraryView(mountedRevision);
+  const pagedGrid = Array.from(main.querySelectorAll('.grid,.collection-sections,.episode-list'))
+    .find(node => node._resumeCatalog);
+  if (pagedGrid) pagedGrid._resumeCatalog(mountedRevision);
   if (entry.alphabet) {
     activeAlphabet = entry.alphabet;
     activeAlphabet.resume(() => revision === mountedRevision);
@@ -1042,6 +1061,7 @@ function episodeCard(item) {
   return node;
 }
 async function paginated(loader, currentRevision, options = {}) {
+  let mountedRevision = currentRevision;
   // The first page may be a persisted snapshot. Refresh callbacks replace
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
@@ -1162,33 +1182,41 @@ async function paginated(loader, currentRevision, options = {}) {
     main.removeEventListener('scroll', onScroll);
     if (observer) observer.disconnect();
   }
-  function watchFresh(offset, initialPage, pending) {
-    if (!pending) return;
-    pending.then(async update => {
-      if (!update || !update.changed || currentRevision !== revision ||
-          !grid.isConnected || !loadedPages.has(offset)) return;
-      await prewarmPosters(update.value.items, api,
-        {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
-      if (currentRevision !== revision || !grid.isConnected ||
-          !loadedPages.has(offset)) return;
-      loadedPages.set(offset, update.value);
-      // A changed page length invalidates offsets of its successors.
-      // Discard those pages and load them again from the correct offset.
-      if (initialPage.items.length !== update.value.items.length) {
-        for (const key of Array.from(loadedPages.keys()))
-          if (key > offset) loadedPages.delete(key);
-      }
-      let next = 0;
-      for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
-      start = next;
-      completed = !update.value.items.length || start >= update.value.total;
-      repaintPages();
-      if (completed) cleanup();
-      else { listen(); requestAnimationFrame(check); }
-    }).catch(() => { /* Offline updates keep the saved view usable. */ });
+  async function applyFresh(offset, initialPage, update) {
+    if (!update || !update.changed || mountedRevision !== revision ||
+        !grid.isConnected || !loadedPages.has(offset)) return;
+    await prewarmPosters(update.value.items || [], api,
+      {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
+    if (mountedRevision !== revision || !grid.isConnected ||
+        !loadedPages.has(offset)) return;
+    loadedPages.set(offset, update.value);
+    // A changed page length invalidates offsets of its successors.
+    if (initialPage.items.length !== update.value.items.length) {
+      for (const key of Array.from(loadedPages.keys()))
+        if (key > offset) loadedPages.delete(key);
+    }
+    let next = 0;
+    for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
+    start = next;
+    completed = !update.value.items.length || start >= update.value.total;
+    repaintPages();
+    if (completed) cleanup();
+    else { listen(); requestAnimationFrame(check); }
   }
+  function watchFresh(offset, initialPage, pending) {
+    if (pending) pending.then(update => applyFresh(offset, initialPage, update))
+      .catch(() => { /* Offline updates keep the saved view usable. */ });
+  }
+  grid._applyCatalogUpdate = (offset, update) => {
+    const original = loadedPages.get(offset);
+    if (original) return applyFresh(offset, original, update);
+  };
+  grid._resumeCatalog = restoredRevision => {
+    mountedRevision = restoredRevision;
+    if (!completed) { listen(); requestAnimationFrame(check); }
+  };
   async function load() {
-    if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
+    if (loading || completed || mountedRevision !== revision || !grid.isConnected) return;
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
@@ -1200,10 +1228,10 @@ async function paginated(loader, currentRevision, options = {}) {
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
       const fresh = response && response.fresh;
-      if (currentRevision !== revision || !grid.isConnected) return;
+      if (mountedRevision !== revision || !grid.isConnected) return;
       await prewarmPosters(page.items, api,
         {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
-      if (currentRevision !== revision || !grid.isConnected) return;
+      if (mountedRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       addPage(grid, page);
       loadedPages.set(offset, page);
@@ -1214,18 +1242,18 @@ async function paginated(loader, currentRevision, options = {}) {
       schedulePosters();
       watchFresh(offset, page, fresh);
     } catch (error) {
-      if (currentRevision === revision && grid.isConnected) {
+      if (mountedRevision === revision && grid.isConnected) {
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
         retry.hidden = false;
       }
     } finally {
       loading = false;
-      if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
+      if (mountedRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
         requestAnimationFrame(check);
     }
   }
   function check() {
-    if (currentRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
+    if (mountedRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
     if (loading) return;
     const rect = sentinel.getBoundingClientRect();
     const pane = main.getBoundingClientRect();
@@ -1240,7 +1268,7 @@ async function paginated(loader, currentRevision, options = {}) {
   else requestAnimationFrame(check);
 }
 async function render(prepared = null) {
-  const currentRevision = ++revision;
+  let currentRevision = ++revision;
   pendingRailEntryRevision=null;lastRailRightRevision=null;
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
@@ -1285,6 +1313,9 @@ async function render(prepared = null) {
       title(route.library.title); const currentApi = api;
       const view = route.view || 'browse';
       const tabs = el('div', undefined, 'library-tabs');
+      // This tab's DOM can be detached and restored without remounting it.
+      // Refresh the revision gate used by async data and alphabet callbacks.
+      tabs._resumeLibraryView = restoredRevision => { currentRevision = restoredRevision; };
       [{id:'recommended', name:'Recommended'}, {id:'browse',name:'Browse'},
         {id:'collections',name:'Collections'}, {id:'playlists',name:'Playlists'}].forEach(tab => {
         const control = button(tab.name, () => go({...route, view: tab.id, forceRefresh:false}, false),
