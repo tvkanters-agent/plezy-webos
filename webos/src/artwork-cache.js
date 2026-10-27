@@ -84,11 +84,13 @@ export class ArtworkCache {
     catch (_) { return null; }
     const entry = {src, bytes: blob.size, ready: false};
     // Keep a decoded image reference alive for the immediate next route paint.
-    if (typeof Image !== 'undefined') {
+    entry.decoded = new Promise(resolve => {
+      if (typeof Image === 'undefined') { resolve(false); return; }
       entry.image = new Image();
-      entry.image.onload = () => { entry.ready = true; };
-      entry.image.src = src;
-    }
+      entry.image.onload = () => { entry.ready = true; resolve(true); };
+      entry.image.onerror = () => resolve(false);
+      try { entry.image.src = src; } catch (_) { resolve(false); }
+    });
     this.memory.set(key, entry);
     this.memoryBytes += blob.size;
     while (this.memory.size > MAX_MEMORY_ENTRIES ||
@@ -141,6 +143,50 @@ export class ArtworkCache {
         tx.onabort = () => resolve(null);
       } catch (_) { resolve(null); }
     });
+  }
+  // Rehydrate a page's persisted images before its cards are attached to
+  // the DOM. One readonly transaction retrieves every key concurrently; the
+  // ordinary two-slot viewport queue is reserved for network misses. There
+  // must be NO network fetches in this method.
+  async prewarm(keys) {
+    const unique = [...new Set(keys.filter(Boolean))];
+    const missing = unique.filter(key => !this.peekReady(key) && !this.memory.has(key));
+    if (!missing.length) return;
+    const db = await this.open();
+    if (!db) return;
+    const rows = await new Promise(resolve => {
+      const found = [];
+      try {
+        const tx = db.transaction('images', 'readonly');
+        const store = tx.objectStore('images');
+        for (const key of missing) {
+          const request = store.get(key);
+          request.onsuccess = () => {
+            const entry = request.result;
+            if (entry && entry.blob && entry.blob.size &&
+                entry.blob.size <= MAX_ENTRY_BYTES) found.push({key, blob: entry.blob});
+          };
+        }
+        tx.oncomplete = () => resolve(found);
+        tx.onabort = () => resolve([]);
+        tx.onerror = () => resolve([]);
+      } catch (_) { resolve([]); }
+    });
+    // The image decoder can fail or be slow on older webOS versions. Never
+    // block the screen indefinitely waiting for a malformed cached image.
+    const decoding = rows.map(row => {
+      this.remember(row.key, row.blob);
+      const entry = this.memory.get(row.key);
+      return entry ? entry.decoded : Promise.resolve(false);
+    });
+    if (!decoding.length) return;
+    let timeout;
+    try {
+      await Promise.race([
+        Promise.all(decoding),
+        new Promise(resolve => { timeout = setTimeout(resolve, 2000); })
+      ]);
+    } finally { clearTimeout(timeout); }
   }
   async save(key, blob) {
     const db = await this.open();
