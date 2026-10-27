@@ -219,20 +219,24 @@ export class ArtworkCache {
     catch (_) { /* Best effort. */ }
   }
   // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
-  resolve(key, url = key) {
+  resolve(key, url = key, persistent = true) {
     const hit = this.peek(key);
     if (hit) return Promise.resolve(hit);
     if (this.pending.has(key)) return this.pending.get(key);
-    const task = this.resolveUncached(key, url).then(src => src || url, () => url);
+    const task = this.resolveUncached(key, url, persistent).then(src => src || url, () => url);
     this.pending.set(key, task);
     task.then(() => this.pending.delete(key));
     return task;
   }
-  async resolveUncached(key, url) {
-    const stored = await this.read(key);
-    if (stored) {
-      const src = this.remember(key, stored.blob);
-      if (src) return src;
+  async resolveUncached(key, url, persistent) {
+    // Server images without a trustworthy revision may stay in RAM during this
+    // app session, but must never survive a restart as stale IndexedDB rows.
+    if (persistent) {
+      const stored = await this.read(key);
+      if (stored) {
+        const src = this.remember(key, stored.blob);
+        if (src) return src;
+      }
     }
     let origin = '';
     try { origin = new URL(url).origin; } catch (_) { return url; }
@@ -255,7 +259,7 @@ export class ArtworkCache {
       const src = this.remember(key, blob);
       if (!src) return url;
       // Persist without delaying first paint.
-      this.save(key, blob).catch(() => {});
+      if (persistent) this.save(key, blob).catch(() => {});
       return src;
     } catch (_) {
       this.unsupportedOrigins.add(origin);
