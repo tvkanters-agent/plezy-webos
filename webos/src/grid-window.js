@@ -268,6 +268,10 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   resume();
   return {
     get columns() { return columns; },
+    retainedCardStats() {
+      return {mounted:grid.children.length,localCached:cached.size,
+        globalCached:sharedCards.size};
+    },
     hasLaterRow(current) {
       return live && grid.contains(current) && Number.isInteger(current._gridIndex) &&
         current._gridIndex < (Math.ceil(items.length/Math.max(1,columns))-1)*columns;
