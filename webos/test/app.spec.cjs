@@ -1398,6 +1398,7 @@ test('Home does not flash a loading string while its first requests are pending'
   await expect.poll(()=>typeof release).toBe('function');
   await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
   await expect(page.getByText('Loading your library…')).toHaveCount(0);
+  await expect(page.getByText('Loading libraries…')).toHaveCount(0);
   expect(await page.locator('main').innerText()).not.toMatch(/Loading your library/);
   release();
   await expect(page.locator('main .shelf')).not.toHaveCount(0);
