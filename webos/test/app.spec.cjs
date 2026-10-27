@@ -117,9 +117,11 @@ test('recent Home and library visits use cached metadata, while Refresh bypasses
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.locator('main .grid .card')).toHaveCount(1);
   expect(homeCalls()).toBe(initialHome);
-  expect(browseCalls()).toBe(initialBrowse);
-  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  // Cached library content is displayed without waiting for a request, but
+  // each navigation now refreshes it in the background.
   await expect.poll(browseCalls).toBe(initialBrowse+1);
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect.poll(browseCalls).toBe(initialBrowse+2);
 });
 
 test('watch-state mutations invalidate cached Home and library pages',async({page})=>{
