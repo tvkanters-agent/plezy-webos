@@ -1314,6 +1314,14 @@ test('cast pictures fade in but do not enter the persistent artwork cache',async
   const portrait=page.locator('.cast-picture img').first();
   await portrait.scrollIntoViewIfNeeded();
   await expect(portrait).toHaveClass(/artwork-loaded/);
+  // The image is a composited fade layer on Chromium 53: its own corners
+  // must be rounded, not merely masked by the parent's overflow:hidden.
+  await expect(portrait).toHaveClass(/artwork-image/);
+  const castRadii = await portrait.evaluate(img=>({
+    image:getComputedStyle(img).borderTopLeftRadius,
+    frame:getComputedStyle(img.parentElement).borderTopLeftRadius
+  }));
+  expect(castRadii).toEqual({image:'10px',frame:'10px'});
   await expect.poll(()=>portrait.evaluate(node=>Number(getComputedStyle(node).opacity))).toBe(1);
   expect(await portrait.getAttribute('data-artwork-cache')).toBe(null);
   expect(await portrait.getAttribute('src')).toMatch(/^http:/);
@@ -1433,8 +1441,8 @@ test('actor avatar image itself stays circular during its fade',async({page})=>{
     return {childRadius:style.borderTopLeftRadius,parentRadius:parent.borderTopLeftRadius,
       width:img.getBoundingClientRect().width,height:img.getBoundingClientRect().height};
   });
-  expect(geometry.childRadius).toBe('50%');
-  expect(geometry.parentRadius).toBe('40px');
+  expect(geometry.childRadius).toBe(geometry.parentRadius);
+  expect(geometry.childRadius).toBe('40px');
   expect(geometry.width).toBe(geometry.height);
 });
 
@@ -1453,4 +1461,41 @@ test('Home does not flash a loading string while its first requests are pending'
   expect(await page.locator('main').innerText()).not.toMatch(/Loading your library/);
   release();
   await expect(page.locator('main .shelf')).not.toHaveCount(0);
+});
+
+test('all media artwork inherits the exact frame radius, including future frames',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  const result=await page.evaluate(()=>{
+    const main=document.querySelector('main');
+    const cases=[
+      {name:'poster',outer:'poster',parent:null,expected:'14px',style:'border-radius:14px'},
+      {name:'cast',outer:'cast-picture',parent:null,expected:'10px'},
+      {name:'avatar',outer:'actor-avatar',parent:null,expected:'40px'},
+      {name:'episode',outer:'poster',parent:'episode-thumb',expected:'6px'},
+      {name:'future',outer:'new-media-artwork-frame',parent:null,
+        style:'border-radius:19px;overflow:hidden',expected:'19px'}
+    ];
+    return cases.map(entry=>{
+      const holder=document.createElement('div');
+      if(entry.parent)holder.className=entry.parent;
+      const frame=document.createElement('div');
+      frame.className=entry.outer;
+      if(entry.style)frame.setAttribute('style',entry.style);
+      const img=document.createElement('img');
+      img.className='artwork-image artwork-loaded';
+      img.src='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>';
+      frame.appendChild(img);
+      if(entry.parent)holder.appendChild(frame);
+      main.appendChild(entry.parent?holder:frame);
+      const image=getComputedStyle(img).borderTopLeftRadius;
+      const parent=getComputedStyle(frame).borderTopLeftRadius;
+      (entry.parent?holder:frame).remove();
+      return {name:entry.name,image,parent,expected:entry.expected};
+    });
+  });
+  for(const item of result){
+    expect(item.parent,item.name+' frame radius').toBe(item.expected);
+    expect(item.image,item.name+' fading image radius').toBe(item.expected);
+  }
 });
