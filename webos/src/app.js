@@ -433,7 +433,8 @@ function navigation() {
         control.dataset.navId = 'library:' + library.id;
         section.append(control);
       });
-      else section.append(el('p', 'Loading libraries…', 'muted'));
+      // Keep the rail visually stable while library names are fetched;
+      // a transient "Loading…" label flashed on Home during startup.
       nav.append(section);
     }
     if (libraryCacheFor !== api && !libraryLoading) {
