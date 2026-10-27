@@ -408,3 +408,163 @@ for(const layout of ['grid','flex']) {
     expect(state.visible).toBe(true);
   });
 }
+
+for(const layout of ['grid','flex']) {
+  test('virtual '+layout+' D-pad visits all logical rows before Cast',async({page})=>{
+    const calls=await mockLongJellyfinLibrary(page);
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex')await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await fillFivePages(page,calls);
+    await expect.poll(async()=>{
+      await page.locator('main').evaluate(node=>node.scrollTop=node.scrollHeight);
+      return calls.includes(300);
+    }).toBe(true);
+    await page.locator('main').evaluate(main=>{
+      const cast=document.createElement('div');
+      cast.className='cast-strip';cast.tabIndex=0;
+      main.append(cast);
+      main.scrollTop=0;
+    });
+    await expect(page.locator('.grid .card[data-focus="0"]')).toHaveCount(1);
+    await page.locator('.grid .card[data-focus="0"]').focus();
+    const columns=await page.locator('.grid').evaluate(grid=>grid._windowedGrid.columns);
+    const lastRow=Math.ceil(360/columns)-1;
+    for(let row=1;row<=lastRow;row++){
+      await page.keyboard.press('ArrowDown');
+      await expect(page.locator('main .grid .card:focus'))
+        .toHaveAttribute('data-focus',String(Math.min(row*columns,359)));
+    }
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('main .cast-strip')).toBeFocused();
+  });
+  test('virtual '+layout+' grid restores a same-turn scroll and tab focus',async({page})=>{
+    await mockLongJellyfinLibrary(page);
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex')await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await page.locator('main').evaluate(node=>node.scrollTop=node.scrollHeight);
+    await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
+    const first=await page.locator('main').evaluate(main=>{
+      const pane=main.getBoundingClientRect();
+      const card=Array.from(main.querySelectorAll('.grid .card')).find(el=>{
+        const box=el.getBoundingClientRect();
+        return box.top>pane.top+8 && box.bottom<pane.bottom-8;
+      });
+      if(!card)return null;
+      card.focus();
+      main.scrollTop+=29;
+      const scroll=main.scrollTop;
+      card.click();
+      return {id:card.dataset.focus,scroll};
+    });
+    expect(first).not.toBeNull();
+    await expect(page.getByRole('heading',{name:'Title '+first.id.padStart(3,'0')})).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('main .grid .card[data-focus="'+first.id+'"]')).toBeFocused();
+    expect(Math.abs((await page.locator('main').evaluate(n=>n.scrollTop))-first.scroll))
+      .toBeLessThan(3);
+    const second=await page.locator('main').evaluate(main=>{
+      main.scrollTop+=23;
+      const scroll=main.scrollTop;
+      document.querySelector('nav button[data-nav-id="home"]').click();
+      return scroll;
+    });
+    await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+    await page.locator('nav button[data-nav-id="library:movies"]').click();
+    expect(Math.abs((await page.locator('main').evaluate(n=>n.scrollTop))-second))
+      .toBeLessThan(3);
+    await expect(page.locator('main .grid .card[data-focus="'+first.id+'"]')).toBeFocused();
+  });
+}
+
+test('shared recycler pool stays bounded and clears on snapshot suspension',async({page})=>{
+  const calls=await mockLongJellyfinLibrary(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await fillFivePages(page,calls);
+  for(const percent of [.2,.5,.85,.35,.7,.1,.9]){
+    await page.locator('main').evaluate((main,percent)=>{
+      main.scrollTop=main.scrollHeight*percent;
+    },percent);
+    await expect.poll(()=>page.locator('.grid').evaluate(grid=>
+      grid._windowedGrid.retainedCardStats().globalCached)).toBeLessThanOrEqual(48);
+  }
+  await page.locator('nav button[data-nav-id="home"]').click();
+  await page.locator('nav button[data-nav-id="library:movies"]').click();
+  const stats=await page.locator('.grid').evaluate(grid=>grid._windowedGrid.retainedCardStats());
+  expect(stats.globalCached).toBeLessThanOrEqual(48);
+  expect(stats.localCached).toBe(0);
+  expect(stats.mounted).toBeLessThan(70);
+});
+
+test('delayed Plex actor facts reflows virtualized person grid',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',
+    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]
+  })));
+  const actor={id:'411',tag:'Actor Test',role:'Cast'};
+  const lead={ratingKey:'lead',type:'movie',title:'Lead Film',Role:[actor]};
+  const filmography=Array.from({length:240},(_,i)=>({
+    ratingKey:'actor-'+i,type:'movie',title:'Actor Film '+i
+  }));
+  let releaseBio;
+  const delayed=new Promise(resolve=>{releaseBio=resolve;});
+  await page.route('https://discover.provider.plex.tv/library/people/actor-person',async route=>{
+    await delayed;
+    await route.fulfill({json:{MediaContainer:{Metadata:[{
+      summary:'A detailed biography that changes the height of the header. '.repeat(6),
+      bornAt:'1970-01-01',diedAt:'2020-01-01',birthPlace:'Test City'}]}}});
+  });
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{
+      Hub:[{title:'Movies',Metadata:[lead]}]}}});
+    if(path==='/library/metadata/lead')return route.fulfill({json:{MediaContainer:{
+      Metadata:[lead],totalSize:1}}});
+    if(path==='/library/people/411')return route.fulfill({json:{MediaContainer:{
+      Directory:[{tagKey:'actor-person'}]}}});
+    if(path==='/library/people/411/media')return route.fulfill({json:{MediaContainer:{
+      Metadata:filmography,totalSize:filmography.length}}});
+    return route.fulfill({json:{MediaContainer:{Metadata:[],totalSize:0}}});
+  });
+  await page.setViewportSize({width:1280,height:720});
+  await page.goto('/');
+  await page.getByRole('button',{name:/Lead Film/}).first().click();
+  await expect(page.locator('.cast-strip')).toHaveCount(1);
+  await page.locator('.cast-strip').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading',{name:'Actor Test'})).toBeVisible();
+  await expect(page.locator('.grid .card')).toHaveCount(60);
+  await expect.poll(async()=>{
+    await page.locator('main').evaluate(n=>n.scrollTop=n.scrollHeight);
+    return page.locator('.grid .card').count();
+  }).toBeLessThan(85);
+  await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.65);
+  await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
+  await page.locator('.grid').evaluate(grid=>{
+    window.actorRefreshes=0;
+    const original=grid._windowedGrid.refreshLayout;
+    grid._windowedGrid.refreshLayout=()=>{window.actorRefreshes++;original();};
+  });
+  releaseBio();
+  await expect(page.getByText('Test City')).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>window.actorRefreshes)).toBeGreaterThan(0);
+  await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
+  const before=await visibleGridAnchor(page);
+  const card=page.locator('main .grid .card[data-focus="'+before.index+'"]');
+  await card.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('main .grid .card:focus'))
+    .toHaveAttribute('data-focus','actor-'+(before.index+before.columns));
+});
