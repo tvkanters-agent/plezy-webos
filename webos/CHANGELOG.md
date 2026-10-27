@@ -1,5 +1,15 @@
 # webOS changelog
 
+## 1.4.0 — Persistent library snapshots and live reconciliation
+
+- Persist library directory, Plex and Jellyfin browse pages, Plex recommendations, collection and playlist pages, and Plex alphabet indexes in IndexedDB between app launches.
+- Start fresh server requests concurrently with cached reads; display saved metadata immediately and replace only changed content without blanking the screen.
+- Preserve D-pad focus, scroll position, alphabet offsets, pagination and revisioned first-frame artwork when fresh results arrive; never animate restored pages as delayed loads.
+- Do not persist Home recommendations: each app launch fetches fresh Home shelves while session caching and playback/watch-state invalidation remain intact.
+- Partition catalog snapshots by connection/server/account and token fingerprint; remove saved data when a connection is deleted.
+- Bound cached catalog metadata to 20 MiB / 120 disk entries and 10 MiB / 40 memory entries; no time-based expiration. Failed refreshes leave stored libraries usable offline.
+- Add unit and browser regression coverage for restart hydration, background refresh, stable DOM, offline fallback, focus restoration, account isolation and Plex alphabet restoration.
+
 ## 1.3.2 — Faster page navigation
 
 - Reuse recent Home, recommendation, paginated library, alphabet-index, collection and playlist responses rather than repeating network requests on each visit.
