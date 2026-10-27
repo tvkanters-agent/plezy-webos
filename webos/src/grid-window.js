@@ -46,7 +46,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   let items = [], columns = 0, stride = 0, range = null;
   let live = true, listening = false, paginationCleanup = null;
   let gridOffset = 0, gridPadding = 0;
-  let scrollAnchor = {firstItem:0, within:0};
+  let scrollAnchor = {firstItem:0, within:0, stride:1};
   const cached = new Map(), CACHE_LIMIT = 160;
   const rect = node => node.getBoundingClientRect();
 
@@ -132,7 +132,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
     const local = Math.max(0,main.scrollTop-gridOffset-gridPadding);
     const row = Math.floor(local/stride);
-    scrollAnchor = {firstItem:row*columns, within:local-row*stride};
+    scrollAnchor = {firstItem:row*columns, within:local-row*stride, stride};
     show(row,force);
   }
   function resize() {
@@ -140,7 +140,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     // Use the last measured pre-resize anchor, not the browser's current
     // scrollTop: Chromium can apply scroll anchoring as CSS changes before
     // the resize event fires, producing an entire row of drift.
-    const {firstItem,within} = scrollAnchor;
+    const {firstItem,within,stride:previousStride} = scrollAnchor;
     // Measure with a temporarily complete first-row sample when our window
     // is near the end and responsive CSS changes the number of columns.
     ({columns,stride} = measureGrid(grid));
@@ -148,7 +148,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     gridOffset = measureOffset();
     const newRow = Math.floor(firstItem/columns);
     const target = gridOffset + gridPadding + newRow*stride +
-      Math.min(within,stride-1);
+      Math.min(within / previousStride * stride,stride-1);
     // Apply correct new spacer sizes before scrolling to the anchor row.
     show(newRow,true);
     main.scrollTop = Math.max(0,target);
