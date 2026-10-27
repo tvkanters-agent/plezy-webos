@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.4.3 — Larger, quota-aware library and artwork caches
+
+- Replace artificial title/page/image-count eviction with byte-aware retention. Catalog disk fallback grows to 256 MiB and artwork to 768 MiB, adapting downward only when the browser reports a smaller quota.
+- Keep first pages, Plex alphabet indexes and first-viewport artwork prioritized during long library scrolling and subsequent navigation. Retain Home artwork priority while keeping Home metadata fresh on each app launch.
+- Correct disk recency when catalog pages are served from RAM, so an actively used first page is not mistakenly treated as old.
+- Keep RAM bounded independently: 16 MiB catalog metadata, 24 MiB compressed artwork and 96 MiB estimated decoded bitmap data.
+- Avoid expensive periodic full-database scans unless quota pressure is reported; on actual IndexedDB write failure, evict low-priority data and retry once.
+- Preserve server-driven artwork revisioning, account isolation and stale-while-revalidate page updates. Add stress tests for hundreds of pages and posters with first-page preservation.
+
 ## 1.4.2 — Native-style exit confirmation
 
 - Align the no-backstack exit dialog with Plezy's Mono confirmation styling: centered surface, rounded corners, text/filled pill buttons, focus feedback and dimmed backdrop.
