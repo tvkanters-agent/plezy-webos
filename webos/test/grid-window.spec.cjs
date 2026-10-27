@@ -187,14 +187,17 @@ for(const layout of ['grid','flex']) {
     await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
     await fillFivePages(page,calls);
     await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.6);
+    await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
     const initial=await visibleGridAnchor(page);
     expect(initial).not.toBeNull();
     await page.addStyleTag({content:'.grid .card .poster{height:200px!important}'});
     await page.evaluate(()=>window.dispatchEvent(new Event('resize')));
+    await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
     const altered=await visibleGridAnchor(page);
     expect(altered).not.toBeNull();
     expect(Math.abs(altered.index-initial.index)).toBeLessThan(initial.columns);
     await page.setViewportSize({width:1090,height:720});
+    await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
     const finalAnchor=await visibleGridAnchor(page);
     expect(finalAnchor).not.toBeNull();
     expect(Math.abs(finalAnchor.index-altered.index))
