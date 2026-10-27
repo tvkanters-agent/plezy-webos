@@ -2,7 +2,7 @@
 // Offline-tolerant library snapshots. Return saved pages before the network
 // finishes, then reconcile changed server data without blocking first paint.
 // Home is deliberately excluded: its volatile CatalogCache starts empty.
-import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
+import {diskPressure, evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
 const STORE = 'pages';
 export const CATALOG_DISK_BYTES = 256 * 1024 * 1024;
 export const CATALOG_MEMORY_BYTES = 16 * 1024 * 1024;
@@ -165,7 +165,11 @@ export class PersistentCatalogCache {
     });
     try {
       await put();
-      if (++this.writes % 96 === 0) this.prune().catch(() => {});
+      if (++this.writes % 96 === 0) {
+        diskPressure(1024 * 1024 * 1024).then(pressure => {
+          if (pressure) this.prune().catch(() => {});
+        }).catch(() => {});
+      }
     } catch (_) {
       // Some TVs have very small IDB quotas; cache failure must never
       // prevent the real network response or make the UI unusable.
