@@ -594,13 +594,38 @@ test('Plex watched indicators show remaining episodes on partially watched serie
  await expect(page.locator('.card').filter({hasText:'Partly watched'}).locator('.badge')).toHaveText('4');
 });
 
-test('left from first media card exits to the nearest visible sidebar destination',async({page})=>{
+test('left from first media card restores the last focused sidebar destination',async({page})=>{
  await mockServer(page);await page.goto('/');
- await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+ const movies=page.locator('.rail-library-items').getByRole('button',{name:'Movies'});
+ await movies.click();
  const card=page.locator('.grid .card').first();
  await card.focus();
  await page.keyboard.press('ArrowLeft');
- await expect(page.locator('#nav button:focus')).toHaveCount(1);
+ await expect(movies).toBeFocused();
+});
+
+test('moving left from the main pane defaults to Home then remembers rail focus',async({page})=>{
+ await mockServer(page);await page.goto('/');
+ const card=page.locator('main .shelf .card').first();
+ const home=page.locator('#nav [data-nav-id="home"]');
+ const settings=page.locator('#nav [data-nav-id="settings"]');
+ const movies=page.locator('#nav [data-nav-id="library:movies"]');
+ await expect(card).toBeFocused();
+ // No rail element has been focused in this session.
+ await page.keyboard.press('ArrowLeft');
+ await expect(home).toBeFocused();
+ // The chosen rail item, not the nearest item to the poster, is remembered.
+ await settings.focus();
+ await page.keyboard.press('ArrowRight');
+ await expect(card).toBeFocused();
+ await page.keyboard.press('ArrowLeft');
+ await expect(settings).toBeFocused();
+ // Remember the most recent focus even when it is not the active route.
+ await movies.focus();
+ await page.keyboard.press('ArrowRight');
+ await expect(card).toBeFocused();
+ await page.keyboard.press('ArrowLeft');
+ await expect(movies).toBeFocused();
 });
 test('back restores a covered library page without refetching items',async({page})=>{
  const calls=await mockServer(page);await page.goto('/');
@@ -836,31 +861,10 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  });
  expect(order).toBe(true);
  await cast.focus();
- // At the start of the cast row Left exits to the vertically nearest rail item.
- const nearestRail=await cast.evaluate(strip=>{
-   const r=strip.getBoundingClientRect(),y=(r.top+r.bottom)/2;
-   const viewport=document.querySelector('nav').getBoundingClientRect();
-   const controls=Array.from(document.querySelectorAll('nav button:not(:disabled)'))
-     .filter(node=>node.getClientRects().length&&!node.hidden);
-   const visible=controls.filter(node=>{
-     const box=node.getBoundingClientRect();
-     return box.bottom>viewport.top&&box.top<viewport.bottom;
-   });
-   const candidates=visible.length?visible:controls;
-   const gap=node=>{
-     const box=node.getBoundingClientRect();
-     return Math.max(0,box.top-y,y-box.bottom);
-   };
-   const center=node=>{
-     const box=node.getBoundingClientRect();
-     return Math.abs((box.top+box.bottom)/2-y);
-   };
-   candidates.sort((a,b)=>gap(a)-gap(b)||center(a)-center(b));
-   return candidates[0]?.dataset.navId;
- });
- expect(nearestRail).toBeTruthy();
- expect(nearestRail).not.toBe('home');
- const target=page.locator('nav button[data-nav-id="'+nearestRail+'"]');
+ // Cast's locked-focus row also returns to the last focused rail item.
+ const target=page.locator('#nav [data-nav-id="settings"]');
+ await target.focus();
+ await cast.focus();
  await page.keyboard.press('ArrowLeft');
  await expect(target).toBeFocused();
  await page.keyboard.press('ArrowRight');

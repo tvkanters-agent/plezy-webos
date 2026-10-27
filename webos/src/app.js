@@ -56,6 +56,13 @@ function playbackClosed() {
   }).catch(() => { /* Keep the mounted page usable if metadata is offline. */ });
 }
 let rememberedPaneFocus = null;
+let rememberedRailFocusId = null;
+// Track real rail focus (D-pad and pointer), not the current route. Navigation
+// rebuilds the buttons, so remember the stable destination ID, not its node.
+nav.addEventListener('focusin', event => {
+  const item = event.target.closest('[data-nav-id]');
+  if (item && nav.contains(item)) rememberedRailFocusId = item.dataset.navId;
+});
 let enterPaneAfterNavigation = false;
 let pendingRailEntryRevision = null, libraryRenderRevision = null;
 let lastRailRightRevision = null;
@@ -1767,29 +1774,16 @@ window.addEventListener('keydown', event => {
       node !== current && node.getClientRects().length && !node.hidden);
   const choose = (candidates, axis) => nextFocus(rectFor(current),
     candidates.map(value => ({value, rect: rectFor(value)})), axis);
-  const focusNearestRail = () => {
-    const origin = rectFor(current);
-    const y = (origin.top + origin.bottom) / 2;
-    const viewport = rectFor(nav);
-    const controls = validControls(nav);
-    // Do not jump to destinations scrolled out of the rail viewport.
-    const visible = controls.filter(node => {
-      const box = rectFor(node);
-      return box.bottom > viewport.top && box.top < viewport.bottom;
-    });
-    const candidates = visible.length ? visible : controls;
-    let nearest = null, gap = Infinity, centerDistance = Infinity;
-    candidates.forEach(node => {
-      const box = rectFor(node);
-      const distance = Math.max(0, box.top - y, y - box.bottom);
-      const center = Math.abs((box.top + box.bottom) / 2 - y);
-      if (distance < gap || (distance === gap && center < centerDistance)) {
-        nearest = node; gap = distance; centerDistance = center;
-      }
-    });
-    if (nearest) {
+  const focusLastRailItem = () => {
+    const controls = Array.from(nav.querySelectorAll('button[data-nav-id]:not(:disabled)'))
+      .filter(node => !node.hidden && node.getClientRects().length);
+    // Home is the first destination; it is the default before any rail focus
+    // and when the remembered destination has been removed or hidden.
+    const target = controls.find(node => node.dataset.navId === rememberedRailFocusId) ||
+      controls[0];
+    if (target) {
       rememberedPaneFocus = current;
-      focusWithoutJump(nearest);
+      focusWithoutJump(target);
     }
   };
   if (dialog.hidden && !player.active && (inRail || inMain)) {
@@ -1812,10 +1806,10 @@ window.addEventListener('keydown', event => {
     const source = inRail ? nav : main;
     // Spatial search must not send Left from the first artwork column to
     // a filter button somewhere up the screen. Flutter's D-pad focus boundary
-    // transfers to the active rail destination when the current row ends.
+    // returns to the last focused rail destination when the current row ends.
     if (inMain && direction === 'left') {
       if (current.classList.contains('cast-strip')) {
-        focusNearestRail();
+        focusLastRailItem();
         return;
       }
       // The first poster in a media row has no left-hand peer. Never
@@ -1824,7 +1818,7 @@ window.addEventListener('keydown', event => {
       const firstPoster = card && card.parentNode && card ===
         card.parentNode.querySelector('.card');
       if (firstPoster) {
-        focusNearestRail();
+        focusLastRailItem();
         return;
       }
       const rect = rectFor(current);
@@ -1835,7 +1829,7 @@ window.addEventListener('keydown', event => {
       });
       const adjacent = choose(rowCandidates, 'left');
       if (adjacent) { focusWithoutJump(adjacent); return; }
-      focusNearestRail();
+      focusLastRailItem();
       return;
     }
     const local = choose(validControls(source), direction);
