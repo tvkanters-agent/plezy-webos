@@ -5,6 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {CatalogCache} from './catalog-cache.js';
+import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
@@ -16,6 +17,10 @@ import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 const artworkCache = new ArtworkCache();
 const catalogCache = new CatalogCache();
+const savedCatalog = new PersistentCatalogCache();
+function savedPage(key, loader, options) {
+  return savedCatalog.page(catalogScope(activeServer()), key, loader, options);
+}
 // Accessing localStorage itself may throw in a restricted webOS app context.
 function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
@@ -455,11 +460,19 @@ function navigation() {
     if (libraryCacheFor !== api && !libraryLoading) {
       const currentApi = api;
       libraryLoading = true;
-      currentApi.libraries().then(libraries => {
+      savedPage('libraries', () => currentApi.libraries()).then(result => {
         if (currentApi !== api) return;
-        libraryCacheFor = currentApi; libraryCache = libraries; libraryLoading = false;
-        navigation();
-        if (route.type === 'settings') render();
+        const install = libraries => {
+          if (currentApi !== api) return;
+          libraryCacheFor = currentApi; libraryCache = libraries;
+          libraryLoading = false;
+          navigation();
+          if (route.type === 'settings') render();
+        };
+        install(result.value);
+        if (result.fresh) result.fresh.then(update => {
+          if (update.changed) install(update.value);
+        }).catch(() => {});
       }).catch(() => { if (currentApi === api) libraryLoading = false; });
     }
     const searchLink = railButton('Search', () => go({type:'search'}), route.type === 'search' ? 'active' : '', 'search');
@@ -1553,6 +1566,8 @@ function settings() {
     actions.append(button(server.id === (activeServer() || {}).id ? 'Open server' : 'Switch to server', () => {
       state.active = server.id; persist(); setClient(); history = []; go({type: 'home'}, false);
     }), button('Remove from this TV', () => {
+      // Keep each connection's saved catalog isolated and erase it on removal.
+      savedCatalog.removeScope(catalogScope(server)).catch(() => {});
       state.servers = state.servers.filter(s => s.id !== server.id); persist(); setClient(); render();
     })); panel.append(actions); main.append(panel);
   });
