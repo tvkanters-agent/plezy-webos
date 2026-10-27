@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.5.4 — Plezy On Deck episode captions
+
+- Identify Plex Continue Watching hubs as On Deck, including global hub results and fallback shelf results.
+- Display episode cards as in Plezy: the series name above “S# E# · Episode title”, including season zero.
+- Retain original episode titles for playback and detail pages and leave movie cards unchanged.
+- Add unit, Plex API and browser regression coverage.
+
+
 ## 1.5.1 — Faster cached navigation and incremental library refresh
 
 - Predecode only viewport artwork and nearby rows, rather than entire library pages and Home shelves.
