@@ -430,6 +430,8 @@ test('offscreen library posters are deferred until reaching the viewport',async(
   await page.goto('/');
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
+  // A click starts an async library query; wait for its grid before cloning.
+  await expect(page.locator('.grid .card').first()).toBeVisible();
   await page.evaluate(()=>{
     const grid=document.querySelector('.grid');
     const entry=grid.querySelector('.card');
