@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {ArtworkCache} from '../src/artwork-cache.js';
+import {ArtworkCache, artworkCacheKey} from '../src/artwork-cache.js';
 
 const blob = () => new Blob(['test'], {type:'image/png'});
 test('memory image reuse is synchronous after decode and never expires by age', async () => {
@@ -69,4 +69,14 @@ test('revisioned keys fetch the real URL and refresh only on revision change', a
   assert.equal(await cache.resolve(newKey,url),'blob:revision-2');
   assert.equal(fetches,2);
   assert.deepEqual(seen,[url,url]);
+});
+
+test('artwork keys ignore client release version but honor server revisions and sizes', () => {
+  const base='https://plex.test/photo/:/transcode?X-Plex-Version=1.2.1&width=320&url=poster';
+  const upgraded=base.replace('1.2.1','1.2.2');
+  assert.equal(artworkCacheKey(base,'9876'),artworkCacheKey(upgraded,'9876'));
+  assert.notEqual(artworkCacheKey(base,'9876'),artworkCacheKey(base,'9877'));
+  assert.notEqual(artworkCacheKey(base,'9876'),
+    artworkCacheKey(base.replace('width=320','width=600'),'9876'));
+  assert.equal(artworkCacheKey(base,''),'');
 });
