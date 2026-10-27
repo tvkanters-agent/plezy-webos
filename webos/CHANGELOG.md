@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.2.1 — Stable cast heading while loading
+
+- Reserve the cast member's title-count line using the same text metrics as the eventual count, with no fixed line-height or pixel reservation.
+- Confirm the placeholder grows with font changes and the header stays stable when the filmography arrives.
+
+
 ## 1.1.4 — Reduce browsing layout work
 
 - Reuse bounds within D-pad decisions and avoid candidate scans on first-poster sidebar exits.
