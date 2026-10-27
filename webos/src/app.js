@@ -7,6 +7,7 @@ import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js'
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
 import {CatalogCache} from './catalog-cache.js';
+import {cardLabels} from './card-labels.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
@@ -813,9 +814,10 @@ function back() {
   focusFirst(dialog);
 }
 function card(item) {
+  const labels = cardLabels(item);
   const node = button('', () => go({type: 'detail', id: item.id, kind: item.type})); node.className = 'card'; node.dataset.focus = item.id;
-  node.setAttribute('aria-label', item.title + (item.subtitle ? ', ' + item.subtitle : ''));
-  node.append(poster(item), el('strong', item.title), el('small', item.subtitle));
+  node.setAttribute('aria-label', labels.title + (labels.subtitle ? ', ' + labels.subtitle : ''));
+  node.append(poster(item), el('strong', labels.title), el('small', labels.subtitle));
   if (item.unwatchedCount > 0 && ['show','season','Series','Season'].includes(item.type))
     node.append(el('span', String(item.unwatchedCount), 'badge'));
   else if (item.watched && !(item.resume > 0 && item.duration > 0))

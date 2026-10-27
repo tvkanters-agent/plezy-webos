@@ -1,11 +1,19 @@
 # webOS changelog
 
-## 1.5.4 — Preload artwork while scrolling libraries
+## 1.5.5 — Preload artwork while scrolling libraries
 
 - Prefetch artwork three card rows above and below the visible library viewport, including both regular and sparse alphabetical grids and episode lists.
 - Use measured CSS card row height and spacing, including Chromium 53 flex fallback, so the buffer follows TV layout rather than a fixed margin.
 - Load visible artwork before nearby off-screen rows, favoring the scrolling direction without increasing the existing two-download limit.
 - Keep distant artwork deferred; add unit and browser regressions for scroll-buffer behavior.
+
+## 1.5.4 — Plezy On Deck episode captions
+
+- Identify Plex Continue Watching hubs as On Deck, including global hub results and fallback shelf results.
+- Display episode cards as in Plezy: the series name above “S# E# · Episode title”, including season zero.
+- Retain original episode titles for playback and detail pages and leave movie cards unchanged.
+- Add unit, Plex API and browser regression coverage.
+
 
 ## 1.5.1 — Faster cached navigation and incremental library refresh
 
