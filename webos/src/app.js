@@ -6,6 +6,7 @@ import {Player} from './player.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
+import {createGridWindow} from './grid-window.js';
 import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
@@ -91,6 +92,7 @@ nav.addEventListener('focusin', event => {
 let enterPaneAfterNavigation = false;
 let navigationIntent = 0;
 let pendingRailEntryRevision = null, libraryRenderRevision = null;
+let activeGridWindow = null;
 let lastRailRightRevision = null;
 function preferredPaneControl() {
   // Enter media before the toolbar when coming from the remote's side rail.
@@ -598,15 +600,21 @@ async function go(next, remember = true) {
       document.activeElement.dataset.focus : null;
     const alphabet = activeAlphabet;
     if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
+    const windowedGrid = activeGridWindow;
+    if (windowedGrid) { windowedGrid.suspend(); activeGridWindow = null; }
     // A restored page must not replay the previous content entrance animation.
     main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
     while (main.firstChild) snapshot.appendChild(main.firstChild);
     history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
-      catalogGeneration:catalogCache.generation});
+      windowedGrid, catalogGeneration:catalogCache.generation});
     if (history.length > 8) {
       const discarded = history.shift();
       if (discarded.alphabet) discarded.alphabet.destroy();
+      if (discarded.windowedGrid) discarded.windowedGrid.destroy();
     }
+  } else if (activeGridWindow) {
+    activeGridWindow.destroy();
+    activeGridWindow = null;
   }
   route = next;
   if (next.type === 'home' && restoreSessionHome()) return;
@@ -634,6 +642,7 @@ function back() {
   }
   if (player.active) { player.close(); return; }
   if (history.length) {
+    if (activeGridWindow) { activeGridWindow.destroy(); activeGridWindow = null; }
     const previous = history.pop();
     route = previous.route || previous;
     if (previous.snapshot && previous.sourceApi === api && previous.snapshot.childNodes.length &&
@@ -645,6 +654,8 @@ function back() {
       navigation();
       main.scrollTop = route.scroll || 0;
       main.classList.toggle('has-alpha-bar', !!previous.alphabet);
+      activeGridWindow = previous.windowedGrid || null;
+      if (activeGridWindow) activeGridWindow.resume();
       if (previous.alphabet) {
         const restoredRevision = revision;
         activeAlphabet = previous.alphabet;
@@ -657,6 +668,7 @@ function back() {
       schedulePosters();
     } else {
       if (previous.alphabet) previous.alphabet.destroy();
+      if (previous.windowedGrid) previous.windowedGrid.destroy();
       render();
     }
     return;
@@ -956,6 +968,12 @@ async function paginated(loader, currentRevision, options = {}) {
   const retry = button('Retry loading', () => load(), 'library-retry');
   retry.hidden = true;
   main.append(grid, sentinel, errorMessage, retry);
+  // Normal card grids use bounded DOM; grouped collections and variable-height
+  // episode rows retain their existing full layout to avoid incorrect spacers.
+  const windowedGrid = !options.grouped && !options.episodes ? createGridWindow({
+    main, grid, makeCard, focusWithoutJump, schedulePosters
+  }) : null;
+  if (windowedGrid) activeGridWindow = windowedGrid;
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   function makeCard(item) {
     const node = options.episodes ? episodeCard(item) : card(item);
@@ -1040,7 +1058,8 @@ async function paginated(loader, currentRevision, options = {}) {
     } else {
       const items = [];
       for (const page of loadedPages.values()) items.push(...page.items);
-      reconcileCards(grid, items);
+      if (windowedGrid) windowedGrid.setItems(items);
+      else reconcileCards(grid, items);
     }
     if (!grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
     main.scrollTop = scroll;
@@ -1107,8 +1126,12 @@ async function paginated(loader, currentRevision, options = {}) {
         {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
       if (currentRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
-      addPage(grid, page);
       loadedPages.set(offset, page);
+      if (windowedGrid) {
+        const all = [];
+        for (const saved of loadedPages.values()) all.push(...saved.items);
+        windowedGrid.setItems(all);
+      } else addPage(grid, page);
       start += page.items.length;
       completed = !page.items.length || start >= page.total;
       if (completed) cleanup();
@@ -1150,6 +1173,7 @@ async function render(prepared = null) {
   cancelAuth(); detailMenu = null;
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
+  if (activeGridWindow) { activeGridWindow.destroy(); activeGridWindow = null; }
   main.textContent = ''; main.scrollTop = 0; navigation();
   const valid = () => currentRevision === revision;
   try {
