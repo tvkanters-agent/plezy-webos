@@ -85,6 +85,10 @@ test('paged Plex collections continue the same library section before adding the
   await page.locator('.library-tabs').getByRole('button',{name:'Collections'}).click();
   await page.locator('main').getByRole('button',{name:'Favorites'}).click();
   const sections=page.locator('.collection-library-section');
+  await expect(sections).toHaveCount(1);
+  // Auto-pagination only requests the next page once the sentinel approaches
+  // the viewport. Simulate the viewer scrolling through the first 60 cards.
+  await page.locator('#main').evaluate(main => { main.scrollTop = main.scrollHeight; });
   await expect(sections).toHaveCount(2);
   await expect(sections.locator('h2')).toHaveText(['Movies','TV Shows']);
   await expect(sections.nth(0).locator('.grid .card')).toHaveCount(61);
