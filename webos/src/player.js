@@ -129,7 +129,9 @@ export class Player {
   clearSkipMarker() {
     this.cancelSkipTimers();
     this.marker = null; this.skipDismissed = false;
-    if (document.activeElement === this.skipButton)
+    // Legacy LG-resume tests construct only the decoder portion of Player.
+    if (!this.skipButton) return;
+    if (typeof document !== 'undefined' && document.activeElement === this.skipButton)
       (this.controls.classList.contains('hidden-controls') ? this.video :
         this.root.querySelector('[data-action="pause"]')).focus();
     this.skipButton.hidden = true;
@@ -403,7 +405,7 @@ export class Player {
     this.initialSeekPending=false;
     this.hasFirstFrame = this.video.readyState >= 2;
     this.video.style.visibility='visible';
-    this.update();
+    if (this.skipButton) this.update();
     clearTimeout(this.startTimeout);
     this.showBuffering(false);
   }
