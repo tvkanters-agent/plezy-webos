@@ -49,7 +49,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   top.className = bottom.className = 'grid-window-spacer';
   main.insertBefore(top, grid);
   main.insertBefore(bottom, grid.nextSibling);
-  let items = [], columns = 0, stride = 0, range = null;
+  let items = [], itemKeys = [], columns = 0, stride = 0, range = null;
   let live = true, listening = false, paginationCleanup = null;
   let gridOffset = 0, gridPadding = 0;
   let scrollAnchor = {firstItem:0, within:0, stride:1};
@@ -60,8 +60,8 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     cached.clear();
   }
   function save(node) {
-    const id = node.dataset.focus;
-    if (!id) return;
+    const id = node._gridKey;
+    if (id == null) return;
     const previous = cached.get(id);
     if (previous) sharedCards.delete(previous);
     cached.delete(id);
@@ -72,7 +72,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       const oldest = sharedCards.keys().next().value;
       const owner = sharedCards.get(oldest);
       sharedCards.delete(oldest);
-      if (owner.get(oldest.dataset.focus) === oldest) owner.delete(oldest.dataset.focus);
+      if (owner.get(oldest._gridKey) === oldest) owner.delete(oldest._gridKey);
     }
   }
   function reactivateCard(node) {
@@ -93,19 +93,22 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   function paint(start, end) {
     const previous = new Map();
     Array.from(grid.children).forEach(node => {
-      if (node.dataset.focus !== undefined) previous.set(node.dataset.focus, node);
+      if (node._gridKey !== undefined) previous.set(node._gridKey, node);
     });
     const focused = grid.contains(document.activeElement) ? document.activeElement : null;
     const focusedColumn = focused ? focused._gridIndex % columns : 0;
     const desired = [];
     for (let index=start; index<end; index++) {
-      const item = items[index], id = String(item.id), signature = JSON.stringify(item);
-      let node = previous.get(id);
-      if (!node) node = cached.get(id);
+      // Offset pages can overlap when the server inserts a title while
+      // pagination is running. Distinct positions must never share a DOM node.
+      const item = items[index], key = itemKeys[index], signature = JSON.stringify(item);
+      let node = previous.get(key);
+      if (!node) node = cached.get(key);
       if (!node || node._catalogSignature !== signature) node = makeCard(item);
-      const old = cached.get(id);
+      const old = cached.get(key);
       if (old) sharedCards.delete(old);
-      cached.delete(id);
+      cached.delete(key);
+      node._gridKey = key;
       node._gridIndex = index;
       reactivateCard(node);
       desired.push(node);
@@ -254,6 +257,11 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   function focusNeighbor(current,direction) {
     if (!live || !grid.contains(current) || !Number.isInteger(current._gridIndex) ||
         (direction !== 'up' && direction !== 'down')) return false;
+    // A Down from the actual last row belongs to the surrounding page
+    // navigation/paginator, never to another card in this same row.
+    if (direction === 'down' &&
+        Math.floor(current._gridIndex / columns) >= Math.ceil(items.length / columns) - 1)
+      return false;
     const targetIndex = current._gridIndex + (direction === 'down' ? columns : -columns);
     if (targetIndex < 0) return false;
     // A partial last row still follows the current row logically.
@@ -268,6 +276,30 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     focusWithoutJump(next);
     return true;
   }
+  function captureLayoutAnchor() {
+    if (!live || !listening || !grid.isConnected || !items.length || !columns)
+      return null;
+    const beforeOffset = measureOffset();
+    const pane = rect(main), region = rect(top);
+    // Preserve the filmography's place only when it occupies the viewport
+    // or focus is inside it; when editing the header alone, let that control
+    // remain visible rather than jumping down to the grid.
+    const visible = region.top < pane.bottom &&
+      rect(bottom).bottom > pane.top;
+    if (!visible && !grid.contains(document.activeElement)) return null;
+    return {beforeOffset, scrollTop:main.scrollTop};
+  }
+  function refreshLayout(anchor = null) {
+    if (!live || !listening || !grid.isConnected) return;
+    if (anchor) {
+      const afterOffset = measureOffset();
+      const newScroll = anchor.scrollTop + afterOffset - anchor.beforeOffset;
+      if (Math.abs(main.scrollTop-anchor.scrollTop) < 2 ||
+          Math.abs(main.scrollTop-newScroll) < 2)
+        main.scrollTop = Math.max(0,newScroll);
+    }
+    sync(true);
+  }
   resume();
   return {
     get columns() { return columns; },
@@ -280,7 +312,8 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       return live && grid.contains(current) && Number.isInteger(current._gridIndex) &&
         current._gridIndex < (Math.ceil(items.length/Math.max(1,columns))-1)*columns;
     },
-    refreshLayout() { if (live && listening) sync(true); },
+    captureLayoutAnchor,
+    refreshLayout,
     get grid() { return grid; },
     focusNeighbor,
     setPaginationCleanup(fn) { paginationCleanup=fn; },
@@ -292,12 +325,24 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       const oldIndex = focused && Number.isInteger(focused._gridIndex) ?
         focused._gridIndex : -1;
       const focusedId = oldIndex >= 0 ? focused.dataset.focus : null;
-      const newIndex = focusedId == null ? -1 :
-        nextItems.findIndex(item => String(item.id) === focusedId);
+      const focusedKey = oldIndex >= 0 ? focused._gridKey : null;
+      const counts = new Map();
+      const nextKeys = nextItems.map(item => {
+        const id=String(item.id), occurrence=counts.get(id) || 0;
+        counts.set(id,occurrence+1);
+        return JSON.stringify([id,occurrence]);
+      });
+      // Preserve which occurrence was focused if overlapping pages contain
+      // the same server ID. Other cases still fall back to the stable ID.
+      const newIndex = focusedKey == null ?
+        (focusedId == null ? -1 :
+          nextItems.findIndex(item => String(item.id) === focusedId)) :
+        nextKeys.indexOf(focusedKey);
       const nextScroll = oldIndex >= 0 && newIndex >= 0 && columns ?
         Math.max(0,main.scrollTop +
           (Math.floor(newIndex/columns)-Math.floor(oldIndex/columns))*stride) : null;
       items=nextItems;
+      itemKeys=nextKeys;
       if (!items.length) {
         grid.textContent='';
         top.style.height=bottom.style.height='0px';
