@@ -97,7 +97,7 @@ let lastRailRightRevision = null;
 function cardWithinPane(node) {
   if (!node || !main.contains(node)) return false;
   const view = main.getBoundingClientRect(), box = node.getBoundingClientRect();
-  return box.bottom > view.top + 8 && box.top < view.bottom - 8;
+  return box.top >= view.top + 8 && box.bottom <= view.bottom - 8;
 }
 function preferredPaneControl() {
   // Buffered rows are mounted but not visible. Rail RIGHT should never
@@ -2327,8 +2327,11 @@ window.addEventListener('keydown', event => {
     // scroll position. Otherwise enter at the first visible media card.
     const target = (restored && (activeGridWindow?.grid.contains(restored) ?
       cardWithinPane(restored) : true) ? restored : null) || preferredPaneControl();
-    if (target) focusWithoutJump(target);
-    else { main.tabIndex = -1; focusWithoutJump(main); }
+    if (target) {
+      // The pane was intentionally wheel-scrolled while focus remained in
+      // the rail. Focus a visible card without re-revealing its buffered row.
+      focusWithoutJump(target, !(activeGridWindow && activeGridWindow.grid.contains(target)));
+    } else { main.tabIndex = -1; focusWithoutJump(main); }
     return;
   }
   const validControls = scope => Array.from(scope.querySelectorAll(
