@@ -1326,8 +1326,9 @@ test('previously visited unversioned library paints every cached image on its fi
   await expect(first).toHaveCount(movies.length);
   await expect.poll(()=>first.evaluateAll(images=>images.filter(img=>
     img.classList.contains('artwork-loaded') && img.naturalWidth>0).length)).toBe(movies.length);
-  const before=requests;
   await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf')).not.toHaveCount(0);
+  const before=requests;
   // Capture a DOM mutation before the browser paints the new page: all
   // previously loaded images must already have their full-opacity class.
   await page.evaluate(expected=>{
