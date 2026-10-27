@@ -542,12 +542,13 @@ let posterFrame = 0, artworkInFlight = 0;
 function artworkImage(url, persistent, failed, revision = '') {
   const img = el('img');
   img.alt = '';
-  // Keep cached images indefinitely until their server-supplied artwork
-  // revision changes. For versionless artwork, fall back to ordinary loading
-  // instead of risking a permanently stale persistent entry.
-  const key = persistent ? artworkCacheKey(url, revision) : '';
+  // Revisioned artwork persists until metadata changes. Artwork without a
+  // revision can still be reused immediately in RAM for this session, but
+  // is never persisted and therefore cannot go stale across launches.
+  const diskKey = persistent ? artworkCacheKey(url, revision) : '';
+  const key = persistent ? (diskKey || 'session:' + url) : '';
   if (key) {
-    img.setAttribute('data-artwork-cache', '1');
+    if (diskKey) img.setAttribute('data-artwork-cache', '1');
     img.setAttribute('data-artwork-key', key);
   }
   img.setAttribute('data-artwork-url', url);
@@ -621,8 +622,8 @@ function loadVisiblePosters() {
     if (img.hasAttribute('data-artwork-key')) {
       // Memory/disk hits share the same loader. Disk lookups are asynchronous
       // and still fade in; only ready memory hits bypass the loading queue.
-      artworkCache.resolve(img.getAttribute('data-artwork-key'), url)
-        .then(attach, () => attach(url));
+      artworkCache.resolve(img.getAttribute('data-artwork-key'), url,
+        img.hasAttribute('data-artwork-cache')).then(attach, () => attach(url));
     } else attach(url); // Cast photos deliberately stay out of disk storage.
   }
 }
