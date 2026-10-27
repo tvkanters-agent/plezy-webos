@@ -1763,3 +1763,75 @@ test('a cached library remains browsable when server refresh is unavailable',asy
   await expect(page.locator('main .grid .card').first()).toHaveAttribute('aria-label','The Test Film');
   await expect(page.getByText(/Could not load library titles/)).toHaveCount(0);
 });
+
+test('returning to Home restores identical live DOM before any new page render',async({page})=>{
+  const calls=await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  const initialCalls=calls.filter(c=>c.path==='/Users/user/Items/Resume').length;
+  await page.evaluate(()=>{window.originalHomeCard=document.querySelector('main .shelf .card');});
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  expect(await page.evaluate(()=>
+    document.querySelector('main .shelf .card')===window.originalHomeCard)).toBe(true);
+  await expect(page.locator('main .shelf').first()).not.toHaveClass(/content-enter/);
+  expect(calls.filter(c=>c.path==='/Users/user/Items/Resume').length).toBe(initialCalls);
+  // Reusing the snapshot must not consume history in a way that breaks
+  // repeated rail navigation or remote Back.
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+});
+
+test('a visited Series library paints saved metadata while its next request is pending',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Users/user/Views**',route=>route.fulfill({
+    json:{Items:[{Id:'movies',Name:'Movies',CollectionType:'movies'},
+      {Id:'series',Name:'Series',CollectionType:'tvshows'}]}
+  }));
+  const show={Id:'show-1',Name:'Example Series',Type:'Series',ImageTags:{}};
+  let delay=false, releaseRequest, calls=0;
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    const url=new URL(route.request().url());
+    if(url.searchParams.get('ParentId')!=='series')return route.fallback();
+    calls++;
+    if(delay)await new Promise(resolve=>{releaseRequest=resolve;});
+    await route.fulfill({json:{Items:[show],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Series',exact:true}).click();
+  await expect(page.locator('main .grid .card').first()).toHaveAttribute('aria-label','Example Series');
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  const before=calls;
+  delay=true;
+  await page.getByRole('button',{name:'Series',exact:true}).click();
+  await expect(page.locator('main .grid .card').first()).toHaveAttribute('aria-label','Example Series');
+  await expect.poll(()=>calls).toBe(before+1);
+  expect(typeof releaseRequest).toBe('function');
+  // Rendering must not require the refresh request to complete.
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  releaseRequest();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+});
+
+test('a one-frame Home or library load fades even if under the old 120ms cutoff',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Users/user/Items/Resume**',async route=>{
+    await new Promise(resolve=>setTimeout(resolve,70));
+    await route.fulfill({json:{Items:[item]}});
+  });
+  await page.route('http://media.test/Users/user/Items?**',async route=>{
+    await new Promise(resolve=>setTimeout(resolve,70));
+    await route.fulfill({json:{Items:[item],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await expect(page.locator('main .shelf').first()).toHaveClass(/content-enter/);
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid')).toHaveClass(/content-enter/);
+});
