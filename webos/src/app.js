@@ -719,15 +719,15 @@ async function paginated(loader, currentRevision, options = {}) {
       const page = options.initialPage && start === 0 ? options.initialPage : await loader(start);
       options.initialPage = null;
       if (currentRevision !== revision || !grid.isConnected) return;
-      for (let i = 0; i < page.items.length; i += 8) {
-        if (currentRevision !== revision || !grid.isConnected) return;
-        const fragment = document.createDocumentFragment();
-        page.items.slice(i, i + 8).forEach(item =>
-          fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
-        grid.appendChild(fragment);
-        schedulePosters();
-        if (i + 8 < page.items.length) await new Promise(resolve => setTimeout(resolve, 0));
-      }
+      // Build the page off-DOM, then commit it in one operation. Yielding
+      // every eight cards made previously visited libraries visibly appear
+      // row-by-row even when every poster was already decoded in memory.
+      // The viewport loader still prevents decoding offscreen artwork.
+      const fragment = document.createDocumentFragment();
+      page.items.forEach(item =>
+        fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+      grid.appendChild(fragment);
+      schedulePosters();
       start += page.items.length;
       completed = !page.items.length || start >= page.total;
       if (completed) cleanup();
