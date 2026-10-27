@@ -19,6 +19,12 @@ export function gridWindowRange(count, columns, firstRow, visibleRows, previous 
     topRows:startRow, bottomRows:rows-endRow};
 }
 
+// Across all live grids, keep only a small shared pool of detached image nodes.
+// Inactive snapshots additionally discard their pool entries and excess rows.
+// This avoids multiplying a 160-poster cache by every cached library tab.
+const RECYCLED_CARD_BUDGET = 48;
+const sharedCards = new Map(); // DOM card -> owning grid's cache Map
+
 // One synchronous measurement (about two rows), compatible with CSS Grid and
 // the Chromium 53 flexbox fallback. Card subtitles have a reserved line in CSS.
 export function measureGrid(grid) {
@@ -47,15 +53,27 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   let live = true, listening = false, paginationCleanup = null;
   let gridOffset = 0, gridPadding = 0;
   let scrollAnchor = {firstItem:0, within:0, stride:1};
-  const cached = new Map(), CACHE_LIMIT = 160;
+  const cached = new Map();
   const rect = node => node.getBoundingClientRect();
-
+  function clearCached() {
+    cached.forEach(node => sharedCards.delete(node));
+    cached.clear();
+  }
   function save(node) {
     const id = node.dataset.focus;
     if (!id) return;
+    const previous = cached.get(id);
+    if (previous) sharedCards.delete(previous);
     cached.delete(id);
-    cached.set(id, node);
-    while (cached.size > CACHE_LIMIT) cached.delete(cached.keys().next().value);
+    cached.set(id,node);
+    sharedCards.delete(node);
+    sharedCards.set(node,cached);
+    while (sharedCards.size > RECYCLED_CARD_BUDGET) {
+      const oldest = sharedCards.keys().next().value;
+      const owner = sharedCards.get(oldest);
+      sharedCards.delete(oldest);
+      if (owner.get(oldest.dataset.focus) === oldest) owner.delete(oldest.dataset.focus);
+    }
   }
   function reactivateCard(node) {
     // onload's delayed opacity callback intentionally skips detached images.
@@ -85,6 +103,8 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       let node = previous.get(id);
       if (!node) node = cached.get(id);
       if (!node || node._catalogSignature !== signature) node = makeCard(item);
+      const old = cached.get(id);
+      if (old) sharedCards.delete(old);
       cached.delete(id);
       node._gridIndex = index;
       reactivateCard(node);
@@ -155,7 +175,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     scrollAnchor = {firstItem:row*columns, within:local-row*stride, stride};
     show(row,force);
   }
-  function resize() {
+  function resize(measured = null) {
     if (!live || !grid.isConnected || !items.length || !columns) return;
     // Use the last measured pre-resize anchor, not the browser's current
     // scrollTop: Chromium can apply scroll anchoring as CSS changes before
@@ -163,7 +183,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     const {firstItem,within,stride:previousStride} = scrollAnchor;
     // Measure with a temporarily complete first-row sample when our window
     // is near the end and responsive CSS changes the number of columns.
-    ({columns,stride} = measureGrid(grid));
+    ({columns,stride} = measured || measureGrid(grid));
     gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
     gridOffset = measureOffset();
     const newRow = Math.floor(firstItem/columns);
@@ -174,23 +194,54 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     main.scrollTop = Math.max(0,target);
     sync();
   }
+  // Snapshot capture may follow a programmatic scroll in the same event turn,
+  // before the scroll event has updated the last calculated row anchor.
+  function captureAnchor() {
+    if (!columns || !stride || !grid.isConnected) return;
+    gridOffset = measureOffset();
+    gridPadding = parseFloat(getComputedStyle(grid).paddingTop) || 0;
+    const local = Math.max(0,main.scrollTop-gridOffset-gridPadding);
+    const row = Math.floor(local/stride);
+    scrollAnchor = {firstItem:row*columns, within:local-row*stride,stride};
+  }
+  // Suspended routes retain visible rows and one adjacent row on each side,
+  // rather than dozens of overscan/decoded bitmap nodes per cached route.
+  function compactMounted() {
+    if (!items.length || !columns || !grid.isConnected) return;
+    const row = Math.floor(scrollAnchor.firstItem/columns);
+    const rows = Math.ceil(items.length/columns);
+    const visible = Math.ceil(main.clientHeight/stride)+1;
+    const focus = grid.contains(document.activeElement) ? document.activeElement : null;
+    const focusedRow = focus ? Math.floor(focus._gridIndex/columns) : row;
+    // Do not unmount an offscreen remembered focus and change scroll merely
+    // to compact; this route will be restored to that focused item.
+    if (focus && (focusedRow<row-1 || focusedRow>row+visible+1)) return;
+    const startRow = Math.max(0,row-1);
+    const endRow = Math.min(rows,row+visible+1);
+    applyRange({start:startRow*columns,end:Math.min(items.length,endRow*columns),
+      topRows:startRow,bottomRows:rows-endRow},true);
+  }
   const onScroll = () => sync();
   function resume() {
     if (!live || listening) return;
     listening = true;
     main.addEventListener('scroll',onScroll);
     window.addEventListener('resize',resize);
-    // A cached route cannot receive resize while detached. Re-measure every
-    // time it is restored; resize() uses the saved logical anchor from before
-    // suspension, even when the number of columns stayed the same.
-    if (grid.isConnected && items.length && columns) resize();
-    else sync(true);
+    if (grid.isConnected && items.length && columns) {
+      const measured=measureGrid(grid);
+      if (measured.columns !== columns || Math.abs(measured.stride-stride) > .5)
+        resize(measured);
+      else sync(true); // Preserve the exact restored scrollTop without resize.
+    } else sync(true);
   }
   function suspend() {
     if (listening) {
+      captureAnchor();
       listening = false;
       main.removeEventListener('scroll',onScroll);
       window.removeEventListener('resize',resize);
+      clearCached();
+      compactMounted();
     }
     if (paginationCleanup) paginationCleanup();
   }
@@ -198,12 +249,15 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
     if (!live || !grid.contains(current) || !Number.isInteger(current._gridIndex) ||
         (direction !== 'up' && direction !== 'down')) return false;
     const targetIndex = current._gridIndex + (direction === 'down' ? columns : -columns);
-    if (targetIndex < 0 || targetIndex >= items.length) return false;
-    if (!range || targetIndex < range.start || targetIndex >= range.end) {
-      const row = Math.floor(targetIndex/columns);
+    if (targetIndex < 0) return false;
+    // A partial last row still follows the current row logically.
+    const nextIndex=direction==='down' ? Math.min(targetIndex,items.length-1) : targetIndex;
+    if (nextIndex >= items.length) return false;
+    if (!range || nextIndex < range.start || nextIndex >= range.end) {
+      const row = Math.floor(nextIndex/columns);
       applyRange(gridWindowRange(items.length,columns,Math.max(0,row-1),3),true);
     }
-    const next = Array.from(grid.children).find(node=>node._gridIndex===targetIndex);
+    const next = Array.from(grid.children).find(node=>node._gridIndex===nextIndex);
     if (!next) return false;
     focusWithoutJump(next);
     return true;
@@ -211,6 +265,11 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   resume();
   return {
     get columns() { return columns; },
+    hasLaterRow(current) {
+      return live && grid.contains(current) && Number.isInteger(current._gridIndex) &&
+        current._gridIndex < (Math.ceil(items.length/Math.max(1,columns))-1)*columns;
+    },
+    refreshLayout() { if (live && listening) sync(true); },
     get grid() { return grid; },
     focusNeighbor,
     setPaginationCleanup(fn) { paginationCleanup=fn; },
@@ -231,7 +290,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       if (!items.length) {
         grid.textContent='';
         top.style.height=bottom.style.height='0px';
-        range=null;cached.clear();
+        range=null;clearCached();
         return;
       }
       if (nextScroll != null) main.scrollTop=nextScroll;
@@ -252,6 +311,6 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       }
     },
     suspend,resume,
-    destroy() { suspend(); live=false; items=[]; cached.clear(); }
+    destroy() { suspend(); live=false; items=[]; clearCached(); }
   };
 }
