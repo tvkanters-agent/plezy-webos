@@ -24,7 +24,10 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:bundle
-      - run: npx playwright install --with-deps chromium
+      # Ubuntu runners already include Chromium's headless runtime libraries.
+      # Installing --with-deps forces an apt update/upgrade, which can hang on
+      # mirrors even though no missing shared libraries are needed for tests.
+      - run: npx playwright install chromium
       - run: npm run test:e2e
       - run: npm run package
       - uses: actions/upload-artifact@v4
