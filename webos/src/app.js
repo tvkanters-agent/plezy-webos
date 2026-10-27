@@ -1629,6 +1629,13 @@ async function render(prepared = null) {
       const facts=el('div',undefined,'actor-facts');
       const bio=el('div',undefined,'actor-biography');
       header.append(facts,bio);main.append(header);
+      // Plex Discover biography/facts may arrive long after person media has
+      // been virtualized. No ResizeObserver is available on Chromium 53.
+      const refreshActorGrid=()=>requestAnimationFrame(()=>{
+        if (!valid() || !header.isConnected) return;
+        const grid=main.querySelector('.grid');
+        if (grid && grid._windowedGrid) grid._windowedGrid.refreshLayout();
+      });
       const contentStartedAt=beginContentEntrance();
       // The catalog lookup must survive unavailable Plex Discover details.
       savedPage('person-details:' + personRoute.id, () => currentApi.personDetails(personRoute.id)).then(result=>{
@@ -1660,11 +1667,13 @@ async function render(prepared = null) {
               const expand=button('Show more',()=>{
                 const open=text.classList.toggle('collapsed');
                 expand.textContent=open?'Show more':'Show less';
+                refreshActorGrid();
               },'actor-biography-toggle');
               expand.dataset.focus='actor-biography';
               bio.append(expand);
             }
           }
+          refreshActorGrid();
         };
         paintDetails(result.value);
         if (result.fresh) result.fresh.then(update => {
@@ -1678,10 +1687,13 @@ async function render(prepared = null) {
         if(!start&&valid()&&header.isConnected){
           fadeDelayedContent(count,contentStartedAt);
           count.textContent=page.total+' '+(page.total===1?'title':'titles');
+          refreshActorGrid();
         }
         if (!start && result.fresh) result.fresh.then(update => {
-          if (update.changed && valid() && header.isConnected)
+          if (update.changed && valid() && header.isConnected) {
             count.textContent=update.value.total+' '+(update.value.total===1?'title':'titles');
+            refreshActorGrid();
+          }
         }).catch(()=>{});
         return result;
       },currentRevision,{startedAt:contentStartedAt});
@@ -2516,6 +2528,14 @@ window.addEventListener('keydown', event => {
     if (inMain && direction==='down' && current.matches('.grid .card,.episode-list .episode-row')) {
       const cast=main.querySelector('.cast-strip[tabindex]');
       if(cast){
+        const windowed=activeGridWindow();
+        // Check logical rows, not only mounted cards. Otherwise the last
+        // buffered row skips unseen children and sends Down straight to Cast.
+        if (windowed && windowed.grid.contains(current) &&
+            windowed.hasLaterRow(current)) {
+          windowed.focusNeighbor(current,'down');
+          return;
+        }
         const currentRect=rectFor(current);
         const later=Array.from(main.querySelectorAll('.grid .card,.episode-list .episode-row'))
           .some(node=>node!==current && rectFor(node).top>currentRect.top+8);
