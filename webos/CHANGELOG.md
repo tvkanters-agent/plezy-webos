@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.4.1 — Instant Home restoration and consistent content fades
+
+- Restore the preserved Home page directly on same-session rail navigation instead of reconstructing shelves and artwork, keeping decoded images and focus intact.
+- Reuse Home instantly after its 45-second cache window while refreshing in the background; rebuild only if updated server content differs, and do not restore state invalidated by playback, watched changes or server switching.
+- Avoid a redundant teardown when reselecting the active Home or identical library view.
+- Replace the fixed 120 ms page-fade threshold with first-frame readiness. Instantly available pages remain fully visible, while even short real loading gaps fade rather than pop in.
+- Apply the fade to cached library/recommendation/alpha pages when artwork rehydration actually takes longer than a frame.
+- Cover warm Series visits, repeated Home restoration, back navigation, cache invalidation, and short-delay fades in automated tests.
+
 ## 1.4.0 — Persistent library snapshots and live reconciliation
 
 - Persist library directory, Plex and Jellyfin browse pages, Plex recommendations, collection and playlist pages, and Plex alphabet indexes in IndexedDB between app launches.
