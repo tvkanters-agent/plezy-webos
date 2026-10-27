@@ -792,10 +792,12 @@ function back() {
       cancelAuth();
       main.textContent = '';
       main.appendChild(previous.snapshot);
-      forEachPagedGrid(main, node => node._resumeCatalog(revision));
-      navigation();
-      main.scrollTop = route.scroll || 0;
       main.classList.toggle('has-alpha-bar', !!previous.alphabet);
+      navigation();
+      // Restore geometry before the recycler resumes. Otherwise it paints
+      // the first rows and unmounts the focused card from the saved window.
+      main.scrollTop = route.scroll || 0;
+      forEachPagedGrid(main, node => node._resumeCatalog(revision));
       if (previous.alphabet) {
         const restoredRevision = revision;
         activeAlphabet = previous.alphabet;
