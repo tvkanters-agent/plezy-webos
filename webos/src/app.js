@@ -1631,16 +1631,19 @@ async function render(prepared = null) {
       header.append(facts,bio);main.append(header);
       // Plex Discover biography/facts may arrive long after person media has
       // been virtualized. No ResizeObserver is available on Chromium 53.
-      const refreshActorGrid=()=>requestAnimationFrame(()=>{
+      const actorGridWindow=()=>main.querySelector('.grid')?._windowedGrid;
+      const captureActorGrid=()=>actorGridWindow()?.captureLayoutAnchor();
+      const refreshActorGrid=anchor=>requestAnimationFrame(()=>{
         if (!valid() || !header.isConnected) return;
-        const grid=main.querySelector('.grid');
-        if (grid && grid._windowedGrid) grid._windowedGrid.refreshLayout();
+        const windowed=actorGridWindow();
+        if (windowed) windowed.refreshLayout(anchor);
       });
       const contentStartedAt=beginContentEntrance();
       // The catalog lookup must survive unavailable Plex Discover details.
       savedPage('person-details:' + personRoute.id, () => currentApi.personDetails(personRoute.id)).then(result=>{
         const paintDetails = details => {
           if(!valid()||!header.isConnected||!details)return;
+          const layoutAnchor=captureActorGrid();
           facts.textContent=''; bio.textContent='';
           const formatDate=value=>{
             if(!value)return '';
@@ -1665,15 +1668,16 @@ async function render(prepared = null) {
             fadeDelayedContent(bio,contentStartedAt);
             if(long){
               const expand=button('Show more',()=>{
+                const anchor=captureActorGrid();
                 const open=text.classList.toggle('collapsed');
                 expand.textContent=open?'Show more':'Show less';
-                refreshActorGrid();
+                refreshActorGrid(anchor);
               },'actor-biography-toggle');
               expand.dataset.focus='actor-biography';
               bio.append(expand);
             }
           }
-          refreshActorGrid();
+          refreshActorGrid(layoutAnchor);
         };
         paintDetails(result.value);
         if (result.fresh) result.fresh.then(update => {
@@ -1685,14 +1689,16 @@ async function render(prepared = null) {
           () => currentApi.personMedia(personRoute.id,start,personRoute.actor), {priority:start===0});
         const page=result.value;
         if(!start&&valid()&&header.isConnected){
+          const anchor=captureActorGrid();
           fadeDelayedContent(count,contentStartedAt);
           count.textContent=page.total+' '+(page.total===1?'title':'titles');
-          refreshActorGrid();
+          refreshActorGrid(anchor);
         }
         if (!start && result.fresh) result.fresh.then(update => {
           if (update.changed && valid() && header.isConnected) {
+            const anchor=captureActorGrid();
             count.textContent=update.value.total+' '+(update.value.total===1?'title':'titles');
-            refreshActorGrid();
+            refreshActorGrid(anchor);
           }
         }).catch(()=>{});
         return result;
