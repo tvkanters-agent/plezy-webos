@@ -132,10 +132,10 @@ test('compressed artwork memory is limited by bytes, not 128-item entry count', 
   assert.equal(cache.memory.size,350);
 });
 
-test('first-viewport protection is capped and does not grow without bound', () => {
+test('protection spans many libraries without discarding first-screen keys by count', () => {
   const cache=new ArtworkCache({indexedDB:null});
   cache.protect(Array.from({length:400},(_,i)=>'photo-'+i));
-  assert.equal(cache.protectedKeys.size,96);
+  assert.equal(cache.protectedKeys.size,400);
   assert.ok(cache.protectedKeys.has('photo-399'));
-  assert.equal(cache.protectedKeys.has('photo-0'),false);
+  assert.ok(cache.protectedKeys.has('photo-0'));
 });
