@@ -3,11 +3,10 @@
 // finishes, then reconcile changed server data without blocking first paint.
 // Home is deliberately excluded: its volatile CatalogCache starts empty.
 const STORE = 'pages';
-const MAX_DISK_BYTES = 20 * 1024 * 1024;
-const MAX_DISK_ENTRIES = 120;
-const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
-const MAX_MEMORY_ENTRIES = 40;
-const MAX_MEMORY_BYTES = 10 * 1024 * 1024;
+export const CATALOG_DISK_BYTES = 64 * 1024 * 1024;
+export const CATALOG_MEMORY_BYTES = 16 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 4 * 1024 * 1024;
+const TOUCH_INTERVAL_MS = 60000;
 
 function fingerprint(value) {
   // Do not store the Plex/Jellyfin access token in IndexedDB keys.
@@ -25,14 +24,16 @@ export function catalogScope(server) {
 }
 
 export class PersistentCatalogCache {
-  constructor({indexedDB: factory, now = () => Date.now()} = {}) {
+  constructor({indexedDB: factory, now = () => Date.now(),
+    memoryBytes = CATALOG_MEMORY_BYTES, diskBytes = CATALOG_DISK_BYTES} = {}) {
     this.factory = factory === undefined
       ? (typeof indexedDB === 'undefined' ? null : indexedDB) : factory;
     this.now = now;
+    this.memoryLimit = memoryBytes;
+    this.diskLimit = diskBytes;
     this.dbPromise = null;
     this.memory = new Map();
     this.memoryBytes = 0;
-    this.inFlight = new Map();
     this.generations = new Map();
     this.writes = 0;
     this.pruning = null;
@@ -61,34 +62,74 @@ export class PersistentCatalogCache {
     if (entry) this.memoryBytes -= entry.bytes;
     this.memory.delete(key);
   }
-  remember(key, data, bytes) {
+  remember(key, data, bytes, priority = false) {
     if (!bytes) {
       try { bytes = JSON.stringify(data).length * 2; }
       catch (_) { return; }
     }
+    const previous = this.memory.get(key);
+    const protectedPage = priority || !!(previous && previous.priority);
     this.forget(key);
-    if (bytes > MAX_MEMORY_BYTES) return;
-    this.memory.set(key, {data, bytes});
+    if (bytes > this.memoryLimit) return;
+    this.memory.set(key, {data, bytes, priority: protectedPage, used: this.now()});
     this.memoryBytes += bytes;
-    while (this.memory.size > MAX_MEMORY_ENTRIES || this.memoryBytes > MAX_MEMORY_BYTES)
-      this.forget(this.memory.keys().next().value);
+    // Landing pages are compact but essential to instant reopening. Evict
+    // scrolled-through pages first, regardless of how many pages exist.
+    while (this.memoryBytes > this.memoryLimit) {
+      const disposable = Array.from(this.memory).find(([, row]) => !row.priority);
+      this.forget(disposable ? disposable[0] : this.memory.keys().next().value);
+    }
   }
-  async read(key) {
+  async touch(key, priority) {
+    const db = await this.open();
+    if (!db) return;
+    return new Promise(resolve => {
+      try {
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const entry = request.result;
+          if (!entry) return;
+          if ((priority && !entry.priority) ||
+              this.now() - entry.used >= TOUCH_INTERVAL_MS) {
+            entry.used = this.now();
+            entry.priority = priority || !!entry.priority;
+            store.put(entry);
+          }
+        };
+        tx.oncomplete = resolve; tx.onerror = resolve; tx.onabort = resolve;
+      } catch (_) { resolve(); }
+    });
+  }
+  async read(key, priority = false) {
     if (this.memory.has(key)) {
       const entry = this.memory.get(key);
-      this.remember(key, entry.data, entry.bytes);
+      const shouldTouch = (priority && !entry.priority) ||
+        this.now() - entry.used >= TOUCH_INTERVAL_MS;
+      this.remember(key, entry.data, entry.bytes, priority);
+      // Disk LRU must reflect navigation even when metadata hits RAM; a
+      // stale disk timestamp otherwise evicts an actively used first page.
+      if (shouldTouch) this.touch(key, priority).catch(() => {});
       return entry.data;
     }
     const db = await this.open();
     if (!db) return null;
     return new Promise(resolve => {
       try {
-        const tx = db.transaction(STORE, 'readonly');
-        const request = tx.objectStore(STORE).get(key);
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        const request = store.get(key);
         request.onsuccess = () => {
           const entry = request.result;
           if (entry && entry.data !== undefined && entry.bytes <= MAX_ENTRY_BYTES) {
-            this.remember(key, entry.data, entry.bytes);
+            this.remember(key, entry.data, entry.bytes, priority || !!entry.priority);
+            if ((priority && !entry.priority) ||
+                this.now() - entry.used >= TOUCH_INTERVAL_MS) {
+              entry.used = this.now();
+              entry.priority = priority || !!entry.priority;
+              store.put(entry);
+            }
             resolve(entry.data);
           } else resolve(null);
         };
@@ -97,7 +138,7 @@ export class PersistentCatalogCache {
       } catch (_) { resolve(null); }
     });
   }
-  async write(key, data) {
+  async write(key, data, priority = false) {
     let bytes;
     try { bytes = JSON.stringify(data).length * 2; }
     catch (_) { return; }
@@ -107,7 +148,7 @@ export class PersistentCatalogCache {
     const put = () => new Promise((resolve, reject) => {
       try {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put({key, data, bytes, used: this.now()});
+        tx.objectStore(STORE).put({key, data, bytes, used: this.now(), priority});
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
@@ -115,20 +156,20 @@ export class PersistentCatalogCache {
     });
     try {
       await put();
-      if (++this.writes % 10 === 0) this.prune().catch(() => {});
+      if (++this.writes % 24 === 0) this.prune().catch(() => {});
     } catch (_) {
       // Some TVs have very small IDB quotas; cache failure must never
       // prevent the real network response or make the UI unusable.
-      await this.prune(MAX_DISK_BYTES / 2, MAX_DISK_ENTRIES / 2);
+      await this.prune(this.diskLimit / 2);
       try { await put(); } catch (_) { /* Storage is optional. */ }
     }
   }
-  async prune(maxBytes = MAX_DISK_BYTES, maxEntries = MAX_DISK_ENTRIES) {
+  async prune(maxBytes = this.diskLimit) {
     if (this.pruning) return this.pruning;
-    this.pruning = this.pruneRows(maxBytes, maxEntries).catch(() => {});
+    this.pruning = this.pruneRows(maxBytes).catch(() => {});
     try { await this.pruning; } finally { this.pruning = null; }
   }
-  async pruneRows(maxBytes, maxEntries) {
+  async pruneRows(maxBytes) {
     const db = await this.open();
     if (!db) return;
     const entries = await new Promise(resolve => {
@@ -140,7 +181,7 @@ export class PersistentCatalogCache {
           const cursor = request.result;
           if (!cursor) { resolve(rows); return; }
           rows.push({key: cursor.key, bytes: cursor.value.bytes || 0,
-            used: cursor.value.used || 0});
+            used: cursor.value.used || 0, priority: !!cursor.value.priority});
           cursor.continue();
         };
         request.onerror = () => resolve([]);
@@ -148,11 +189,13 @@ export class PersistentCatalogCache {
       } catch (_) { resolve([]); }
     });
     let total = entries.reduce((sum, e) => sum + e.bytes, 0);
-    let count = entries.length;
     const remove = [];
-    for (const row of entries.sort((a, b) => a.used - b.used)) {
-      if (total <= maxBytes && count <= maxEntries) break;
-      remove.push(row.key); total -= row.bytes; count--;
+    // A library with thousands of titles must not lose its first page simply
+    // because it has many small pagination entries. Bound actual bytes only.
+    for (const row of entries.sort((a, b) =>
+      Number(a.priority) - Number(b.priority) || a.used - b.used)) {
+      if (total <= maxBytes) break;
+      remove.push(row.key); total -= row.bytes;
     }
     if (!remove.length) return;
     await new Promise(resolve => {
@@ -167,7 +210,7 @@ export class PersistentCatalogCache {
   // Start revalidation at the same time as disk lookup. Fresh responses only
   // replace a page when different; a failed request leaves the saved page.
   // Every open has a fresh task, even if the data is in memory.
-  async page(scope, key, loader, {force = false} = {}) {
+  async page(scope, key, loader, {force = false, priority = false} = {}) {
     const id = this.id(scope, key);
     const serial = (this.generations.get(id) || 0) + 1;
     this.generations.set(id, serial);
@@ -175,15 +218,15 @@ export class PersistentCatalogCache {
     // Observe a rejected request immediately, including while IndexedDB is
     // opening, so browsers do not report an unhandled rejection.
     const live = requested.then(value => ({value}), error => ({error}));
-    const cached = force ? null : await this.read(id);
+    const cached = force ? null : await this.read(id, priority);
     if (cached !== null && cached !== undefined) {
       const fresh = live.then(result => {
         if (result.error) return {error:result.error,changed:false};
         if (this.generations.get(id) !== serial)
           return {value:result.value,changed:false};
         const changed = JSON.stringify(cached) !== JSON.stringify(result.value);
-        this.remember(id, result.value);
-        if (changed) this.write(id, result.value).catch(() => {});
+        this.remember(id, result.value, undefined, priority);
+        if (changed) this.write(id, result.value, priority).catch(() => {});
         return {value:result.value,changed};
       });
       return {value:cached, fresh, cached:true};
@@ -191,8 +234,8 @@ export class PersistentCatalogCache {
     const result = await live;
     if (result.error) throw result.error;
     if (this.generations.get(id) === serial) {
-      this.remember(id, result.value);
-      this.write(id, result.value).catch(() => {});
+      this.remember(id, result.value, undefined, priority);
+      this.write(id, result.value, priority).catch(() => {});
     }
     return {value:result.value, fresh:null, cached:false};
   }
