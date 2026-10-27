@@ -941,6 +941,16 @@ test('Plezy person fallback handles absent and failed portraits on cast strip an
  const strip=page.locator('.cast-strip'), portraits=strip.locator('.cast-picture');
  await expect(portraits).toHaveCount(2);
  await expect(portraits.locator('.person-placeholder svg')).toHaveCount(2);
+ // The head must be circular, not the malformed cubic path that drew a dark wedge.
+ await expect(portraits.locator('.person-placeholder svg circle')).toHaveCount(2);
+ await expect(portraits.locator('.person-placeholder svg circle').first()).toHaveAttribute('r','4');
+ const portraitGeometry=await portraits.first().locator('svg').evaluate(svg=>{
+   const head=svg.querySelector('circle').getBBox();
+   const shoulders=svg.querySelector('path').getBBox();
+   return {round:head.width===head.height, gap:shoulders.y-head.y-head.height};
+ });
+ expect(portraitGeometry.round).toBe(true);
+ expect(portraitGeometry.gap).toBeGreaterThan(0);
  await expect(portraits.nth(0).locator('img')).toHaveCount(0);
  await portraits.nth(1).scrollIntoViewIfNeeded();
  await expect.poll(()=>attempts).toBeGreaterThan(0);
@@ -949,6 +959,7 @@ test('Plezy person fallback handles absent and failed portraits on cast strip an
  await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'No Portrait'})).toBeVisible();
  await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar .person-placeholder svg circle')).toHaveCount(1);
  await expect(page.locator('.actor-avatar img')).toHaveCount(0);
  await page.keyboard.press('Escape');
  await expect(strip).toHaveCount(1);
@@ -959,6 +970,7 @@ test('Plezy person fallback handles absent and failed portraits on cast strip an
  await expect.poll(()=>attempts).toBeGreaterThan(1);
  await expect(page.locator('.actor-avatar img')).toHaveCount(0);
  await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar .person-placeholder svg circle')).toHaveCount(1);
 });
 
 test('actor count loads without shifting the cast page header',async({page})=>{
@@ -1040,6 +1052,7 @@ test('Plezy actor page displays compact portrait, character, biography and filmo
  await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{name:'Movie Actor'})).toBeVisible();
  await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
+ await expect(page.locator('.actor-avatar .person-placeholder svg circle')).toHaveCount(1);
  await expect(page.locator('.actor-avatar img')).toHaveCount(0);
  await expect(page.getByText('The Lead')).toBeVisible();
  await expect(page.getByText('Rotterdam, Netherlands')).toBeVisible();
