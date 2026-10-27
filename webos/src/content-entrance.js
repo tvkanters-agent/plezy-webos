@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Avoid fading pages whose data arrived before the first noticeable loading gap.
-// Artwork has its own independent ready-from-cache / async-fade lifecycle.
+// Only fade content when a frame actually passed without it. The previous
+// fixed delay missed short-but-visible loading gaps on fast LG browsers.
+// Artwork still has its own independent fade / decoded-cache lifecycle.
 export const CONTENT_FADE_DELAY_MS = 120;
+
+// Tracking the first paint avoids an arbitrary millisecond threshold: data
+// available in the same rendering turn paints immediately, while data that
+// arrives after an empty frame is softly introduced.
+export function beginContentEntrance(schedule = callback => requestAnimationFrame(callback)) {
+  const state = {blankFrame: false};
+  schedule(() => { state.blankFrame = true; });
+  return state;
+}
+
 export function fadeDelayedContent(node, startedAt, now = Date.now()) {
-  if (now - startedAt >= CONTENT_FADE_DELAY_MS) node.classList.add('content-enter');
+  const delayed = startedAt && typeof startedAt === 'object'
+    ? startedAt.blankFrame
+    : now - startedAt >= CONTENT_FADE_DELAY_MS;
+  if (delayed) node.classList.add('content-enter');
   return node;
 }
