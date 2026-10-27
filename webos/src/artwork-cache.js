@@ -6,7 +6,6 @@ import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './ca
 export const ARTWORK_DISK_BYTES = 768 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
-const MAX_PRIORITY_KEYS = 96; // About four library landing viewports.
 const MAX_DECODED_BYTES = 96 * 1024 * 1024; // Approximate bitmap RAM budget.
 
 // Plex photo URLs include X-Plex-Version (our app release number); this is
@@ -65,8 +64,6 @@ export class ArtworkCache {
       if (!key) continue;
       this.protectedKeys.delete(key);
       this.protectedKeys.add(key);
-      while (this.protectedKeys.size > MAX_PRIORITY_KEYS)
-        this.protectedKeys.delete(this.protectedKeys.values().next().value);
     }
   }
   memoryVictim() {
