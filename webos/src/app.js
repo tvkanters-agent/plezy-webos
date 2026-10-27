@@ -967,15 +967,46 @@ async function render() {
         return;
       }
       if (currentApi instanceof Plex && view === 'recommended') {
-        const shelves = await catalogCache.get('recommended:' + route.library.id,
-          () => currentApi.recommended(route.library.id));
+        const result = await savedPage('recommended:' + route.library.id,
+          () => currentApi.recommended(route.library.id), {force:forceRefresh});
         if (!valid()) return;
-        await prewarmShelves(shelves, currentApi);
-        if (!valid()) return;
-        if (!shelves.length) main.append(fadeDelayedContent(el('p','No recommendations for this library.', 'muted'), contentStartedAt));
-        shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
-          section.append(el('h2', shelf.title), cards(shelf.items)); main.append(fadeDelayedContent(section, contentStartedAt)); });
-        schedulePosters();
+        const anchor = document.createComment('recommended-shelves');
+        main.append(anchor);
+        let mounted = [];
+        async function paintShelves(shelves, updated = false) {
+          await prewarmShelves(shelves, currentApi);
+          if (!valid() || !anchor.isConnected) return;
+          const fragment = document.createDocumentFragment(), next = [];
+          if (!shelves.length) next.push(el('p', 'No recommendations for this library.', 'muted'));
+          shelves.forEach(shelf => {
+            const section = el('section', undefined, 'shelf');
+            section.append(el('h2', shelf.title), cards(shelf.items));
+            next.push(section);
+          });
+          const focus = updated && main.contains(document.activeElement) ?
+            document.activeElement.dataset.focus : null;
+          const scroll = main.scrollTop;
+          next.forEach(node => {
+            if (!updated) fadeDelayedContent(node, contentStartedAt);
+            fragment.appendChild(node);
+          });
+          main.insertBefore(fragment, anchor);
+          mounted.forEach(node => node.remove());
+          mounted = next;
+          if (updated) {
+            main.scrollTop = scroll;
+            if (focus) {
+              const selected = Array.from(main.querySelectorAll('[data-focus]')).find(
+                node => node.dataset.focus === focus);
+              if (selected) focusWithoutJump(selected, false);
+            }
+          }
+          schedulePosters();
+        }
+        await paintShelves(result.value);
+        if (result.fresh) result.fresh.then(update => {
+          if (update.changed && valid()) paintShelves(update.value, true).catch(() => {});
+        }).catch(() => {});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
@@ -1041,28 +1072,51 @@ async function render() {
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
-        const [pageResult, characters] = await Promise.all([
+        const [firstResult, firstCharacters] = await Promise.all([
           libraryLoader(0).catch(error => ({error})),
-          catalogCache.get('characters:' + JSON.stringify([route.library.id, selectedFilter]),
-            () => currentApi.firstCharacters(route.library.id, selectedFilter)).catch(() => [])
+          savedPage('characters:' + JSON.stringify([route.library.id, selectedFilter]),
+            () => currentApi.firstCharacters(route.library.id, selectedFilter),
+            {force:forceRefresh}).catch(() => ({value:[],fresh:null}))
         ]);
         if (!valid()) return;
-        if (pageResult.error) {
-          await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
-        } else if (showPlexAlphaBar(pageResult.total, characters, selected)) {
-          await prewarmPosters(pageResult.items, currentApi);
+        if (firstResult.error) {
+          await paginated(start => libraryLoader(start), currentRevision,
+            {startedAt:contentStartedAt});
+        } else if (showPlexAlphaBar(firstResult.value.total, firstCharacters.value, selected)) {
+          await prewarmPosters(firstResult.value.items, currentApi);
           if (!valid()) return;
           main.classList.add('has-alpha-bar');
+          // Further pages can be restored from disk too, but alpha navigation
+          // uses true Plex offsets rather than flattened sorted list positions.
+          const alphaLoader = async (start, count) => {
+            const result = await libraryLoader(start, count);
+            if (result.fresh) result.fresh.then(async update => {
+              if (!update.changed || !valid() || !activeAlphabet) return;
+              await prewarmPosters(update.value.items, currentApi);
+              if (valid() && activeAlphabet)
+                activeAlphabet.updateRange(start, update.value);
+            }).catch(() => {});
+            return result.value;
+          };
           activeAlphabet = mountAlphabetLibrary({
-            main, firstPage: pageResult, characters,
-            loader: (start, count) => libraryLoader(start, count),
+            main, firstPage: firstResult.value, characters:firstCharacters.value,
+            loader: alphaLoader,
             card, schedulePosters, focusWithoutJump, isActive: valid,
             startedAt:contentStartedAt,
             prewarmPage: items => prewarmPosters(items, currentApi)
           });
+          if (firstResult.fresh) firstResult.fresh.then(async update => {
+            if (!update.changed || !valid() || !activeAlphabet) return;
+            await prewarmPosters(update.value.items, currentApi);
+            if (valid() && activeAlphabet) activeAlphabet.updateRange(0, update.value);
+          }).catch(() => {});
+          if (firstCharacters.fresh) firstCharacters.fresh.then(update => {
+            if (update.changed && valid() && activeAlphabet)
+              activeAlphabet.updateCharacters(update.value);
+          }).catch(() => {});
         } else {
           await paginated(start => libraryLoader(start), currentRevision,
-            {initialPage:pageResult, startedAt:contentStartedAt});
+            {initialPage:firstResult, startedAt:contentStartedAt});
         }
       } else if (currentApi instanceof Jellyfin) {
         // Native MediaBrowserAlphaBarStrategy uses a synthetic 27-letter
@@ -1071,7 +1125,7 @@ async function render() {
         if (!valid()) return;
         if (firstPage.error) {
           await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
-        } else if (firstPage.total >= 80 || route.alpha) {
+        } else if (firstPage.value.total >= 80 || route.alpha) {
           main.classList.add('has-alpha-bar');
           await paginated(start => libraryLoader(start), currentRevision,
             {initialPage:firstPage, startedAt:contentStartedAt});
