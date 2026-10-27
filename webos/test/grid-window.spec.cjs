@@ -46,8 +46,11 @@ for (const layout of ['grid','flex']) {
     // Reaching the end of each loaded range requests the next page. The
     // titles remain in memory/IndexedDB, but the number of DOM cards is bounded.
     for(let i=1;i<5;i++) {
-      await page.locator('main').evaluate(node=>node.scrollTop=node.scrollHeight);
-      await expect.poll(()=>calls.length).toBeGreaterThan(i);
+      await expect.poll(async()=>{
+        await page.locator('main').evaluate(node=>node.scrollTop=node.scrollHeight);
+        return calls.includes(i*60);
+      }, {timeout:12000,message:'Missing page '+i+'; requests: '+calls.join(',')})
+        .toBe(true);
     }
     await expect.poll(()=>page.locator('main .grid .card').count())
       .toBeLessThan(100);
