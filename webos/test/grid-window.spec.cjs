@@ -218,6 +218,12 @@ for(const layout of ['grid','flex']) {
 
 test('recycling reuses nearby artwork DOM and suspends both scroll listeners',async({page})=>{
   const calls=await mockLongJellyfinLibrary(page);
+  const artworkRequests=[];
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGPUsAlgYGBgYmBgYGBgAAAIcgC421576AAAAABJRU5ErkJggg==','base64');
+  await page.route('http://media.test/Items/*/Images/Primary**',route=>{
+    artworkRequests.push(new URL(route.request().url()).pathname);
+    return route.fulfill({body:png,contentType:'image/png'});
+  });
   await page.setViewportSize({width:1280,height:720});
   await page.goto('/');
   await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
@@ -238,6 +244,10 @@ test('recycling reuses nearby artwork DOM and suspends both scroll listeners',as
   await fillFivePages(page,calls);
   await page.locator('main').evaluate(main=>main.scrollTop=0);
   await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
+  await expect(page.locator('main .grid .card[data-focus="0"] img'))
+    .toHaveClass(/artwork-(ready|loaded)/);
+  const initialRequestCount=artworkRequests.filter(x=>x==='/Items/0/Images/Primary').length;
+  expect(initialRequestCount).toBeGreaterThan(0);
   await page.evaluate(()=>{window.savedCard=document.querySelector('.grid .card[data-focus="0"]')});
   await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.7);
   await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(0);
@@ -245,4 +255,8 @@ test('recycling reuses nearby artwork DOM and suspends both scroll listeners',as
   await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
   expect(await page.evaluate(()=>document.querySelector('.grid .card[data-focus="0"]')===window.savedCard))
     .toBe(true);
+  await expect(page.locator('main .grid .card[data-focus="0"] img'))
+    .toHaveClass(/artwork-(ready|loaded)/);
+  expect(artworkRequests.filter(x=>x==='/Items/0/Images/Primary').length)
+    .toBe(initialRequestCount);
 });
