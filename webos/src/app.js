@@ -5,6 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {fadeDelayedContent} from './content-entrance.js';
+import {mergedCollectionLoader} from './collection-merge.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
@@ -1363,7 +1364,10 @@ async function render() {
         heading.className = 'detail-children-title';
         main.append(heading);
         const currentApi = api;
-        await paginated(start => currentApi.children(item.id, start, item.type),
+        const loadChildren = currentApi instanceof Plex && item.type === 'collection'
+          ? mergedCollectionLoader(currentApi, item)
+          : start => currentApi.children(item.id, start, item.type);
+        await paginated(loadChildren,
           currentRevision, {episodes: item.type === 'season' || item.type === 'Season',
             startedAt:Date.now()});
       }
