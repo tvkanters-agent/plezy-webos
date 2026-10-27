@@ -166,3 +166,10 @@ The artwork queue batches viewport reads before assigning image sources, avoidin
 read/write/read layout work in Chromium. It retains the two-request limit,
 prefetch margins, document order, error handling and OptimizedMediaImage fade.
 Tests verify read-before-write ordering, deferred artwork and concurrency.
+
+Right from the sidebar during library loading parks focus on the content pane
+until the initial page completes. This replaces up to 120 animation-frame polls
+with the existing page-completion handoff, translating Flutter's retained
+preattachment focus request in `LibraryBrowseTab._navigateToGrid`. A deliberate
+focus move before completion cancels the handoff. Delayed-response tests cover
+both entering the first card and leaving the pane while data is pending.

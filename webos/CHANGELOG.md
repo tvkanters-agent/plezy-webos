@@ -5,6 +5,7 @@
 - Reuse bounds within D-pad decisions and avoid candidate scans on first-poster sidebar exits.
 - Bound alphabet-grid sizing to the first row plus one card, preserving jump/focus alignment.
 - Batch artwork measurements before starting image loads, retaining concurrency and fades.
+- Replace pending library focus polling with a completion handoff; preserve cancellation and empty-library navigation.
 - Add deterministic performance regression checks alongside existing navigation and playback tests.
 
 ## 1.1.3 — Stable alphabet row alignment

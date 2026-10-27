@@ -632,6 +632,9 @@ test('D-pad Right from every sidebar destination crosses directly into the main 
   await expect(page.getByLabel('Title', {exact:true})).toBeFocused();
 
   await page.getByRole('button', {name:'Movies',exact:true}).click();
+  // Finish the route's automatic focus before testing a new sidebar entry.
+  // The separate gated-response tests exercise Right while data is pending.
+  await expect(page.locator('main .grid .card').first()).toBeFocused();
   await page.getByRole('button', {name:'Movies',exact:true}).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('main .grid .card').first()).toBeFocused();
@@ -1115,4 +1118,41 @@ test('missing artwork uses the native-style subdued fallback instead of a browse
   const poster=page.locator('main .card .poster').first();
   await expect(poster.locator('img')).toHaveCount(0);
   await expect(poster).not.toContainText('▷');
+});
+
+for (const leavePane of [false, true]) {
+test(`Right during a pending library request respects entry intent (leave: ${leavePane})`, async ({page}) => {
+  await mockServer(page);
+  let release;
+  await page.route('http://media.test/Users/user/Items?**', async route => {
+    await new Promise(resolve => { release = resolve; });
+    await route.fulfill({json:{Items:[item],TotalRecordCount:1}});
+  });
+  await page.goto('/');
+  await page.getByRole('button', {name:'Movies',exact:true}).click();
+  await expect.poll(() => !!release).toBe(true);
+  await page.getByRole('button', {name:'Movies',exact:true}).focus();
+  await page.keyboard.press('ArrowRight');
+  // Keep the request blocked across animation frames, as on a slower server.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (leavePane) await page.getByRole('button', {name:'Movies',exact:true}).focus();
+  release();
+  await expect(page.locator('main .grid .card').first()).toBeVisible();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (leavePane) await expect(page.getByRole('button', {name:'Movies',exact:true})).toBeFocused();
+  else await expect(page.locator('main .grid .card').first()).toBeFocused();
+});
+}
+
+test('Right enters controls of an empty library after loading completes', async ({page}) => {
+  await mockServer(page);
+  await page.route('http://media.test/Users/user/Items?**', route =>
+    route.fulfill({json:{Items:[],TotalRecordCount:0}}));
+  await page.goto('/');
+  await page.getByRole('button', {name:'Movies',exact:true}).click();
+  await expect(page.getByText('No titles found.', {exact:true})).toBeVisible();
+  await expect(page.locator('main').getByRole('button', {name:'Recommended',exact:true})).toBeFocused();
+  await page.getByRole('button', {name:'Movies',exact:true}).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('main').getByRole('button', {name:'Recommended',exact:true})).toBeFocused();
 });

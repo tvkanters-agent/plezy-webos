@@ -54,7 +54,7 @@ function playbackClosed() {
 }
 let rememberedPaneFocus = null;
 let enterPaneAfterNavigation = false;
-let pendingRailEntryRevision = null;
+let pendingRailEntryRevision = null, libraryRenderRevision = null;
 let lastRailRightRevision = null;
 function preferredPaneControl() {
   // Enter media before the toolbar when coming from the remote's side rail.
@@ -753,6 +753,7 @@ async function render() {
       if (!libraries.length) main.append(el('p', 'No video libraries are available for this account.'));
       else main.append(el('p', 'Select a library from the navigation rail to browse its recommended titles, collections and playlists.', 'muted'));
     } else if (route.type === 'library') {
+      libraryRenderRevision = currentRevision;
       title(route.library.title); const currentApi = api;
       const view = route.view || 'browse';
       const tabs = el('div', undefined, 'library-tabs');
@@ -881,6 +882,8 @@ async function render() {
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {
         pendingRailEntryRevision=null;
+        // A deliberate move away while loading cancels the pending handoff.
+        if (document.activeElement !== main) { schedulePosters(); return; }
         focusFirst(main, preferredPaneControl(), true);
       }
     } else if (route.type === 'person' && api instanceof Plex) {
@@ -1310,6 +1313,8 @@ async function render() {
   } catch (error) {
     if (!valid()) return;
     main.append(el('p', error.message, 'error'), button('Retry', render), button('Settings', () => go({type: 'settings'})));
+  } finally {
+    if (libraryRenderRevision === currentRevision) libraryRenderRevision = null;
   }
   if (valid()) {
     schedulePosters();
@@ -1632,21 +1637,14 @@ window.addEventListener('keydown', event => {
   // item happens to be geometrically to the right (indented libraries).
   if (dialog.hidden && !player.active && inRail && direction === 'right') {
     lastRailRightRevision=revision;
-    if (route.type==='library' && !main.querySelector('.grid .card,.shelf .card')) {
-      // RIGHT is an explicit intent to enter the media grid, even when
-      // the first paged fetch is still populating. Delay the focus target,
-      // not the user's keypress, and cancel on navigation.
-      const requested=revision;
-      let frames=0;
-      const enterWhenReady=()=>{
-        if(revision!==requested || !main.isConnected) return;
-        const artwork=main.querySelector('.grid .card,.shelf .card,.episode-list .episode-row');
-        if(artwork) { focusWithoutJump(artwork); return; }
-        if(frames++<120 && (document.activeElement===main || nav.contains(document.activeElement)))
-          requestAnimationFrame(enterWhenReady);
-      };
-      requestAnimationFrame(enterWhenReady);
+    if (libraryRenderRevision===revision && !main.querySelector('.grid .card,.shelf .card')) {
+      // Flutter retains focus requests until the grid item is attached.
+      // Park on the pane while loading; focusing a toolbar control would
+      // make focusFirst treat our own temporary focus as a user's choice.
       pendingRailEntryRevision=revision;
+      main.tabIndex = -1;
+      focusWithoutJump(main, false);
+      return;
     }
     const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
       main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
