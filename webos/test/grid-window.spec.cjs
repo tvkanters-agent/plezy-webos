@@ -562,9 +562,39 @@ test('delayed Plex actor facts reflows virtualized person grid',async({page})=>{
     const original=grid._windowedGrid.refreshLayout;
     grid._windowedGrid.refreshLayout=()=>{window.actorRefreshes++;original();};
   });
+  // Hold the focused filmography title in the same viewport position when
+  // late actor facts/biography are inserted above the virtualized grid.
+  const anchored=await page.locator('main').evaluate(main=>{
+    const pane=main.getBoundingClientRect();
+    const card=Array.from(main.querySelectorAll('.grid .card')).find(node=>{
+      const box=node.getBoundingClientRect();
+      return box.top>pane.top+12 && box.bottom<pane.bottom-12;
+    });
+    if(!card)return null;
+    card.focus();
+    return {id:card.dataset.focus,top:card.getBoundingClientRect().top,
+      scroll:main.scrollTop};
+  });
+  expect(anchored).not.toBeNull();
   releaseBio();
   await expect(page.getByText('Test City')).toBeVisible();
   await expect.poll(()=>page.evaluate(()=>window.actorRefreshes)).toBeGreaterThan(0);
+  await expect(page.locator('main .grid .card[data-focus="'+anchored.id+'"]')).toBeFocused();
+  const preserved=await page.locator('main .grid .card[data-focus="'+anchored.id+'"]')
+    .evaluate(node=>node.getBoundingClientRect().top);
+  expect(Math.abs(preserved-anchored.top)).toBeLessThan(4);
+  // A subsequent manual biography expansion is another above-grid layout
+  // shift, including when the grid card is still holding remote focus.
+  const toggle=page.locator('.actor-biography-toggle');
+  await expect(toggle).toHaveCount(1);
+  await toggle.evaluate(node=>node.click());
+  await expect(toggle).toHaveText('Show less');
+  await expect.poll(()=>page.locator('main .grid .card[data-focus="'+anchored.id+'"]')
+    .evaluate(node=>node.getBoundingClientRect().top)).toBeCloseTo(anchored.top,0);
+  await toggle.evaluate(node=>node.click());
+  await expect(toggle).toHaveText('Show more');
+  await expect.poll(()=>page.locator('main .grid .card[data-focus="'+anchored.id+'"]')
+    .evaluate(node=>node.getBoundingClientRect().top)).toBeCloseTo(anchored.top,0);
   await expect.poll(async()=>!!(await visibleGridAnchor(page))).toBe(true);
   const before=await visibleGridAnchor(page);
   const focusedIndex=await page.locator('main .grid').evaluate((grid,index)=>{
@@ -601,3 +631,100 @@ test('shared recycler budget covers nine separately cached library pages',async(
   expect(stats.mounted).toBeLessThanOrEqual(
     Math.max(80,stats.columns*(stats.visibleRows+8)));
 });
+
+for(const layout of ['grid','flex']) {
+  test('Down at the last loaded row never moves sideways or self-focuses ('+layout+')',async({page})=>{
+    const calls=await mockLongJellyfinLibrary(page);
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex') await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await expect(page.locator('.grid .card')).toHaveCount(60);
+    const columns=await page.locator('.grid').evaluate(grid=>grid._windowedGrid.columns);
+    const finalRow=Math.floor(59/columns);
+    const firstOfLast=finalRow*columns;
+    await page.locator('.grid .card[data-focus="'+firstOfLast+'"]').focus();
+    await page.keyboard.press('ArrowDown');
+    // The incomplete paginator can still trigger its next fetch, but not
+    // redirect focus to another card in the same terminal row.
+    const focused=await page.evaluate(()=>document.activeElement.dataset.focus);
+    expect(focused).not.toBe('59');
+    // Once more pages have loaded, the actual final row must also hand off
+    // to ordinary page scrolling (rather than focus itself indefinitely).
+    await fillFivePages(page,calls);
+    await expect.poll(async()=>{
+      await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight);
+      return calls.includes(300);
+    }).toBe(true);
+    await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight);
+    const lastRow=Math.floor(359/columns)*columns;
+    await expect(page.locator('.grid .card[data-focus="'+lastRow+'"]')).toHaveCount(1);
+    await page.locator('.grid .card[data-focus="'+lastRow+'"]').focus();
+    await page.keyboard.press('ArrowDown');
+    const terminal=await page.evaluate(()=>document.activeElement.dataset.focus);
+    expect(terminal).not.toBe('359');
+  });
+  test('overlapping '+layout+' offset pages keep both logical cards distinct',async({page})=>{
+    const calls=await mockLongJellyfinLibrary(page);
+    await page.route('http://media.test/Users/user/Items**',route=>{
+      const url=new URL(route.request().url());
+      const start=Number(url.searchParams.get('StartIndex')||0);
+      if(start!==60)return route.fallback();
+      // An insertion above a page boundary makes page 60 contain the old
+      // final item 59 again; there must be two distinct logical DOM nodes.
+      calls.push(start);
+      const items=Array.from({length:60},(_,i)=>{
+        const n=start+i-1;
+        return {Id:String(n),Name:'Title '+String(n).padStart(3,'0'),
+          Type:'Movie',ImageTags:{Primary:'art-'+n}};
+      });
+      return route.fulfill({json:{Items:items,TotalRecordCount:360}});
+    });
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto('/');
+    if(layout==='flex') await page.addStyleTag({content:`
+      main .grid{display:flex!important}
+      main .grid .card{flex:0 0 170px!important;width:170px!important;
+        margin:0 20px 26px 0!important}
+    `});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await expect.poll(async()=>{
+      await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight);
+      return calls.includes(60);
+    }).toBe(true);
+    await expect.poll(async()=>page.locator('.grid').evaluate(grid=>{
+      const cards=Array.from(grid.querySelectorAll('.card'));
+      return cards.some(n=>n._gridIndex>=60);
+    })).toBe(true);
+    await page.locator('main').evaluate(main=>{
+      const grid=main.querySelector('.grid');
+      const cards=Array.from(grid.querySelectorAll('.card'));
+      const first=cards[0].getBoundingClientRect();
+      const second=cards.find(node=>Math.abs(node.getBoundingClientRect().top-first.top)>3);
+      const stride=second?second.getBoundingClientRect().top-first.top:340;
+      const columns=grid._windowedGrid.columns;
+      const top=main.scrollTop+grid.getBoundingClientRect().top-
+        main.getBoundingClientRect().top;
+      main.scrollTop=top+(Math.floor(59/columns)-2)*stride;
+    });
+    await expect(page.locator('.grid .card[data-focus="59"]')).toHaveCount(2);
+    const duplicateState=await page.locator('.grid').evaluate(grid=>{
+      const nodes=Array.from(grid.querySelectorAll('.card'));
+      const duplicates=nodes.filter(node=>node.dataset.focus==='59');
+      return {total:nodes.length,unique:new Set(nodes).size,
+        indices:duplicates.map(node=>node._gridIndex),same:duplicates[0]===duplicates[1]};
+    });
+    expect(duplicateState.indices).toEqual([59,60]);
+    expect(duplicateState.same).toBe(false);
+    expect(duplicateState.total).toBe(duplicateState.unique);
+    await page.locator('.grid .card[data-focus="59"]').first().focus();
+    const columns=await page.locator('.grid').evaluate(grid=>grid._windowedGrid.columns);
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(()=>page.locator('.grid .card:focus').evaluate(node=>node._gridIndex))
+      .toBe(59+columns);
+  });
+}
