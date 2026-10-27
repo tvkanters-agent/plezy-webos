@@ -145,12 +145,13 @@ test('unavailable collection discovery still shows original titles under its lib
 });
 
 test('collection discovery is shared between different names and refreshed in background',async()=>{
-  let now=1000, listings=0, resolveRefresh;
+  let now=1000, listings=0;
+  const releaseRefresh=[];
   const api={
     libraries:async()=>[{id:'film',title:'Films'},{id:'tv',title:'Shows'}],
     collections:async id=>{
       listings++;
-      if(listings>2) await new Promise(resolve=>{resolveRefresh=resolve;});
+      if(listings>2) await new Promise(resolve=>{releaseRefresh.push(resolve);});
       return {items:[collection(id, id==='film'?'Holiday':'Other',id)],total:1};
     }
   };
@@ -164,7 +165,7 @@ test('collection discovery is shared between different names and refreshed in ba
   assert.equal(stale.length,1,'stale results should return while refreshing');
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(listings>2);
-  resolveRefresh();
+  releaseRefresh.forEach(resolve=>resolve());
 });
 
 test('collection discovery persists across API clients with account-scoped keys',async()=>{

@@ -41,12 +41,32 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   const alive = () => !destroyed && activeCheck() && grid.isConnected;
   const loadedEnd = () => rangeStart + items.length;
   const allCards = () => Array.from(grid.querySelectorAll('.card'));
+  const makeCard = item => {
+    const node = card(item);
+    node._catalogSignature = JSON.stringify(item);
+    return node;
+  };
   const paint = (data, mode) => {
-    const fragment = document.createDocumentFragment();
-    data.forEach(item => fragment.appendChild(card(item)));
-    if (mode === 'append') grid.append(fragment);
-    else if (mode === 'prepend') grid.insertBefore(fragment, grid.firstChild);
-    else { grid.textContent = ''; grid.append(fragment); }
+    if (mode === 'replace') {
+      // Like the ordinary library paginator, reconcile server metadata without
+      // re-creating unchanged images or dropping a focused title's DOM.
+      const existing = new Map();
+      Array.from(grid.children).forEach(node => {
+        if (node.dataset.focus) existing.set(String(node.dataset.focus), node);
+      });
+      data.forEach((item, index) => {
+        let node = existing.get(String(item.id));
+        if (!node || node._catalogSignature !== JSON.stringify(item)) node = makeCard(item);
+        if (grid.children[index] !== node)
+          grid.insertBefore(node, grid.children[index] || null);
+      });
+      while (grid.children.length > data.length) grid.removeChild(grid.lastChild);
+    } else {
+      const fragment = document.createDocumentFragment();
+      data.forEach(item => fragment.appendChild(makeCard(item)));
+      if (mode === 'append') grid.append(fragment);
+      else grid.insertBefore(fragment, grid.firstChild);
+    }
     schedulePosters();
   };
   const measure = () => {
