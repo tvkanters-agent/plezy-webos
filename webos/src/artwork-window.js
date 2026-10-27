@@ -26,3 +26,10 @@ export function artworkWindowStart(targetOffset, columns) {
   const row = Math.floor(Math.max(0, Number(targetOffset) || 0) / stride);
   return Math.max(0, (row - 2) * stride);
 }
+
+// Estimate the off-screen artwork band from the current CSS row stride,
+// rather than one hard-coded pixel margin for every TV density/layout.
+export function artworkPrefetchMargin(rowStride) {
+  const stride = Number(rowStride);
+  return Number.isFinite(stride) && stride > 0 ? stride * 3 : 200;
+}
