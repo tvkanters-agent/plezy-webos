@@ -487,7 +487,55 @@ function navigation() {
     if (restore) focusWithoutJump(restore, false);
   }
 }
+// Home's already-mounted shelves and decoded poster elements can be reused
+// without a fetch, decode, or a single blank frame. Navigation history owns
+// the detached nodes; consuming its most recent matching snapshot is safe
+// because the older Back entry can still fall back to render().
+function restoreSessionHome() {
+  const priorRows = catalogCache.peek('home', {allowExpired:true});
+  if (!priorRows) return false;
+  const candidate = history.slice().reverse().find(entry =>
+    entry.route?.type === 'home' && entry.sourceApi === api &&
+    entry.catalogGeneration === catalogCache.generation &&
+    entry.snapshot && entry.snapshot.childNodes.length);
+  if (!candidate) return false;
+  const needsRefresh = catalogCache.peek('home') === null;
+  const currentApi = api;
+  const focusFromRail = enterPaneAfterNavigation;
+  enterPaneAfterNavigation = false;
+  const expected = ++revision;
+  pendingRailEntryRevision = null;
+  lastRailRightRevision = null;
+  cancelAuth();
+  detailMenu = null;
+  main.classList.remove('has-alpha-bar');
+  main.textContent = '';
+  main.appendChild(candidate.snapshot);
+  main.scrollTop = candidate.route.scroll || 0;
+  navigation();
+  schedulePosters();
+  focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
+  // A session can outlive the 45s Home freshness window. Show the preserved
+  // DOM immediately, but still honour TTL by updating it when data differs.
+  if (needsRefresh) {
+    catalogCache.get('home', () => currentApi.home()).then(rows => {
+      if (expected !== revision || currentApi !== api || route.type !== 'home') return;
+      if (JSON.stringify(rows) !== JSON.stringify(priorRows)) render();
+    }).catch(() => {
+      // Offline refresh must not blank already usable Home shelves.
+    });
+  }
+  return true;
+}
 function go(next, remember = true) {
+  // Re-selecting the current destination must not tear down its page.
+  if (next.type === 'home' && route.type === 'home' && catalogCache.peek('home', {allowExpired:true}))
+    return;
+  if (next.type === 'library' && route.type === 'library' &&
+      next.library.id === route.library.id && (next.view || 'browse') === (route.view || 'browse') &&
+      (next.sort || 'title') === (route.sort || 'title') &&
+      (next.filter || 'all') === (route.filter || 'all') &&
+      (next.alpha || '') === (route.alpha || '') && !next.forceRefresh) return;
   const fromRail = nav.contains(document.activeElement);
   enterPaneAfterNavigation = fromRail;
   rememberedPaneFocus = null;
@@ -504,13 +552,16 @@ function go(next, remember = true) {
     // A restored page must not replay the previous content entrance animation.
     main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
     while (main.firstChild) snapshot.appendChild(main.firstChild);
-    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet});
+    history.push({route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
+      catalogGeneration:catalogCache.generation});
     if (history.length > 8) {
       const discarded = history.shift();
       if (discarded.alphabet) discarded.alphabet.destroy();
     }
   }
-  route = next; render();
+  route = next;
+  if (next.type === 'home' && restoreSessionHome()) return;
+  render();
 }
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
 function back() {
