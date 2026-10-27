@@ -13,6 +13,7 @@ export function alphabetTopInset(grid) {
 
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
   card, schedulePosters, focusWithoutJump, isActive, startedAt = Date.now(),
+  showRail = true,
   prewarmPage = async () => {}}) {
   const shell = document.querySelector('#shell');
   const topSpace = document.createElement('div');
@@ -108,6 +109,8 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     onExit: focusGrid
   };
   let rail = createAlphaJumpBar(characters, railOptions);
+  let railVisible = showRail;
+  rail.element.hidden = !railVisible;
   shell.append(rail.element);
   paint(items, 'replace');
   measure();
@@ -265,7 +268,12 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   requestAnimationFrame(check);
   return {
     get element() { return rail.element; },
-    handleKey: code => rail.handleKey(code), focus: () => rail.focus(),
+    handleKey: code => railVisible && rail.handleKey(code),
+    focus: () => { if (railVisible) rail.focus(); },
+    setRailVisible(visible) {
+      railVisible = !!visible;
+      rail.element.hidden = !railVisible;
+    },
     updateCharacters(next) {
       if (!alive() || JSON.stringify(next) === JSON.stringify(helper.letters.map(letter => ({title:letter,size:helper.sizes[letter]})))) {
         // Compare canonical bucket data rather than the initial parameter:
@@ -276,6 +284,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
       const previous = rail;
       helper = alphaIndex(next);
       rail = createAlphaJumpBar(next, railOptions);
+      rail.element.hidden = !railVisible;
       shell.append(rail.element);
       previous.destroy();
       rail.draw();
@@ -309,8 +318,8 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     },
     resume(nextIsActive) {
       activeCheck = nextIsActive;
-      rail.element.hidden = false;
-      rail.draw();
+      rail.element.hidden = !railVisible;
+      if (railVisible) rail.draw();
       updateLetter();
       requestAnimationFrame(check);
     },

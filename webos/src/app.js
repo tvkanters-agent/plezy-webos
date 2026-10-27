@@ -1290,20 +1290,20 @@ async function render(prepared = null) {
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
-        const [firstResult, firstCharacters] = await Promise.all([
-          libraryLoader(0).catch(error => ({error})),
-          savedPage('characters:' + JSON.stringify([route.library.id, selectedFilter]),
-            () => currentApi.firstCharacters(route.library.id, selectedFilter),
-            {force:forceRefresh, priority:true}).catch(() => ({value:[],fresh:null}))
-        ]);
+        // The first titles page is independent of the alphabet index.
+        // Missing/slow bucket metadata must never delay visible cached titles.
+        const characterRequest = savedPage(
+          'characters:' + JSON.stringify([route.library.id, selectedFilter]),
+          () => currentApi.firstCharacters(route.library.id, selectedFilter),
+          {force:forceRefresh, priority:true}).catch(() => ({value:[],fresh:null}));
+        const firstResult = await libraryLoader(0).catch(error => ({error}));
         if (!valid()) return;
         if (firstResult.error) {
           await paginated(start => libraryLoader(start), currentRevision,
             {startedAt:contentStartedAt});
-        } else if (showPlexAlphaBar(firstResult.value.total, firstCharacters.value, selected)) {
+        } else if (firstResult.value.total >= 80) {
           await prewarmPosters(firstResult.value.items, currentApi, {protectFirst:24});
           if (!valid()) return;
-          main.classList.add('has-alpha-bar');
           // Further pages can be restored from disk too, but alpha navigation
           // uses true Plex offsets rather than flattened sorted list positions.
           const alphaLoader = async (start, count) => {
@@ -1317,7 +1317,7 @@ async function render(prepared = null) {
             return result.value;
           };
           activeAlphabet = mountAlphabetLibrary({
-            main, firstPage: firstResult.value, characters:firstCharacters.value,
+            main, firstPage: firstResult.value, characters:[], showRail:false,
             loader: alphaLoader,
             card, schedulePosters, focusWithoutJump, isActive: valid,
             startedAt:contentStartedAt,
@@ -1328,9 +1328,19 @@ async function render(prepared = null) {
             await prewarmPosters(update.value.items, currentApi, {protectFirst:24});
             if (valid() && activeAlphabet) activeAlphabet.updateRange(0, update.value);
           }).catch(() => {});
-          if (firstCharacters.fresh) firstCharacters.fresh.then(update => {
-            if (update.changed && valid() && activeAlphabet)
-              activeAlphabet.updateCharacters(update.value);
+          characterRequest.then(result => {
+            if (!valid() || !activeAlphabet) return;
+            const apply = characters => {
+              if (!valid() || !activeAlphabet) return;
+              activeAlphabet.updateCharacters(characters);
+              const enabled = showPlexAlphaBar(firstResult.value.total, characters, selected);
+              activeAlphabet.setRailVisible(enabled);
+              main.classList.toggle('has-alpha-bar', enabled);
+            };
+            apply(result.value);
+            if (result.fresh) result.fresh.then(update => {
+              if (update.changed) apply(update.value);
+            }).catch(() => {});
           }).catch(() => {});
         } else {
           await paginated(start => libraryLoader(start), currentRevision,

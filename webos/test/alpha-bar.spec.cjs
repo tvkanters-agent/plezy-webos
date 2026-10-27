@@ -303,3 +303,19 @@ test('Plex alphabet grid and letter index restore before server responds after r
   releasePage();releaseLetters();
   await expect(page.locator('.alpha-window-grid .card')).toHaveCount(60);
 });
+
+test('a missing firstCharacter index never blocks a cached Plex library grid',async({page})=>{
+  await mockPlexAlphabet(page);
+  let releaseLetters;
+  await page.route('http://plex.test/library/sections/movies/firstCharacter**',async route=>{
+    await new Promise(resolve=>{releaseLetters=resolve;});
+    await route.fallback();
+  });
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.locator('.alpha-window-grid .card').first()).toBeVisible();
+  await expect(page.locator('.alpha-jump-bar')).toBeHidden();
+  releaseLetters();
+  await expect(page.locator('.alpha-jump-bar')).toBeVisible();
+  await expect(page.locator('.alpha-letter-slot')).toHaveCount(6);
+});
