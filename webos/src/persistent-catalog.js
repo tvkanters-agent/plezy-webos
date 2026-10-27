@@ -6,7 +6,7 @@ import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './ca
 const STORE = 'pages';
 export const CATALOG_DISK_BYTES = 256 * 1024 * 1024;
 export const CATALOG_MEMORY_BYTES = 16 * 1024 * 1024;
-const MAX_ENTRY_BYTES = 4 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const TOUCH_INTERVAL_MS = 60000;
 
 function fingerprint(value) {
