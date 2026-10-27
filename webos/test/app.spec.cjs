@@ -102,6 +102,45 @@ test('slow home shelves fade in together instead of popping in',async({page})=>{
   await expect(page.locator('main .shelf').first()).toHaveClass(/content-enter/);
   await expect(page.locator('main .shelf .card').first()).toBeVisible();
 });
+test('recent Home and library visits use cached metadata, while Refresh bypasses it',async({page})=>{
+  const calls=await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  const homeCalls=()=>calls.filter(x=>x.path==='/Users/user/Items/Resume').length;
+  const browseCalls=()=>calls.filter(x=>x.path==='/Users/user/Items').length;
+  const initialHome=homeCalls();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  const initialBrowse=browseCalls();
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  expect(homeCalls()).toBe(initialHome);
+  expect(browseCalls()).toBe(initialBrowse);
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect.poll(browseCalls).toBe(initialBrowse+1);
+});
+
+test('watch-state mutations invalidate cached Home and library pages',async({page})=>{
+  const calls=await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  const originalHome=calls.filter(x=>x.path==='/Users/user/Items/Resume').length;
+  const originalBrowse=calls.filter(x=>x.path==='/Users/user/Items').length;
+  await page.locator('main .grid .card').first().click();
+  await page.getByRole('button',{name:'Mark watched',exact:true}).click();
+  await expect.poll(()=>calls.some(x=>x.path==='/Users/user/PlayedItems/movie'&&x.method==='POST')).toBe(true);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await expect.poll(()=>calls.filter(x=>x.path==='/Users/user/Items/Resume').length).toBe(originalHome+1);
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>calls.filter(x=>x.path==='/Users/user/Items').length).toBe(originalBrowse+1);
+});
+
 test('search renders results and focuses the first match',async({page})=>{
   await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByLabel('Title',{exact:true}).fill('film');
   await page.locator('form').getByRole('button',{name:'Search',exact:true}).click();await expect(page.getByRole('heading',{name:'1 results'})).toBeVisible();
