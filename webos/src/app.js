@@ -553,6 +553,7 @@ function artworkImage(url, persistent, failed, revision = '') {
   img.setAttribute('data-artwork-url', url);
   img.onload = () => {
     if (key && img.src.indexOf('blob:') === 0) artworkCache.markReady(key);
+    else if (img.src === url) artworkCache.markDirectImage(url);
     if (img.classList.contains('artwork-ready')) return;
     // A second frame guarantees the transparent starting style was painted,
     // even when IndexedDB or the browser cache resolves during initial layout.
@@ -573,6 +574,11 @@ function artworkImage(url, persistent, failed, revision = '') {
   if (ready) {
     img.classList.add('artwork-ready');
     img.src = ready; // Set before DOM insertion for the first rendered frame.
+  } else if (artworkCache.sawDirectImage(url)) {
+    // Native image cache hits decode synchronously. Only skip the fade if
+    // Chromium confirms this image is actually ready before DOM insertion.
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) img.classList.add('artwork-ready');
   } else {
     img.setAttribute('data-poster-src', url);
   }
