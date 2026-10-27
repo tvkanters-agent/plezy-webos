@@ -1151,7 +1151,6 @@ async function render() {
           };
           activeAlphabet = mountAlphabetLibrary({
             main, firstPage: firstResult.value, characters:firstCharacters.value,
-            cached: firstResult.cached,
             loader: alphaLoader,
             card, schedulePosters, focusWithoutJump, isActive: valid,
             startedAt:contentStartedAt,
