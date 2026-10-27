@@ -1303,3 +1303,102 @@ test('changed artwork tags refresh images while unchanged versions stay cached',
   await expect(page.locator('main .grid .poster img').first()).toHaveClass(/artwork-ready/);
   expect(requested.length).toBe(count);
 });
+
+test('previously visited unversioned library paints every cached image on its first frame',async({page})=>{
+  await mockServer(page);
+  const movies=Array.from({length:12},(_,i)=>({Id:'repeat-'+i,Name:'Repeat '+i,Type:'Movie'}));
+  const image='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>';
+  let requests=0;
+  await page.route('http://media.test/**', route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.includes('/Images/')){
+      requests++;
+      return route.fulfill({body:image,headers:{
+        'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}});
+    }
+    if(url.pathname.endsWith('/Users/user/Items'))return route.fulfill({
+      json:{Items:movies,TotalRecordCount:movies.length}});
+    return route.fallback();
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  const first=page.locator('main .grid .poster img');
+  await expect(first).toHaveCount(movies.length);
+  await expect.poll(()=>first.evaluateAll(images=>images.filter(img=>
+    img.classList.contains('artwork-loaded') && img.naturalWidth>0).length)).toBe(movies.length);
+  const before=requests;
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  // Capture a DOM mutation before the browser paints the new page: all
+  // previously loaded images must already have their full-opacity class.
+  await page.evaluate(expected=>{
+    window.libraryFirstFrame=null;
+    window.libraryFrameObserver=new MutationObserver(()=>{
+      if(window.libraryFirstFrame)return;
+      const grid=document.querySelector('main .grid');
+      if(!grid||grid.querySelectorAll('.card').length!==expected)return;
+      const imgs=Array.from(grid.querySelectorAll('.poster img'));
+      window.libraryFirstFrame=imgs.map(img=>({
+        ready:img.classList.contains('artwork-ready'),
+        opacity:getComputedStyle(img).opacity, src:img.getAttribute('src')
+      }));
+      window.libraryFrameObserver.disconnect();
+    });
+    window.libraryFrameObserver.observe(document.querySelector('main'),{childList:true,subtree:true});
+  },movies.length);
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.libraryFirstFrame)).not.toBeNull();
+  const firstFrame=await page.evaluate(()=>window.libraryFirstFrame);
+  expect(firstFrame).toHaveLength(movies.length);
+  expect(firstFrame.every(img=>img.ready&&img.opacity==='1'&&img.src.startsWith('blob:'))).toBe(true);
+  expect(requests).toBe(before);
+});
+
+test('actor avatar image itself stays circular during its fade',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'dev',active:'plex',
+    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+  const actor={id:'17',tag:'Performer',thumb:'/cast/17.jpg'};
+  const film={ratingKey:'film',type:'movie',title:'Cast Image Test',Role:[actor]};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/photo/:/transcode')return route.fulfill({
+      body:'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>',
+      headers:{'Content-Type':'image/svg+xml'}});
+    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{
+      Hub:[{title:'Films',Metadata:[film]}]}}});
+    if(path==='/library/metadata/film')return route.fulfill({
+      json:{MediaContainer:{Metadata:[film]}}});
+    return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:/Cast Image Test/}).first().click();
+  await page.locator('.cast-strip').focus();
+  await page.keyboard.press('Enter');
+  const portrait=page.locator('.actor-avatar img');
+  await expect(portrait).toHaveCount(1);
+  await expect(portrait).toHaveClass(/artwork-loaded/);
+  const geometry=await portrait.evaluate(img=>{
+    const parent=getComputedStyle(img.parentElement), style=getComputedStyle(img);
+    return {childRadius:style.borderTopLeftRadius,parentRadius:parent.borderTopLeftRadius,
+      width:img.getBoundingClientRect().width,height:img.getBoundingClientRect().height};
+  });
+  expect(geometry.childRadius).toBe('50%');
+  expect(geometry.parentRadius).toBe('40px');
+  expect(geometry.width).toBe(geometry.height);
+});
+
+test('Home does not flash a loading string while its first requests are pending',async({page})=>{
+  await mockServer(page);
+  let release;
+  await page.route('http://media.test/Users/user/Items/Resume**',async route=>{
+    await new Promise(resolve=>{release=resolve;});
+    await route.fulfill({json:{Items:[item]}});
+  });
+  await page.goto('/');
+  await expect.poll(()=>typeof release).toBe('function');
+  await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+  await expect(page.getByText('Loading your library…')).toHaveCount(0);
+  expect(await page.locator('main').innerText()).not.toMatch(/Loading your library/);
+  release();
+  await expect(page.locator('main .shelf')).not.toHaveCount(0);
+});
