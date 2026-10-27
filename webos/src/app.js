@@ -26,7 +26,7 @@ function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
-let detailMenu = null, ratingDialogReturnFocus = null;
+let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
 let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
@@ -564,10 +564,22 @@ function go(next, remember = true) {
   render();
 }
 function cancelAuth() { if (authAbort) { authAbort.abort(); authAbort = null; } }
+// Match the source AlertDialog's cancel-first autofocus, while restoring the
+// actual covered screen's focus instead of jumping to its first control.
+function dismissExitDialog() {
+  dialog.hidden = true;
+  dialog.classList.remove('exit-dialog');
+  dialog.removeAttribute('aria-labelledby');
+  const target = exitDialogReturnFocus;
+  exitDialogReturnFocus = null;
+  if (target && target.isConnected) focusWithoutJump(target, false);
+  else focusFirst();
+}
 function back() {
   if (detailMenu) { closeDetailMenu(); return; }
   if (!dialog.hidden) {
     if(ratingDialogReturnFocus){closeRatingSheet();return;}
+    if (dialog.classList.contains('exit-dialog')) { dismissExitDialog(); return; }
     dialog.hidden = true; focusFirst(); return;
   }
   if (player.active) { player.close(); return; }
@@ -598,10 +610,19 @@ function back() {
     }
     return;
   }
-  dialog.textContent = ''; dialog.append(el('h2', 'Close Plezy?'));
+  exitDialogReturnFocus = document.activeElement;
+  dialog.classList.add('exit-dialog');
+  dialog.textContent = '';
+  const title = el('h2', 'Close Plezy?');
+  title.id = 'exit-dialog-title';
+  dialog.setAttribute('aria-labelledby', title.id);
+  dialog.append(title, el('p', 'Are you sure you want to close Plezy?', 'dialog-description'));
   const actions = el('div', undefined, 'actions');
-  actions.append(button('Keep watching', () => { dialog.hidden = true; focusFirst(); }), button('Exit', () => window.close()));
-  dialog.append(actions); dialog.hidden = false; focusFirst(dialog);
+  actions.append(button('Keep watching', dismissExitDialog), button('Exit', () => window.close()));
+  actions.lastElementChild.classList.add('primary');
+  dialog.append(actions);
+  dialog.hidden = false;
+  focusFirst(dialog);
 }
 function card(item) {
   const node = button('', () => go({type: 'detail', id: item.id, kind: item.type})); node.className = 'card'; node.dataset.focus = item.id;

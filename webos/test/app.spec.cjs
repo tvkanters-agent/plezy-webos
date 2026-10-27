@@ -162,6 +162,38 @@ test('Back 461 opens an exit confirmation and traps navigation inside it',async(
   await page.keyboard.press('ArrowRight');await expect(page.getByRole('button',{name:'Exit',exact:true})).toBeFocused();
   await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toBeHidden();
 });
+test('exit dialog uses Plezy Mono styling and restores focus on cancellation',async({page})=>{
+  await page.goto('/');
+  const previous=page.getByRole('button',{name:'Sign in with Plex',exact:true});
+  await expect(previous).toBeFocused();
+  await page.keyboard.press('Escape');
+  const modal=page.getByRole('dialog');
+  await expect(modal).toBeVisible();
+  await expect(modal).toHaveClass(/exit-dialog/);
+  await expect(modal.getByRole('heading',{name:'Close Plezy?'})).toBeVisible();
+  await expect(modal.getByText('Are you sure you want to close Plezy?')).toBeVisible();
+  const layout=await modal.evaluate(node=>{
+    const style=getComputedStyle(node), rect=node.getBoundingClientRect();
+    return {background:style.backgroundColor,border:style.borderTopWidth,
+      radius:style.borderTopLeftRadius,
+      centerX:rect.left+rect.width/2,centerY:rect.top+rect.height/2};
+  });
+  const viewport=page.viewportSize();
+  expect(layout.background).toBe('rgb(21, 23, 28)');
+  expect(layout.border).toBe('0px');
+  expect(layout.radius).toBe('28px');
+  expect(Math.abs(layout.centerX-viewport.width/2)).toBeLessThan(3);
+  expect(Math.abs(layout.centerY-viewport.height/2)).toBeLessThan(3);
+  const cancel=modal.getByRole('button',{name:'Keep watching'});
+  const exit=modal.getByRole('button',{name:'Exit',exact:true});
+  await expect(cancel).toBeFocused();
+  expect(await cancel.evaluate(node=>getComputedStyle(node).borderTopLeftRadius)).toBe('100px');
+  expect(await exit.evaluate(node=>getComputedStyle(node).backgroundColor)).toBe('rgb(237, 237, 237)');
+  await page.keyboard.press('ArrowRight');await expect(exit).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await expect(previous).toBeFocused();
+});
 test('cancelling Plex linking prevents subsequent polling',async({page})=>{
   let polls=0;await page.route('https://plex.tv/**',async route=>{
     if(new URL(route.request().url()).pathname==='/api/v2/pins')await route.fulfill({json:{id:1,code:'ABCD',expiresIn:300}});
