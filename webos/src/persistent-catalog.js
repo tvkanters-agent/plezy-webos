@@ -2,8 +2,9 @@
 // Offline-tolerant library snapshots. Return saved pages before the network
 // finishes, then reconcile changed server data without blocking first paint.
 // Home is deliberately excluded: its volatile CatalogCache starts empty.
+import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
 const STORE = 'pages';
-export const CATALOG_DISK_BYTES = 64 * 1024 * 1024;
+export const CATALOG_DISK_BYTES = 256 * 1024 * 1024;
 export const CATALOG_MEMORY_BYTES = 16 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 4 * 1024 * 1024;
 const TOUCH_INTERVAL_MS = 60000;
@@ -164,20 +165,22 @@ export class PersistentCatalogCache {
     });
     try {
       await put();
-      if (++this.writes % 24 === 0) this.prune().catch(() => {});
+      if (++this.writes % 96 === 0) this.prune().catch(() => {});
     } catch (_) {
       // Some TVs have very small IDB quotas; cache failure must never
       // prevent the real network response or make the UI unusable.
-      await this.prune(this.diskLimit / 2);
+      await this.prune(undefined, true);
       try { await put(); } catch (_) { /* Storage is optional. */ }
     }
   }
-  async prune(maxBytes = this.diskLimit) {
-    if (this.pruning) return this.pruning;
-    this.pruning = this.pruneRows(maxBytes).catch(() => {});
+  async prune(maxBytes, quotaFailure = false) {
+    if (this.pruning) await this.pruning;
+    const budget = maxBytes === undefined
+      ? await preferredDiskBudget(this.diskLimit, 0.15) : maxBytes;
+    this.pruning = this.pruneRows(budget, quotaFailure).catch(() => {});
     try { await this.pruning; } finally { this.pruning = null; }
   }
-  async pruneRows(maxBytes) {
+  async pruneRows(maxBytes, quotaFailure = false) {
     const db = await this.open();
     if (!db) return;
     const entries = await new Promise(resolve => {
@@ -196,15 +199,10 @@ export class PersistentCatalogCache {
         tx.onabort = () => resolve([]);
       } catch (_) { resolve([]); }
     });
-    let total = entries.reduce((sum, e) => sum + e.bytes, 0);
-    const remove = [];
-    // A library with thousands of titles must not lose its first page simply
-    // because it has many small pagination entries. Bound actual bytes only.
-    for (const row of entries.sort((a, b) =>
-      Number(a.priority) - Number(b.priority) || a.used - b.used)) {
-      if (total <= maxBytes) break;
-      remove.push(row.key); total -= row.bytes;
-    }
+    const total = entries.reduce((sum, e) => sum + e.bytes, 0);
+    const budget = quotaFailure
+      ? quotaRecoveryTarget(total, maxBytes, 2 * 1024 * 1024) : maxBytes;
+    const remove = evictionsForBudget(entries, budget);
     if (!remove.length) return;
     await new Promise(resolve => {
       try {
