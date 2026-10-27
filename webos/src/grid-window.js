@@ -222,11 +222,14 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       topRows:startRow,bottomRows:rows-endRow},true);
   }
   const onScroll = () => sync();
+  // DOM events pass their Event as argument; never interpret it as a measured
+  // {columns,stride} object on the resize path.
+  const onResize = () => resize();
   function resume() {
     if (!live || listening) return;
     listening = true;
     main.addEventListener('scroll',onScroll);
-    window.addEventListener('resize',resize);
+    window.addEventListener('resize',onResize);
     if (grid.isConnected && items.length && columns) {
       const measured=measureGrid(grid);
       if (measured.columns !== columns || Math.abs(measured.stride-stride) > .5)
@@ -239,7 +242,7 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       captureAnchor();
       listening = false;
       main.removeEventListener('scroll',onScroll);
-      window.removeEventListener('resize',resize);
+      window.removeEventListener('resize',onResize);
       clearCached();
       compactMounted();
       // Compaction's removed buffered cards must not remain in the shared LRU
