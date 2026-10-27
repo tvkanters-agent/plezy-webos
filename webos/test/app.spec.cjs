@@ -1467,10 +1467,14 @@ test('changed artwork tags refresh images while unchanged versions stay cached',
   await expect(updated).toHaveClass(/artwork-loaded/);
   expect(new URL(await updated.getAttribute('data-artwork-url')).searchParams.get('tag')).toBe('poster-new');
   const count=requested.length;
-  // A new navigation receives the same tag and reuses the decoded image.
+  await page.evaluate(()=>{window.originalPoster=document.querySelector('main .grid .poster img');});
+  // A tab switch reattaches the SAME decoded image rather than creating a
+  // second image with a new ready/fade-in state.
   await page.getByRole('button',{name:'Search',exact:true}).click();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
-  await expect(page.locator('main .grid .poster img').first()).toHaveClass(/artwork-ready/);
+  const preserved=page.locator('main .grid .poster img').first();
+  await expect(preserved).toHaveClass(/artwork-loaded|artwork-ready/);
+  expect(await page.evaluate(()=>document.querySelector('main .grid .poster img')===window.originalPoster)).toBe(true);
   expect(requested.length).toBe(count);
 });
 
@@ -1509,7 +1513,7 @@ test('previously visited unversioned library paints every cached image on its fi
       if(!grid||grid.querySelectorAll('.card').length!==expected)return;
       const imgs=Array.from(grid.querySelectorAll('.poster img'));
       window.libraryFirstFrame=imgs.map(img=>({
-        ready:img.classList.contains('artwork-ready'),
+        ready:img.classList.contains('artwork-ready') || img.classList.contains('artwork-loaded'),
         opacity:getComputedStyle(img).opacity, src:img.getAttribute('src')
       }));
       window.libraryFrameObserver.disconnect();
@@ -1819,7 +1823,7 @@ test('returning to Home restores identical live DOM before any new page render',
   await page.getByRole('button',{name:'Home',exact:true}).click();
   await expect(page.locator('main .shelf .card').first()).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 test('a visited Series library paints saved metadata while its next request is pending',async({page})=>{
