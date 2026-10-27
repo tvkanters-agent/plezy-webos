@@ -3,6 +3,7 @@ import './compat.js';
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
+import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
@@ -32,7 +33,7 @@ const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
 let playbackReturn = null;
-const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker);
+const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker, () => state);
 // Plezy keeps the detail route beneath playback. Never clear/refetch that
 // page after hiding the player: it flashes blank and discards remote focus.
 function playbackClosed() {
@@ -1848,6 +1849,43 @@ function settings() {
     state.quality = state.quality === 'auto' ? 'transcode' : 'auto'; persist(); render();
   }));
   panel.append(el('p', 'Automatic plays compatible MP4 files directly. Other formats use server transcoding. Compatible playback requires permission to transcode on your server.', 'muted'));
+
+  // Native PlaybackSettingsScreen: independent off/button/auto modes for
+  // intros and credits, plus countdown and chapter-pattern preferences.
+  for (const [field, label] of [['skipIntroMode','Skip intro'],['skipCreditsMode','Skip credits']]) {
+    const row = el('label', label + ': ', 'skip-pref-row');
+    const select = el('select'); select.setAttribute('aria-label', label + ' mode');
+    for (const [value, text] of [['off','Off'],['button','Show skip button'],['auto','Automatic skip']]) {
+      const option = el('option', text); option.value = value; select.append(option);
+    }
+    select.value = state[field]; select.onchange = () => { state[field] = select.value; persist(); };
+    row.append(select); panel.append(row);
+  }
+  const delay = el('label', 'Automatic skip delay (seconds): ', 'skip-pref-row');
+  const delayInput = el('input'); delayInput.type = 'number'; delayInput.min = '1'; delayInput.max = '30';
+  delayInput.value = String(state.autoSkipDelay); delayInput.setAttribute('aria-label','Automatic skip delay');
+  delayInput.onchange = () => {
+    const value = Number(delayInput.value);
+    if (Number.isInteger(value) && value >= 1 && value <= 30) { state.autoSkipDelay = value; persist(); }
+    else { delayInput.value = String(state.autoSkipDelay); notify('Use a delay between 1 and 30 seconds.'); }
+  };
+  delay.append(delayInput); panel.append(delay);
+  panel.append(button('Prefer chapter markers: ' + (state.forceSkipMarkerFallback ? 'On' : 'Off'), () => {
+    state.forceSkipMarkerFallback = !state.forceSkipMarkerFallback; persist(); render();
+  }));
+  for (const [field, label, fallback] of [
+    ['introPattern','Intro chapter pattern',DEFAULT_INTRO_PATTERN],
+    ['creditsPattern','Credits chapter pattern',DEFAULT_CREDITS_PATTERN]]) {
+    const row = el('label', label, 'skip-pref-row');
+    const input = el('input'); input.type = 'text'; input.value = state[field] || fallback;
+    input.setAttribute('aria-label', label);
+    input.onchange = () => {
+      try { if (!input.value.trim()) throw new Error(); new RegExp(input.value, 'i'); }
+      catch (_) { notify('Enter a nonempty valid regular expression.'); input.value = state[field] || fallback; return; }
+      state[field] = input.value; persist();
+    };
+    row.append(input); panel.append(row);
+  }
   main.append(panel);
   const simklPanel = el('section', undefined, 'panel');
   simklPanel.append(el('h2', 'Simkl tracking'));

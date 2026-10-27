@@ -1,12 +1,12 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = []) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
-  await page.addInitScript(pendingStops=>localStorage.setItem('plezy.webos',JSON.stringify({deviceId:'device',active:'plex',
+  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({...skipSettings,deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
-    simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),pendingStops);
+    simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),{pendingStops,skipSettings});
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
     Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm',Stream:[]}]}],...extra};
   await page.route('https://api.simkl.com/**',route=>{
@@ -318,4 +318,56 @@ test('subtitle descriptions occupy a distinct line under primary track labels',a
    return {titleBottom:title.bottom,subtitleTop:description.top};
  });
  expect(positions.subtitleTop).toBeGreaterThanOrEqual(positions.titleBottom-1);
+});
+
+test('chapter fallback supplies skip intro when Plex returns no native markers', async ({page}) => {
+  await setup(page, {Chapter:[
+    {title:'Introduction',startTimeOffset:0,endTimeOffset:15000},
+    {title:'Story',startTimeOffset:15000,endTimeOffset:110000},
+    {title:'Credits',startTimeOffset:110000,endTimeOffset:120000}]});
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
+  await page.getByRole('button',{name:'Skip intro'}).click();
+  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(15);
+  await page.locator('video').evaluate(v=>{v.currentTime=112;});
+  await expect(page.getByRole('button',{name:'Skip credits'})).toBeVisible();
+});
+test('independent intro and credits modes respect the off setting', async ({page}) => {
+  await setup(page, {Marker:[
+    {type:'intro',startTimeOffset:0,endTimeOffset:15000},
+    {type:'credits',startTimeOffset:100000,endTimeOffset:110000}]
+  }, undefined, [], {skipIntroMode:'off'});
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeHidden();
+  await page.locator('video').evaluate(v=>{v.currentTime=102;});
+  await expect(page.getByRole('button',{name:'Skip credits'})).toBeVisible();
+});
+test('auto skip counts down and seeks to the actual marker end', async ({page}) => {
+  await setup(page, {Marker:[{type:'intro',startTimeOffset:0,endTimeOffset:15000}]},
+    undefined, [], {skipIntroMode:'auto',autoSkipDelay:1});
+  await expect(page.getByRole('button',{name:'Skip intro'})).toContainText('Skip intro');
+  await expect.poll(()=>page.locator('video').evaluate(v=>v.currentTime),{timeout:3500}).toBeGreaterThanOrEqual(15);
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeHidden();
+});
+test('pressing a remote key cancels automatic skip, without seeking', async ({page}) => {
+  await setup(page, {Marker:[{type:'intro',startTimeOffset:0,endTimeOffset:15000}]},
+    undefined, [], {skipIntroMode:'auto',autoSkipDelay:2});
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(2500);
+  expect(await page.locator('video').evaluate(v=>v.currentTime)).toBeLessThan(15);
+});
+
+test('TV skip marker gains focus only once its floating button is visible', async ({page}) => {
+  await setup(page, {Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.evaluate(() => {
+    // Simulate TV input mode after desktop playback has already opened.
+    window.PalmSystem = {};
+    const video = document.querySelector('#player video');
+    video.currentTime = 5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeFocused();
+  await expect(page.locator('#player .controls')).toBeVisible();
 });

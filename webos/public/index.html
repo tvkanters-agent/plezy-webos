@@ -45,7 +45,6 @@
           <button data-action="stop" class="transport-icon" aria-label="Stop" title="Stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg></button>
         </div>
         <div class="player-secondary">
-          <button data-action="skip" class="player-pill" hidden>Skip intro</button>
           <button data-action="options" class="transport-icon" aria-label="Playback settings" title="Playback settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="9" cy="6" r="2.3" fill="currentColor"/><circle cx="15" cy="12" r="2.3" fill="currentColor"/><circle cx="10" cy="18" r="2.3" fill="currentColor"/></svg></button>
           <button data-action="audio-options" class="transport-icon" aria-label="Audio tracks" title="Audio tracks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6a8 8 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
           <button data-action="subtitle-options" class="transport-icon" aria-label="Subtitles" title="Subtitles"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 12h5m2 0h5M6 16h12" stroke="currentColor" stroke-width="2"/></svg></button>
@@ -53,6 +52,13 @@
         </div>
       </div>
     </div>
+    <!-- Plezy's SkipMarkerButton floats above playback, including while
+         transport chrome is hidden, and counts down in automatic mode. -->
+    <button data-action="skip" class="player-skip" aria-label="Skip intro" hidden>
+      <span class="skip-progress" aria-hidden="true"></span>
+      <span class="skip-label">Skip intro</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l9-7zm10 0v14l9-7z" fill="currentColor"/></svg>
+    </button>
     <!-- Upstream TrackChapterControls opens a sheet, rather than rendering
          oversized native HTML dropdowns on the video itself. -->
     <div class="player-sheet" hidden>
