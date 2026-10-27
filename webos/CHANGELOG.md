@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.3.0 — Cross-library Plex collections
+
+- Combine matching Plex collection names across movie and television libraries on the collection detail page.
+- Stream titles in original collection order, suppress duplicate Plex item IDs, and preserve individual detail navigation.
+- Keep the primary collection usable when another library cannot be enumerated or read.
+- Add unit and end-to-end coverage for pagination, library matching, deduplication, and unavailable libraries.
+
 ## 1.2.9 — Remember sidebar focus
 
 - Return to the last focused navigation destination when pressing Left from the main content area, including cast rows.
