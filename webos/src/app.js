@@ -926,6 +926,11 @@ async function paginated(loader, currentRevision, options = {}) {
   retry.hidden = true;
   main.append(grid, sentinel, errorMessage, retry);
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
+  function makeCard(item) {
+    const node = options.episodes ? episodeCard(item) : card(item);
+    node._catalogSignature = JSON.stringify(item);
+    return node;
+  }
   function addPage(target, page) {
     const fragment = document.createDocumentFragment();
     if (options.grouped) {
@@ -940,30 +945,76 @@ async function paginated(loader, currentRevision, options = {}) {
           fragment.appendChild(lastSection);
         }
         const cardsFragment = document.createDocumentFragment();
-        group.items.forEach(item => cardsFragment.appendChild(card(item)));
+        group.items.forEach(item => cardsFragment.appendChild(makeCard(item)));
         lastSection.querySelector('.grid').appendChild(cardsFragment);
       }
     } else {
-      page.items.forEach(item =>
-        fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+      page.items.forEach(item => fragment.appendChild(makeCard(item)));
     }
     target.appendChild(fragment);
+  }
+  // Reconcile items by stable ID and metadata. An unchanged card keeps its
+  // DOM, click handler, focus and decoded <img>; only changed cards are made.
+  // Insert/move nodes only where the server actually changed their position.
+  function reconcileCards(container, items) {
+    const existing = new Map();
+    Array.from(container.children).forEach(node => {
+      if (node.dataset && node.dataset.focus) existing.set(String(node.dataset.focus), node);
+    });
+    items.forEach((item, index) => {
+      const key = String(item.id), signature = JSON.stringify(item);
+      let node = existing.get(key);
+      if (!node || node._catalogSignature !== signature) node = makeCard(item);
+      if (container.children[index] !== node)
+        container.insertBefore(node, container.children[index] || null);
+    });
+    while (container.children.length > items.length)
+      container.removeChild(container.lastChild);
   }
   function repaintPages() {
     const oldFocus = grid.contains(document.activeElement) ?
       document.activeElement.dataset.focus : null;
     const scroll = main.scrollTop;
-    // Build the complete replacement off-DOM; never reveal incomplete rows
-    // or replay entrance animation when the server returns updated metadata.
-    const fresh = el('div');
-    for (const page of loadedPages.values()) addPage(fresh, page);
-    const fragment = document.createDocumentFragment();
-    while (fresh.firstChild) fragment.appendChild(fresh.firstChild);
-    grid.textContent = '';
-    grid.appendChild(fragment);
+    if (options.grouped) {
+      // Adjacent paginated groups of the same library share a section.
+      const groups = [];
+      for (const page of loadedPages.values()) for (const group of page.groups) {
+        if (!group.items.length) continue;
+        let dest = groups[groups.length - 1];
+        if (!dest || String(dest.libraryId) !== String(group.libraryId)) {
+          dest = {libraryId:group.libraryId, libraryTitle:group.libraryTitle, items:[]};
+          groups.push(dest);
+        }
+        dest.items.push(...group.items);
+      }
+      const available = Array.from(grid.querySelectorAll('.collection-library-section'));
+      const used = new Set();
+      groups.forEach((group, index) => {
+        let section = available.find(node => !used.has(node) &&
+          node.dataset.libraryId === String(group.libraryId));
+        if (!section) {
+          section = el('section', undefined, 'collection-library-section');
+          section.dataset.libraryId = String(group.libraryId);
+          section.append(el('h2', group.libraryTitle, 'detail-children-title'),
+            cards([], true));
+        }
+        used.add(section);
+        const heading = section.querySelector('h2');
+        if (heading.textContent !== group.libraryTitle) heading.textContent = group.libraryTitle;
+        if (grid.children[index] !== section)
+          grid.insertBefore(section, grid.children[index] || null);
+        reconcileCards(section.querySelector('.grid'), group.items);
+      });
+      while (grid.children.length > groups.length) grid.removeChild(grid.lastChild);
+    } else {
+      const items = [];
+      for (const page of loadedPages.values()) items.push(...page.items);
+      reconcileCards(grid, items);
+    }
     if (!grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
     main.scrollTop = scroll;
-    if (oldFocus) {
+    if (oldFocus && (!grid.contains(document.activeElement) ||
+        document.activeElement.dataset.focus !== oldFocus)) {
       const selected = Array.from(grid.querySelectorAll('[data-focus]')).find(
         node => node.dataset.focus === oldFocus);
       if (selected) focusWithoutJump(selected, false);
