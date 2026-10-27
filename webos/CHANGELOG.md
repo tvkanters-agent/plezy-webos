@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.4.2 — Native-style exit confirmation
+
+- Align the no-backstack exit dialog with Plezy's Mono confirmation styling: centered surface, rounded corners, text/filled pill buttons, focus feedback and dimmed backdrop.
+- Preserve the rating sheet's independent styling and restore the originating control's focus when cancelling the exit prompt.
+- Add browser regression coverage for dialog geometry, native colors, button styles, D-pad focus and Back dismissal.
+
 ## 1.4.1 — Instant Home restoration and consistent content fades
 
 - Restore the preserved Home page directly on same-session rail navigation instead of reconstructing shelves and artwork, keeping decoded images and focus intact.
