@@ -938,12 +938,14 @@ async function render() {
       else main.append(fadeDelayedContent(el('p', 'Select a library from the navigation rail to browse its recommended titles, collections and playlists.', 'muted'), contentStartedAt));
     } else if (route.type === 'library') {
       libraryRenderRevision = currentRevision;
+      const forceRefresh = !!route.forceRefresh;
+      if (forceRefresh) delete route.forceRefresh;
       title(route.library.title); const currentApi = api;
       const view = route.view || 'browse';
       const tabs = el('div', undefined, 'library-tabs');
       [{id:'recommended', name:'Recommended'}, {id:'browse',name:'Browse'},
         {id:'collections',name:'Collections'}, {id:'playlists',name:'Playlists'}].forEach(tab => {
-        const control = button(tab.name, () => go({...route, view: tab.id}, false),
+        const control = button(tab.name, () => go({...route, view: tab.id, forceRefresh:false}, false),
           view === tab.id ? 'active' : '');
         control.setAttribute('aria-pressed', String(view === tab.id));
         tabs.append(control);
@@ -951,15 +953,15 @@ async function render() {
       main.append(tabs);
       const contentStartedAt = Date.now();
       if (currentApi instanceof Plex && view === 'collections') {
-        await paginated(start => catalogCache.get('collections:' + route.library.id + ':' + start,
-          () => currentApi.collections(route.library.id, start)), currentRevision,
+        await paginated(start => savedPage('collections:' + route.library.id + ':' + start,
+          () => currentApi.collections(route.library.id, start), {force:forceRefresh}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
-        await paginated(start => catalogCache.get('playlists:' + start,
-          () => currentApi.playlists(start)), currentRevision,
+        await paginated(start => savedPage('playlists:' + start,
+          () => currentApi.playlists(start), {force:forceRefresh}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst();
         return;
@@ -1026,16 +1028,16 @@ async function render() {
       const refreshAction = detailButton('Refresh', () => {
         // Explicit refresh must fetch a new page and new artwork revisions.
         catalogCache.clear();
-        go({...route}, false);
+        go({...route, forceRefresh:true}, false);
       }, 'restart', 'library-toolbar-button');
       toolbar.append(sortAction, filterAction, refreshAction);
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
-      const libraryLoader = (start, count) => catalogCache.get(
+      const libraryLoader = (start, count) => savedPage(
         'browse:' + JSON.stringify([route.library.id, selected, selectedFilter,
           route.alpha || '', start, count || null]),
         () => currentApi.list(route.library.id, start, selected, selectedFilter, count,
-          currentApi instanceof Jellyfin ? route.alpha : undefined));
+          currentApi instanceof Jellyfin ? route.alpha : undefined), {force:forceRefresh});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
