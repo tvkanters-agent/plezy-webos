@@ -655,7 +655,10 @@ function back() {
       main.scrollTop = route.scroll || 0;
       main.classList.toggle('has-alpha-bar', !!previous.alphabet);
       activeGridWindow = previous.windowedGrid || null;
-      if (activeGridWindow) activeGridWindow.resume();
+      if (activeGridWindow) {
+        activeGridWindow.resumePagination(revision);
+        activeGridWindow.resume();
+      }
       if (previous.alphabet) {
         const restoredRevision = revision;
         activeAlphabet = previous.alphabet;
@@ -955,7 +958,7 @@ function episodeCard(item) {
   node.append(image, details);
   return node;
 }
-async function paginated(loader, currentRevision, options = {}) {
+async function paginated(loader, pageRevision, options = {}) {
   // The first page may be a persisted snapshot. Refresh callbacks replace
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
@@ -973,7 +976,16 @@ async function paginated(loader, currentRevision, options = {}) {
   const windowedGrid = !options.grouped && !options.episodes ? createGridWindow({
     main, grid, makeCard, focusWithoutJump, schedulePosters
   }) : null;
-  if (windowedGrid) activeGridWindow = windowedGrid;
+  if (windowedGrid) {
+    activeGridWindow = windowedGrid;
+    // A cached route is detached while a detail page is open, then restored.
+    // Reattach the paginator to the new navigation revision so scrolling can
+    // continue beyond the pages loaded before the user opened that detail.
+    windowedGrid.resumePagination = nextRevision => {
+      pageRevision = nextRevision;
+      if (!completed) { listen(); requestAnimationFrame(check); }
+    };
+  }
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   function makeCard(item) {
     const node = options.episodes ? episodeCard(item) : card(item);
@@ -1086,11 +1098,11 @@ async function paginated(loader, currentRevision, options = {}) {
   function watchFresh(offset, initialPage, pending) {
     if (!pending) return;
     pending.then(async update => {
-      if (!update || !update.changed || currentRevision !== revision ||
+      if (!update || !update.changed || pageRevision !== revision ||
           !grid.isConnected || !loadedPages.has(offset)) return;
       await prewarmPosters(update.value.items, api,
         {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
-      if (currentRevision !== revision || !grid.isConnected ||
+      if (pageRevision !== revision || !grid.isConnected ||
           !loadedPages.has(offset)) return;
       loadedPages.set(offset, update.value);
       // A changed page length invalidates offsets of its successors.
@@ -1109,7 +1121,7 @@ async function paginated(loader, currentRevision, options = {}) {
     }).catch(() => { /* Offline updates keep the saved view usable. */ });
   }
   async function load() {
-    if (loading || completed || currentRevision !== revision || !grid.isConnected) return;
+    if (loading || completed || pageRevision !== revision || !grid.isConnected) return;
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
@@ -1121,10 +1133,10 @@ async function paginated(loader, currentRevision, options = {}) {
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
       const fresh = response && response.fresh;
-      if (currentRevision !== revision || !grid.isConnected) return;
+      if (pageRevision !== revision || !grid.isConnected) return;
       await prewarmPosters(page.items, api,
         {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
-      if (currentRevision !== revision || !grid.isConnected) return;
+      if (pageRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       loadedPages.set(offset, page);
       if (windowedGrid) {
@@ -1139,18 +1151,18 @@ async function paginated(loader, currentRevision, options = {}) {
       schedulePosters();
       watchFresh(offset, page, fresh);
     } catch (error) {
-      if (currentRevision === revision && grid.isConnected) {
+      if (pageRevision === revision && grid.isConnected) {
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
         retry.hidden = false;
       }
     } finally {
       loading = false;
-      if (currentRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
+      if (pageRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
         requestAnimationFrame(check);
     }
   }
   function check() {
-    if (currentRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
+    if (pageRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
     if (loading) return;
     const rect = sentinel.getBoundingClientRect();
     const pane = main.getBoundingClientRect();
