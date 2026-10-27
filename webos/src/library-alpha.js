@@ -276,6 +276,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     check();
   };
   main.addEventListener('scroll', onScroll);
+  let listening = true;
   const resize = () => {
     if (!alive()) return;
     const index = firstVisibleIndex();
@@ -346,10 +347,20 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     },
     suspend() {
       clearTimeout(scrollTimer);
+      if (listening) {
+        main.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', resize);
+        listening = false;
+      }
       rail.element.hidden = true;
     },
     resume(nextIsActive) {
       activeCheck = nextIsActive;
+      if (!listening) {
+        main.addEventListener('scroll', onScroll);
+        window.addEventListener('resize', resize);
+        listening = true;
+      }
       rail.element.hidden = !railVisible;
       if (railVisible) rail.draw();
       updateLetter();
