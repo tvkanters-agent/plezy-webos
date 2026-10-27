@@ -676,6 +676,22 @@ function poster(item, options = {}) {
   else unavailablePoster(node);
   return node;
 }
+// Page preparation is disk-only. Cached artwork becomes decoded memory hits
+// before cards are inserted, including across full app restarts. Uncached art
+// still loads lazily through the existing two-slot network queue and fades in.
+async function prewarmPosters(items, sourceApi = api, options = {}) {
+  const keys = [];
+  for (const item of items) {
+    const url = sourceApi.image(item, options);
+    if (!url) continue;
+    const key = artworkCacheKey(url, sourceApi.artworkVersion(item, options));
+    if (key) keys.push(key);
+  }
+  await artworkCache.prewarm(keys);
+}
+async function prewarmShelves(shelves, sourceApi = api) {
+  await prewarmPosters(shelves.reduce((all, shelf) => all.concat(shelf.items), []), sourceApi);
+}
 function cards(items, grid = false) {
   const node = el('div', undefined, grid ? 'grid' : 'cards'); items.forEach(item => node.append(card(item))); return node;
 }
@@ -726,6 +742,8 @@ async function paginated(loader, currentRevision, options = {}) {
     try {
       const page = options.initialPage && start === 0 ? options.initialPage : await loader(start);
       options.initialPage = null;
+      if (currentRevision !== revision || !grid.isConnected) return;
+      await prewarmPosters(page.items, api, options.episodes ? {landscape:true} : {});
       if (currentRevision !== revision || !grid.isConnected) return;
       // Build the page off-DOM, then commit it in one operation. Yielding
       // every eight cards made previously visited libraries visibly appear
@@ -797,6 +815,8 @@ async function render() {
       // Keep the first frame quiet instead of flashing a temporary text
       // message while the home shelves are fetched.
       const rows = await api.home(); if (!valid()) return;
+      await prewarmShelves(rows);
+      if (!valid()) return;
       if (!rows.length) {
         main.append(el('p', 'No recommendations yet. Browse a library to find something to watch.'));
         main.append(button('Browse libraries', () => go({type: 'libraries'}), 'primary'));
@@ -833,6 +853,8 @@ async function render() {
       }
       if (currentApi instanceof Plex && view === 'recommended') {
         const shelves = await currentApi.recommended(route.library.id);
+        if (!valid()) return;
+        await prewarmShelves(shelves, currentApi);
         if (!valid()) return;
         if (!shelves.length) main.append(el('p','No recommendations for this library.', 'muted'));
         shelves.forEach(shelf => { const section = el('section', undefined, 'shelf');
@@ -905,11 +927,14 @@ async function render() {
         if (pageResult.error) {
           await paginated(start => libraryLoader(start), currentRevision);
         } else if (showPlexAlphaBar(pageResult.total, characters, selected)) {
+          await prewarmPosters(pageResult.items, currentApi);
+          if (!valid()) return;
           main.classList.add('has-alpha-bar');
           activeAlphabet = mountAlphabetLibrary({
             main, firstPage: pageResult, characters,
             loader: (start, count) => libraryLoader(start, count),
-            card, schedulePosters, focusWithoutJump, isActive: valid
+            card, schedulePosters, focusWithoutJump, isActive: valid,
+            prewarmPage: items => prewarmPosters(items, currentApi)
           });
         } else {
           await paginated(start => libraryLoader(start), currentRevision, {initialPage: pageResult});
