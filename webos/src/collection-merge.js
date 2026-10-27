@@ -6,12 +6,15 @@ const PAGE_SIZE = 60;
 
 export async function matchingCollections(api, collection) {
   const name = nameKey(collection.title);
-  if (!name) return [];
+  const originalLibrary = String(collection.raw?.librarySectionID || '');
+  const primary = {id: collection.id, libraryId: originalLibrary,
+    libraryTitle: collection.raw?.librarySectionTitle || 'Titles'};
+  if (!name) return [primary];
   let libraries;
   try { libraries = await api.libraries(); }
   catch (error) {
     console.warn('Could not look up collections in other libraries', error);
-    return [];
+    return [primary];
   }
   const matches = libraries.map(() => []);
   // Limit parallel metadata requests on servers with many libraries. Keep
@@ -27,7 +30,8 @@ export async function matchingCollections(api, collection) {
           const page = await api.collections(library.id, start);
           for (const item of page.items) {
             if (nameKey(item.title) === name)
-              matches[index].push({libraryId: String(library.id), item});
+              matches[index].push({libraryId: String(library.id),
+                libraryTitle: library.title, item});
           }
           start += page.items.length;
           if (!page.items.length || start >= page.total) break;
@@ -39,14 +43,22 @@ export async function matchingCollections(api, collection) {
     }
   }));
   const found = matches.reduce((all, items) => all.concat(items), []);
-  const owner = String(collection.raw?.librarySectionID ||
-    found.find(entry => entry.item.id === collection.id)?.libraryId || '');
+  // Detail metadata may omit librarySectionID. The matching listing row
+  // supplies it, including the library's human-readable name.
+  const owner = originalLibrary ||
+    found.find(entry => String(entry.item.id) === String(collection.id))?.libraryId || '';
+  const owningLibrary = libraries.find(library => String(library.id) === owner);
+  primary.libraryId = owner;
+  primary.libraryTitle = owningLibrary?.title || primary.libraryTitle;
   const ids = new Set([String(collection.id)]);
-  return found.filter(({libraryId, item}) => {
+  const otherSources = found.filter(({libraryId, item}) => {
     if ((owner && libraryId === owner) || ids.has(String(item.id))) return false;
     ids.add(String(item.id));
     return true;
-  }).map(entry => entry.item);
+  }).map(({libraryId, libraryTitle, item}) => ({
+    id: item.id, libraryId, libraryTitle: libraryTitle || 'Titles'
+  }));
+  return [primary, ...otherSources];
 }
 
 // PaginatedItemLoader-style merge. Read one source at a time to retain each
@@ -56,10 +68,8 @@ export async function matchingCollections(api, collection) {
 export function mergedCollectionLoader(api, collection) {
   let initialization, sources, sourceIndex = 0, emitted = 0;
   const pending = [], seen = new Set();
-  async function initialize() {
-    const matching = await matchingCollections(api, collection);
-    sources = [collection, ...matching].map(item => ({id: item.id, start: 0}));
-  }
+  async function initialize() { sources = (await matchingCollections(api, collection))
+    .map(source => ({...source, start: 0})); }
   return async function load() {
     if (!initialization) initialization = initialize();
     await initialization;
@@ -77,14 +87,23 @@ export function mergedCollectionLoader(api, collection) {
       for (const item of page.items) {
         if (seen.has(String(item.id))) continue;
         seen.add(String(item.id));
-        pending.push(item);
+        pending.push({item, libraryId: source.libraryId, libraryTitle: source.libraryTitle});
       }
       source.start += page.items.length;
       if (!page.items.length || source.start >= page.total) sourceIndex++;
     }
-    const items = pending.splice(0, PAGE_SIZE);
-    emitted += items.length;
-    return {items, total: sourceIndex === sources.length && !pending.length
-      ? emitted : Number.MAX_SAFE_INTEGER};
+    const entries = pending.splice(0, PAGE_SIZE), groups = [];
+    for (const entry of entries) {
+      let group = groups[groups.length - 1];
+      if (!group || group.libraryId !== entry.libraryId) {
+        group = {libraryId: entry.libraryId, libraryTitle: entry.libraryTitle, items: []};
+        groups.push(group);
+      }
+      group.items.push(entry.item);
+    }
+    emitted += entries.length;
+    return {items: entries.map(entry => entry.item), groups,
+      total: sourceIndex === sources.length && !pending.length
+        ? emitted : Number.MAX_SAFE_INTEGER};
   };
 }

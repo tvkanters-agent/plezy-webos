@@ -153,6 +153,8 @@ main { position:relative; }
   background:linear-gradient(to right, #0e0f12 2%, rgba(14,15,18,.86) 48%, rgba(14,15,18,.2)),
     linear-gradient(to top, #0e0f12, transparent 65%); }
 main > .detail,main > .detail-children-title, main > .grid,main > .error { position:relative; z-index:1; }
+main > .collection-sections { position:relative; z-index:1; }
+.collection-library-section > .detail-children-title { margin:44px 0 12px; }
 .detail { margin-top:54px; align-items:flex-start; }
 .detail > .poster { border-radius:12px; box-shadow:0 16px 42px rgba(0,0,0,.4); }
 .detail-info { max-width:960px; }

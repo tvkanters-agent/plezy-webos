@@ -27,7 +27,11 @@ test('matches equal collection names across libraries, not different titles or o
     }
   };
   const matches = await matchingCollections(api, collection('primary', 'Festival', 'movies'));
-  assert.deepEqual(matches.map(item => item.id), ['other', 'archive']);
+  assert.deepEqual(matches, [
+    {id:'primary', libraryId:'movies', libraryTitle:'Movies'},
+    {id:'other', libraryId:'series', libraryTitle:'Series'},
+    {id:'archive', libraryId:'archive', libraryTitle:'Archive'}
+  ]);
   assert.ok(calls.some(([id, start]) => id === 'series' && start === 1));
 });
 
@@ -38,8 +42,10 @@ test('source library is inferred if Plex detail omits librarySectionID', async (
       [collection('first', 'Series', 'a'), collection('same-library', 'Series', 'a')] :
       [collection('second', 'Series', 'b')], total: id === 'a' ? 2 : 1})
   };
-  assert.deepEqual((await matchingCollections(api, {id: 'first', title: 'Series'}))
-    .map(item => item.id), ['second']);
+  assert.deepEqual(await matchingCollections(api, {id: 'first', title: 'Series'}), [
+    {id:'first', libraryId:'a', libraryTitle:'A'},
+    {id:'second', libraryId:'b', libraryTitle:'B'}
+  ]);
 });
 
 test('mixed movie and TV collections stream in original order without repeated items', async () => {
@@ -63,6 +69,11 @@ test('mixed movie and TV collections stream in original order without repeated i
   assert.deepEqual([...page1.items, ...page2.items].map(item => item.id),
     [...first.map(item => item.id), 'series-0', 'series-1']);
   assert.equal(page2.total, 67);
+  assert.deepEqual(page1.groups.map(group => [group.libraryTitle, group.items.length]),
+    [['Movies', 60]]);
+  assert.deepEqual(page2.groups.map(group => [group.libraryTitle, group.items.length]),
+    [['Movies', 5], ['TV', 2]]);
+  assert.deepEqual(page2.groups.map(group => group.libraryId), ['movies', 'tv']);
   assert.deepEqual(calls, [
     ['movies-col', 0, 'collection'], ['movies-col', 60, 'collection'],
     ['tv-col', 0, 'collection']
@@ -99,4 +110,35 @@ test('a transient primary-page failure can be retried without dropping queued ti
   const page = await load(60);
   assert.deepEqual(page.items.map(item => item.id), ['item-60','item-61']);
   assert.equal(page.total, 62);
+});
+
+test('library group metadata is preserved through page boundaries and unavailable libraries', async () => {
+  const films = Array.from({length: 61}, (_, i) => media('film-' + i));
+  const api = {
+    libraries: async () => [{id:'films',title:'Films'}, {id:'empty',title:'Empty'},
+      {id:'shows',title:'Television'}],
+    collections: async id => ({items:[collection(id, 'Favorites', id)],total:1}),
+    children: async (id,start) => {
+      const items = id === 'films' ? films : id === 'shows' ? [media('series', 'show')] : [];
+      return {items:items.slice(start,start+60),total:items.length};
+    }
+  };
+  const load = mergedCollectionLoader(api, collection('films','Favorites','films'));
+  const first = await load(0), second = await load(60);
+  assert.deepEqual(first.groups.map(group => group.libraryTitle), ['Films']);
+  assert.deepEqual(second.groups.map(group => group.libraryTitle), ['Films','Television']);
+  assert.deepEqual(second.groups.map(group => group.items.map(item=>item.id)),
+    [['film-60'],['series']]);
+  assert.equal(second.total, 62);
+});
+
+test('unavailable collection discovery still shows original titles under its library heading', async () => {
+  const api = {
+    libraries: async () => { throw new Error('offline'); },
+    children: async () => ({items:[media('one')],total:1})
+  };
+  const page = await mergedCollectionLoader(api, {
+    id:'c',title:'Favorites',raw:{librarySectionID:7,librarySectionTitle:'My Movies'}
+  })(0);
+  assert.deepEqual(page.groups.map(group => group.libraryTitle), ['My Movies']);
 });

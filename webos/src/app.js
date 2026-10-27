@@ -736,7 +736,8 @@ async function paginated(loader, currentRevision, options = {}) {
   // Plezy loads sparse pages automatically as the grid approaches the viewport.
   // There is no manually activated "Load more" button.
   let start = 0, loading = false, completed = false;
-  const grid = options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
+  const grid = options.grouped ? el('div', undefined, 'collection-sections') :
+    options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
   const sentinel = el('div', undefined, 'page-sentinel');
   const errorMessage = el('p', '', 'error');
   errorMessage.setAttribute('role', 'alert');
@@ -762,8 +763,27 @@ async function paginated(loader, currentRevision, options = {}) {
       // row-by-row even when every poster was already decoded in memory.
       // The viewport loader still prevents decoding offscreen artwork.
       const fragment = document.createDocumentFragment();
-      page.items.forEach(item =>
-        fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+      if (options.grouped) {
+        // A library heading belongs to its own grid, not to an arbitrary
+        // pagination page. Subsequent pages append to that grid unchanged.
+        let lastSection = grid.lastElementChild;
+        for (const group of page.groups) {
+          if (!group.items.length) continue;
+          if (!lastSection || lastSection.dataset.libraryId !== String(group.libraryId)) {
+            lastSection = el('section', undefined, 'collection-library-section');
+            lastSection.dataset.libraryId = String(group.libraryId);
+            lastSection.append(el('h2', group.libraryTitle, 'detail-children-title'),
+              cards([], true));
+            fragment.appendChild(lastSection);
+          }
+          const cardsFragment = document.createDocumentFragment();
+          group.items.forEach(item => cardsFragment.appendChild(card(item)));
+          lastSection.querySelector('.grid').appendChild(cardsFragment);
+        }
+      } else {
+        page.items.forEach(item =>
+          fragment.appendChild(options.episodes ? episodeCard(item) : card(item)));
+      }
       if (start === 0) fadeDelayedContent(grid, startedAt);
       grid.appendChild(fragment);
       schedulePosters();
@@ -1359,17 +1379,19 @@ async function render() {
         content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       main.append(content);
       if (item.folder) {
-        const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
-          item.type === 'season' ? 'Episodes' : 'Titles');
-        heading.className = 'detail-children-title';
-        main.append(heading);
         const currentApi = api;
-        const loadChildren = currentApi instanceof Plex && item.type === 'collection'
-          ? mergedCollectionLoader(currentApi, item)
+        const grouped = currentApi instanceof Plex && item.type === 'collection';
+        if (!grouped) {
+          const heading = el('h2', item.type === 'show' || item.type === 'Series' ? 'Seasons' :
+            item.type === 'season' ? 'Episodes' : 'Titles');
+          heading.className = 'detail-children-title';
+          main.append(heading);
+        }
+        const loadChildren = grouped ? mergedCollectionLoader(currentApi, item)
           : start => currentApi.children(item.id, start, item.type);
-        await paginated(loadChildren,
-          currentRevision, {episodes: item.type === 'season' || item.type === 'Season',
-            startedAt:Date.now()});
+        await paginated(loadChildren, currentRevision, {grouped,
+          episodes: item.type === 'season' || item.type === 'Season',
+          startedAt:Date.now()});
       }
       // Port CastMemberStrip: one locked-focus D-pad row, internal horizontal
       // scroll with no browser scrollbar, placed AFTER seasons/episodes.
