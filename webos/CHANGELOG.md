@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.3.2 — Faster page navigation
+
+- Reuse recent Home, recommendation, paginated library, alphabet-index, collection and playlist responses rather than repeating network requests on each visit.
+- Bound the metadata cache to 32 entries and a 45-second freshness window, with in-flight request sharing and no persisted user-specific catalog responses.
+- Invalidate data after playback, watched-state changes, server switching and manual library refresh; prevent obsolete in-flight requests from repopulating the cache.
+- Preserve artwork-preparation, lazy loading, focus handling, alphabet-grid behavior and content fade transitions.
+- Add browser and unit regressions for cache reuse, refresh, expiry, errors, stale-result races and watched-state invalidation.
+
 ## 1.3.1 — Collection sections by library
 
 - Group a Plex collection's movies and shows in distinct sections headed with each source library's actual name.
