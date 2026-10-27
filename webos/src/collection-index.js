@@ -2,7 +2,6 @@
 // A shared, account-scoped index of Plex collection listings. Merged collection
 // details look up names locally instead of walking every library on each open.
 // Persist only collection IDs/titles/library names, not full media metadata.
-const PAGE_SIZE = 60;
 const REFRESH_AFTER_MS = 5 * 60 * 1000;
 const RETRY_AFTER_MS = 30 * 1000;
 
@@ -52,17 +51,18 @@ export class CollectionIndex {
     if (state.refreshing) return state.refreshing;
     const task = (async () => {
       const libraries = await api.libraries();
-      const rows = [];
+      const rowsByLibrary = libraries.map(() => []);
       let next = 0, failed = false;
       // Match the bounded four-library discovery fan-out used previously.
       await Promise.all(Array.from({length:Math.min(4,libraries.length)}, async () => {
         while (next < libraries.length) {
-          const library = libraries[next++];
+          const libraryIndex = next++;
+          const library = libraries[libraryIndex];
           try {
             let start = 0;
             for (;;) {
               const page = await api.collections(library.id, start);
-              for (const item of page.items) rows.push({
+              for (const item of page.items) rowsByLibrary[libraryIndex].push({
                 id:item.id, title:item.title, libraryId:String(library.id),
                 libraryTitle:library.title || 'Titles'
               });
@@ -79,9 +79,11 @@ export class CollectionIndex {
         state.retryAt = this.now() + RETRY_AFTER_MS;
         return state.data; // Never erase known matches on a partial failure.
       }
+      // Keep collection sections in library order, not request completion order.
+      const rows = rowsByLibrary.reduce((all, page) => all.concat(page), []);
       const result = {libraries:libraries.map(library => ({
         id:library.id, title:library.title || 'Titles'
-      })), rows, checkedAt:this.now()};
+      })), rows, checkedAt:failed ? this.now() - this.ttl : this.now()};
       if (this.byClient.get(api) === state) {
         state.data = result;
         state.retryAt = failed ? this.now() + RETRY_AFTER_MS : 0;

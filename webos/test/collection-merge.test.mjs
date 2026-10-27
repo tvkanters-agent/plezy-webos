@@ -189,3 +189,46 @@ test('collection discovery persists across API clients with account-scoped keys'
   await matchingCollections(makeApi(second),collection('c','Favorites','movies'),index,'userB');
   assert.equal(second.calls,1,'another account must not read the previous index');
 });
+
+test('partial collection discovery retries promptly once unavailable libraries recover',async()=>{
+  let now=1000,broken=true,calls=0;
+  const api={
+    libraries:async()=>[{id:'first',title:'First'},{id:'second',title:'Second'}],
+    collections:async id=>{
+      calls++;
+      if(id==='second'&&broken)throw new Error('temporarily unavailable');
+      return {items:[collection(id,'Favorites',id)],total:1};
+    }
+  };
+  const index=new CollectionIndex({now:()=>now,ttl:300000});
+  assert.equal((await matchingCollections(api,collection('first','Favorites','first'),index)).length,1);
+  broken=false;
+  now=31001;
+  // Return partial data immediately, then complete the missing library.
+  assert.equal((await matchingCollections(api,collection('first','Favorites','first'),index)).length,1);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal((await matchingCollections(api,collection('first','Favorites','first'),index)).length,2);
+  assert.equal(calls,4);
+});
+
+test('collection index preserves source library ordering despite staggered requests',async()=>{
+  let finishFirst,startedFirst;
+  const firstStarted=new Promise(resolve=>{startedFirst=resolve;});
+  const api={
+    libraries:async()=>[{id:'first',title:'First'},{id:'second',title:'Second'}],
+    collections:async id=>{
+      if(id==='first') {
+        startedFirst();
+        await new Promise(resolve=>{finishFirst=resolve;});
+      }
+      return {items:[collection(id,'Favorites',id)],total:1};
+    }
+  };
+  const index=new CollectionIndex();
+  const matching=matchingCollections(api,collection('primary','Favorites','unknown'),index);
+  await firstStarted;
+  await new Promise(resolve=>setImmediate(resolve));
+  finishFirst();
+  const matches=await matching;
+  assert.deepEqual(matches.slice(1).map(item=>item.id),['first','second']);
+});
