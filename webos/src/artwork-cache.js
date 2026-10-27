@@ -35,6 +35,14 @@ export class ArtworkCache {
     this.memory.set(key, entry);
     return entry.src;
   }
+  peekReady(key) {
+    const entry = this.memory.get(key);
+    return entry && entry.ready ? this.peek(key) : null;
+  }
+  markReady(key) {
+    const entry = this.memory.get(key);
+    if (entry) entry.ready = true;
+  }
   drop(key) {
     const entry = this.memory.get(key);
     if (!entry) return;
@@ -50,10 +58,11 @@ export class ArtworkCache {
     let src;
     try { src = this.urls.createObjectURL(blob); }
     catch (_) { return null; }
-    const entry = {src, bytes: blob.size, expires};
+    const entry = {src, bytes: blob.size, expires, ready: false};
     // Keep a decoded image reference alive for the immediate next route paint.
     if (typeof Image !== 'undefined') {
       entry.image = new Image();
+      entry.image.onload = () => { entry.ready = true; };
       entry.image.src = src;
     }
     this.memory.set(key, entry);
@@ -211,7 +220,11 @@ export class ArtworkCache {
       // Normal <img> works without CORS; reading bytes for IndexedDB does not.
       // If the TV/server rejects a cross-origin fetch, use <img> directly and
       // stop retrying the unsupported origin for the remainder of this launch.
-      const response = await this.fetchImage(key);
+      const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+      const timer = controller ? setTimeout(() => controller.abort(), 7000) : null;
+      let response;
+      try { response = await this.fetchImage(key, controller ? {signal: controller.signal} : {}); }
+      finally { if (timer) clearTimeout(timer); }
       if (!response.ok || (response.type === 'opaque')) return key;
       const type = response.headers && response.headers.get('content-type') || '';
       if (type && !/^image\//i.test(type) && !/^application\/octet-stream/i.test(type))
