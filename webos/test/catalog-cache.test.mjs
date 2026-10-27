@@ -56,3 +56,16 @@ test('cleared in-flight data cannot overwrite new server or refreshed content', 
   assert.equal(await stale, 'old');
   assert.equal(await cache.get('browse', () => { throw new Error('should be cached'); }), 'new');
 });
+
+test('Home snapshot peek supports same-session stale display but never crosses invalidation', async () => {
+  let now=0;
+  const cache=new CatalogCache({ttl:45,now:()=>now});
+  const rows=[{title:'Recent',items:[]}];
+  await cache.get('home',()=>rows);
+  assert.strictEqual(cache.peek('home'),rows);
+  now=45;
+  assert.strictEqual(cache.peek('home'),null);
+  assert.strictEqual(cache.peek('home',{allowExpired:true}),rows);
+  cache.clear();
+  assert.strictEqual(cache.peek('home',{allowExpired:true}),null);
+});
