@@ -3,6 +3,7 @@
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
 import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
+import {plexPlaybackNavigation, jellyfinPlaybackNavigation} from './skip-markers.js';
 const enc = encodeURIComponent;
 const PAGE = 60;
 // Plex stores an artwork timestamp in its /thumb/<timestamp> and /art/<timestamp>
@@ -70,21 +71,9 @@ function jellyItem(raw) {
     resume: seconds(raw.UserData && raw.UserData.PlaybackPositionTicks), watched: !!(raw.UserData && raw.UserData.Played),
     folder: !!raw.IsFolder || ['Series', 'Season', 'BoxSet', 'CollectionFolder'].includes(raw.Type), raw};
 }
-// Plex chapter/marker offsets are milliseconds on the full title timeline.
-export function plexNavigation(raw) {
-  const duration = Number(raw.duration) / 1000;
-  const valid = value => value !== null && value !== undefined && value !== ''
-    && Number.isFinite(Number(value)) && Number(value) >= 0;
-  const chapters = (Array.isArray(raw.Chapter) ? raw.Chapter : [])
-    .filter(c => c && valid(c.startTimeOffset))
-    .map((c, i) => ({start: Number(c.startTimeOffset) / 1000, title: c.title || 'Chapter ' + (i + 1)}))
-    .filter(c => !duration || c.start < duration).sort((a, b) => a.start - b.start);
-  const markers = (Array.isArray(raw.Marker) ? raw.Marker : [])
-    .filter(m => m && ['intro', 'credits'].includes(m.type) && valid(m.startTimeOffset) && valid(m.endTimeOffset))
-    .map(m => ({type: m.type, start: Number(m.startTimeOffset) / 1000,
-      end: Math.min(Number(m.endTimeOffset) / 1000, duration || Infinity)}))
-    .filter(m => m.end > m.start).sort((a, b) => a.start - b.start);
-  return {chapters, markers};
+// Plezy derives missing markers from chapter titles for all supported backends.
+export function plexNavigation(raw, settings = {}) {
+  return plexPlaybackNavigation(raw, settings);
 }
 export function plexIdentity(deviceId) {
   return {'X-Plex-Product': 'Plezy webOS', 'X-Plex-Version': VERSION,
@@ -407,7 +396,7 @@ export class Plex {
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, item,
       start: Math.max(0, Number(options.start) || 0),
-      ...plexNavigation(item.raw),
+      ...plexNavigation(item.raw, options.skipSettings),
       audio: (part.Stream || []).filter(s => s.streamType === 2)
         .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'audio', index)})),
       subtitles: (part.Stream || []).filter(s => s.streamType === 3)
@@ -514,6 +503,14 @@ export class Jellyfin {
     await this.call(this.userPath('/PlayedItems/') + enc(item.id), {}, {method: played ? 'POST' : 'DELETE'});
   }
   async playback(item, options = {}) {
+    // Native Plezy fetches Jellyfin's media segments independently of playback
+    // and uses chapters immediately if the server lacks the endpoint.
+    // Emby does not implement /MediaSegments.
+    const markerPromise = this.server.kind === 'jellyfin'
+      ? this.call('/MediaSegments/' + enc(item.id)).then(segments =>
+        jellyfinPlaybackNavigation(item.raw, segments, options.skipSettings).markers).catch(() => null)
+      : null;
+    const navigation = jellyfinPlaybackNavigation(item.raw, [], options.skipSettings);
     const transcode = !!options.transcode || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
     const data = await this.call('/Items/' + enc(item.id) + '/PlaybackInfo', {UserId: this.server.userId}, {
       method: 'POST', body: {UserId: this.server.userId, StartTimeTicks: 0, MaxStreamingBitrate: 12000000,
@@ -538,6 +535,7 @@ export class Jellyfin {
     return {url: direct ? this.url('/Videos/' + enc(item.id) + '/stream', {Static: true, MediaSourceId: source.Id,
       DeviceId: this.deviceId, PlaySessionId: data.PlaySessionId}) : this.url(streamPath),
       sessionId: data.PlaySessionId, sourceId: source.Id, transcode: !direct, item, start: options.start || 0, options,
+      ...navigation, markerPromise,
       audio: (source.MediaStreams || []).filter(s => s.Type === 'Audio').map(s => ({id: s.Index, label: s.DisplayTitle || s.Language || s.Codec})),
       subtitles: (source.MediaStreams || []).filter(s => s.Type === 'Subtitle').map(s => ({id: s.Index, label: s.DisplayTitle || s.Language || s.Codec}))};
   }
