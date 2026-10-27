@@ -62,16 +62,18 @@ export class PersistentCatalogCache {
     if (entry) this.memoryBytes -= entry.bytes;
     this.memory.delete(key);
   }
-  remember(key, data, bytes, priority = false) {
+  remember(key, data, bytes, priority = false, diskUsed = null) {
     if (!bytes) {
       try { bytes = JSON.stringify(data).length * 2; }
       catch (_) { return; }
     }
     const previous = this.memory.get(key);
     const protectedPage = priority || !!(previous && previous.priority);
+    const lastDiskTouch = diskUsed === null
+      ? previous ? previous.used : this.now() : diskUsed;
     this.forget(key);
     if (bytes > this.memoryLimit) return;
-    this.memory.set(key, {data, bytes, priority: protectedPage, used: this.now()});
+    this.memory.set(key, {data, bytes, priority: protectedPage, used:lastDiskTouch});
     this.memoryBytes += bytes;
     // Landing pages are compact but essential to instant reopening. Evict
     // scrolled-through pages first, regardless of how many pages exist.
@@ -110,7 +112,11 @@ export class PersistentCatalogCache {
       this.remember(key, entry.data, entry.bytes, priority);
       // Disk LRU must reflect navigation even when metadata hits RAM; a
       // stale disk timestamp otherwise evicts an actively used first page.
-      if (shouldTouch) this.touch(key, priority).catch(() => {});
+      if (shouldTouch) {
+        const refreshed = this.memory.get(key);
+        if (refreshed) refreshed.used = this.now();
+        this.touch(key, priority).catch(() => {});
+      }
       return entry.data;
     }
     const db = await this.open();
@@ -123,13 +129,15 @@ export class PersistentCatalogCache {
         request.onsuccess = () => {
           const entry = request.result;
           if (entry && entry.data !== undefined && entry.bytes <= MAX_ENTRY_BYTES) {
-            this.remember(key, entry.data, entry.bytes, priority || !!entry.priority);
-            if ((priority && !entry.priority) ||
-                this.now() - entry.used >= TOUCH_INTERVAL_MS) {
+            const touch = (priority && !entry.priority) ||
+              this.now() - entry.used >= TOUCH_INTERVAL_MS;
+            if (touch) {
               entry.used = this.now();
               entry.priority = priority || !!entry.priority;
               store.put(entry);
             }
+            this.remember(key, entry.data, entry.bytes,
+              priority || !!entry.priority, entry.used);
             resolve(entry.data);
           } else resolve(null);
         };
