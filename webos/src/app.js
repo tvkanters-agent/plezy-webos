@@ -86,6 +86,13 @@ function playbackClosed() {
 }
 let rememberedPaneFocus = null;
 let rememberedRailFocusId = null;
+// Magic Remote/pointer tab switches can focus the rail directly without the
+// D-pad Left handler. Remember the last actual media focus in the main pane
+// so its cached root snapshot can restore the same title on return.
+main.addEventListener('focusin', event => {
+  if (event.target.matches('[data-focus]') && main.contains(event.target))
+    rememberedPaneFocus = event.target;
+});
 // Track real rail focus (D-pad and pointer), not the current route. Navigation
 // rebuilds the buttons, so remember the stable destination ID, not its node.
 nav.addEventListener('focusin', event => {
@@ -1213,7 +1220,10 @@ async function paginated(loader, currentRevision, options = {}) {
       else reconcileCards(grid, items);
     }
     if (!grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
-    main.scrollTop = scroll;
+    // A virtualized refresh may have moved the focused title to a different
+    // logical row. Do not undo the recycler's scroll anchor just to restore
+    // the *old* pixel offset, which would immediately recycle that title.
+    if (!windowedGrid) main.scrollTop = scroll;
     if (oldFocus && (!grid.contains(document.activeElement) ||
         document.activeElement.dataset.focus !== oldFocus)) {
       const selected = Array.from(grid.querySelectorAll('[data-focus]')).find(
