@@ -476,8 +476,11 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
   await expect.poll(()=>pending.length).toBe(2);
   await page.waitForTimeout(75);
   expect(pending).toHaveLength(2);
-  expect(await page.evaluate(() => window.artworkOperations)).toEqual(['read','read','write','write']);
+  // Disk lookup/fetch is asynchronous; src isn't assigned until resolved.
+  expect(await page.evaluate(() => window.artworkOperations)).toEqual(['read','read']);
   for(const request of pending.splice(0))await request.fulfill({status:404});
+  await expect.poll(()=>page.evaluate(() =>
+    window.artworkOperations.filter(op => op === 'write').length)).toBe(2);
 });
 
 test('Plex show detail displays metadata and browsable seasons',async({page})=>{
@@ -1199,4 +1202,65 @@ test('Right enters controls of an empty library after loading completes', async 
   await page.getByRole('button', {name:'Movies',exact:true}).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('main').getByRole('button', {name:'Recommended',exact:true})).toBeFocused();
+});
+
+test('artwork persists through reload and decoded memory hits render before insertion',async({page})=>{
+  await mockServer(page);
+  let imageRequests=0;
+  const image='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'+
+    '<rect width="16" height="16" fill="#777"/></svg>';
+  await page.route('http://media.test/Items/movie/Images/Primary**',route=>{
+    imageRequests++;
+    return route.fulfill({body:image,headers:{
+      'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}});
+  });
+  await page.goto('/');
+  const first=page.locator('main .card .poster img').first();
+  await expect(first).toHaveClass(/artwork-loaded/);
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const request=indexedDB.open('plezy-artwork-v1',1);
+    request.onerror=()=>resolve(0);
+    request.onsuccess=()=>{
+      const tx=request.result.transaction('images','readonly');
+      const count=tx.objectStore('images').count();
+      count.onsuccess=()=>resolve(count.result);
+      count.onerror=()=>resolve(0);
+    };
+  }))).toBeGreaterThan(0);
+  const before=imageRequests;
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  const reused=page.locator('main .grid .poster img').first();
+  await expect(reused).toHaveClass(/artwork-ready/);
+  expect(await reused.getAttribute('src')).toMatch(/^blob:/);
+  expect(imageRequests).toBe(before);
+  await page.reload();
+  const fromDisk=page.locator('main .card .poster img').first();
+  await expect(fromDisk).toHaveClass(/artwork-loaded/);
+  expect(await fromDisk.getAttribute('src')).toMatch(/^blob:/);
+  expect(imageRequests).toBe(before);
+});
+test('cast pictures fade in but do not enter the persistent artwork cache',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'dev',active:'plex',
+    servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
+  const actor={id:'1',tag:'Performer',role:'Lead',thumb:'/cast/1.jpg'};
+  const movie={ratingKey:'film',type:'movie',title:'Film with Cast',Role:[actor]};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/photo/:/transcode')return route.fulfill({
+      body:'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>',
+      headers:{'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}});
+    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'Films',Metadata:[movie]}]}}});
+    if(path==='/library/metadata/film')
+      return route.fulfill({json:{MediaContainer:{Metadata:[movie]}}});
+    return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:/Film with Cast/}).first().click();
+  const portrait=page.locator('.cast-picture img').first();
+  await portrait.scrollIntoViewIfNeeded();
+  await expect(portrait).toHaveClass(/artwork-loaded/);
+  await expect.poll(()=>portrait.evaluate(node=>Number(getComputedStyle(node).opacity))).toBe(1);
+  expect(await portrait.getAttribute('data-artwork-cache')).toBe(null);
+  expect(await portrait.getAttribute('src')).toMatch(/^http:/);
 });
