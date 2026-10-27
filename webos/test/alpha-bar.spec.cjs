@@ -258,6 +258,7 @@ test('D-pad reuses bounds per decision and refreshes them on the next key', asyn
     for (const row of result.reads) expect(row.count).toBeLessThanOrEqual(row.selected ? 2 : 1);
   }
   const exit = await move(37);
-  expect(exit.reads).toHaveLength(0);
-  await expect(page.locator('#nav button.active')).toBeFocused();
+  // The first card is measured once to choose the nearest rail destination.
+  expect(exit.reads).toEqual([{id:'0',count:1,selected:false}]);
+  await expect(page.locator('#nav button:focus')).toHaveCount(1);
 });

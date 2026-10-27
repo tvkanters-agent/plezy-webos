@@ -154,8 +154,9 @@ Flutter's `FocusableMediaCard` and `LibraryBrowseTab` retain focus zones and
 layout geometry through the framework. Chromium 53 uses DOM geometry instead.
 D-pad decisions reuse each element's bounds only within one synchronous key
 handler; reveal still measures independently, and every new key measures afresh.
-The first poster's explicit sidebar exit needs no candidate geometry. This
-preserves spatial scoring and avoids caches becoming stale after scroll/resize.
+The first poster's sidebar exit measures its own bounds and the rail
+destinations once to select the nearest visible rail button. This preserves
+spatial scoring and avoids caches becoming stale after scroll/resize.
 
 Alphabet-grid measurement reads the first row and the first card of row two,
 matching upstream's shared column/row metrics. Later rows need no measurements.

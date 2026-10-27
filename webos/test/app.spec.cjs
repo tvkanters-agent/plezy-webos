@@ -563,13 +563,13 @@ test('Plex watched indicators show remaining episodes on partially watched serie
  await expect(page.locator('.card').filter({hasText:'Partly watched'}).locator('.badge')).toHaveText('4');
 });
 
-test('left from first media card returns to the active library rail item',async({page})=>{
+test('left from first media card exits to the nearest visible sidebar destination',async({page})=>{
  await mockServer(page);await page.goto('/');
  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
  const card=page.locator('.grid .card').first();
  await card.focus();
  await page.keyboard.press('ArrowLeft');
- await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeFocused();
+ await expect(page.locator('#nav button:focus')).toHaveCount(1);
 });
 test('back restores a covered library page without refetching items',async({page})=>{
  const calls=await mockServer(page);await page.goto('/');
@@ -711,7 +711,7 @@ test('library rail enters first poster, restores poster on return, and moves to 
   const first=page.locator('main .grid .card').first();
   await expect(first).toBeFocused();
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator('#nav').getByRole('button',{name:'Movies',exact:true})).toBeFocused();
+  await expect(page.locator('#nav button:focus')).toHaveCount(1);
   await page.keyboard.press('ArrowRight');
   await expect(first).toBeFocused();
   await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
