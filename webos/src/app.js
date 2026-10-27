@@ -5,6 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
+import {artworkWindowCount, shelfWindow} from './artwork-window.js';
 import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
@@ -549,7 +550,7 @@ async function prepareNavigation(next, sourceApi) {
     if (!key) return;
     const page = await read(key);
     if (view === 'browse' && sourceApi instanceof Plex && (next.sort || 'title') === 'title')
-      await read('characters:' + JSON.stringify([next.library.id,next.filter || 'all']));
+      read('characters:' + JSON.stringify([next.library.id,next.filter || 'all'])).catch(() => {});
     if (page) {
       if (view === 'recommended') await prewarmShelves(page, sourceApi);
       else await prewarmPosters(page.items, sourceApi, {protectFirst:24});
@@ -844,8 +845,12 @@ function poster(item, options = {}) {
 // before cards are inserted, including across full app restarts. Uncached art
 // still loads lazily through the existing two-slot network queue and fades in.
 async function prewarmPosters(items, sourceApi = api, options = {}) {
+  // Prewarm only the opening viewport and two adjacent rows, as Plezy's
+  // sliver prefetch does. The rest is decoded on demand by the scroll queue.
+  const limit = artworkWindowCount(main.clientWidth, main.clientHeight,
+    {landscape:!!options.landscape});
   const keys = [];
-  for (const item of items) {
+  for (const item of items.slice(0, limit)) {
     const url = sourceApi.image(item, options);
     if (!url) continue;
     const key = artworkCacheKey(url, sourceApi.artworkVersion(item, options));
@@ -855,18 +860,18 @@ async function prewarmPosters(items, sourceApi = api, options = {}) {
   await artworkCache.prewarm(keys);
 }
 async function prewarmShelves(shelves, sourceApi = api) {
-  const landing = [];
-  // A shelf has many items but only its first few appear at page entry.
-  // Keep those decoded across deep library scrolling and later Home visits.
-  shelves.forEach(shelf => shelf.items.slice(0, 8).forEach(item => {
+  // Home/recommendations can contain arbitrarily many horizontal shelves.
+  // Decode the visible shelf columns and nearby rows, never every shelf.
+  const landing = shelfWindow(shelves, main.clientWidth, main.clientHeight);
+  const keys = [];
+  for (const item of landing) {
     const url = sourceApi.image(item);
-    if (url) {
-      const key = artworkCacheKey(url, sourceApi.artworkVersion(item));
-      if (key) landing.push(key);
-    }
-  }));
-  artworkCache.protect(landing);
-  await prewarmPosters(shelves.reduce((all, shelf) => all.concat(shelf.items), []), sourceApi);
+    if (!url) continue;
+    const key = artworkCacheKey(url, sourceApi.artworkVersion(item));
+    if (key) keys.push(key);
+  }
+  artworkCache.protect(keys);
+  await artworkCache.prewarm(keys);
 }
 async function prewarmDetail({item, parentShow}, sourceApi) {
   const episode = item.type === 'episode' || item.type === 'Episode';
