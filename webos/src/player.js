@@ -176,6 +176,9 @@ export class Player {
       this.marker = found || null;
       if (found) {
         this.startAutoSkip(found);
+        // The button must enter the visible tree BEFORE requesting focus.
+        // Focusing its [hidden] state silently fails in Chromium.
+        this.renderSkipMarker();
         // Native Plezy assigns focus on TV only when no sheet or higher
         // overlay owns the remote. Desktop preview retains current focus.
         if (this.sheet.hidden && (typeof window.PalmSystem !== 'undefined' ||
@@ -603,7 +606,8 @@ export class Player {
     const code = event.keyCode;
     this.cancelAutoSkipFromInteraction();
     if (document.activeElement === this.skipButton && code === 40) {
-      event.preventDefault(); this.root.querySelector('[data-action="pause"]').focus(); return true;
+      event.preventDefault(); this.reveal();
+      this.root.querySelector('[data-action="pause"]').focus(); return true;
     }
     if (document.activeElement === this.skipButton && [461, 27, 413].includes(code)) {
       event.preventDefault(); this.dismissSkipMarker(); return true;

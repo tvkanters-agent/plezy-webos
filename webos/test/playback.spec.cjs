@@ -355,3 +355,19 @@ test('pressing a remote key cancels automatic skip, without seeking', async ({pa
   await page.waitForTimeout(2500);
   expect(await page.locator('video').evaluate(v=>v.currentTime)).toBeLessThan(15);
 });
+
+test('TV skip marker gains focus only once its floating button is visible', async ({page}) => {
+  await setup(page, {Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.evaluate(() => {
+    // Simulate TV input mode after desktop playback has already opened.
+    window.PalmSystem = {};
+    const video = document.querySelector('#player video');
+    video.currentTime = 5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeFocused();
+  await expect(page.locator('#player .controls')).toBeVisible();
+});
