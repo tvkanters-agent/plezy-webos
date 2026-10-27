@@ -133,6 +133,10 @@ function setClient() {
   clearNavigationHistory();
   const server = activeServer();
   api = server ? client(server, state.deviceId) : null;
+  // The mounted DOM still belongs to the previous account at this point.
+  // Reset its route before the next go() can mistakenly cache it as a tab
+  // belonging to the newly selected server.
+  route = {type:'home'};
   libraryCache = null; libraryCacheFor = null; libraryLoading = false;
 }
 function addServer(server) {
