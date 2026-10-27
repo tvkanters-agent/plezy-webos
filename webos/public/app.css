@@ -52,9 +52,16 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 48px 48px 80px; }
 /* Native OptimizedMediaImage: a plain opaque surface under an async 300ms
    image fade. Hide src-less/decode-pending images to avoid Chromium's white
    broken-image border. Cached images appear immediately, with no transition. */
-.poster img { width: 100%; height: 100%; object-fit: cover; opacity: 0; }
-.poster img.artwork-loaded { opacity: 1; transition: opacity 300ms ease-out; }
-.poster img.artwork-ready { opacity: 1; }
+.poster img { width: 100%; height: 100%; object-fit: cover; }
+.poster img, .cast-picture img, .actor-avatar img, .detail-backdrop img { opacity: 0; }
+.poster img.artwork-loaded, .cast-picture img.artwork-loaded,
+.actor-avatar img.artwork-loaded, .detail-backdrop img.artwork-loaded {
+  opacity: 1; transition: opacity 300ms ease-out;
+}
+.poster img.artwork-ready, .cast-picture img.artwork-ready,
+.actor-avatar img.artwork-ready, .detail-backdrop img.artwork-ready {
+  opacity: 1; transition: none;
+}
 .poster .poster-fallback { width: 40px; height: 40px; flex: 0 0 40px;
   color: #747b89; }
 .card strong { display: block; font-size: 19px; margin-top: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -127,7 +134,11 @@ nav::-webkit-scrollbar { width:0; display:none; }
 
 /* Native MediaDetailScreen structure: spotlight artwork, metadata, season cards. */
 main { position:relative; }
-.detail-backdrop { pointer-events:none; position:absolute; top:0; right:0; width:100%; height:460px; background-size:cover; background-position:right top; opacity:.65; z-index:0; }
+.detail-backdrop { pointer-events:none; position:absolute; top:0; right:0; width:100%; height:460px; overflow:hidden; opacity:.65; z-index:0; }
+.detail-backdrop img { position:absolute; top:0; right:0; width:100%; height:100%; object-fit:cover; object-position:right top; }
+.detail-backdrop-shade { position:absolute; top:0; right:0; bottom:0; left:0;
+  background:linear-gradient(to right, #0e0f12 2%, rgba(14,15,18,.86) 48%, rgba(14,15,18,.2)),
+    linear-gradient(to top, #0e0f12, transparent 65%); }
 main > .detail,main > .detail-children-title, main > .grid,main > .error { position:relative; z-index:1; }
 .detail { margin-top:54px; align-items:flex-start; }
 .detail > .poster { border-radius:12px; box-shadow:0 16px 42px rgba(0,0,0,.4); }
