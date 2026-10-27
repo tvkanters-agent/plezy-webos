@@ -71,6 +71,12 @@ for (const layout of ['grid','flex']) {
     await expect(page.locator('main .grid .card[data-focus="'+before.id+'"]')).toBeFocused();
     expect(Math.abs(await page.locator('main').evaluate(node=>node.scrollTop)-before.scroll))
       .toBeLessThan(3);
+    // Detaching a cached route for a title detail must not disable its
+    // still-incomplete paginator after Back restores the DOM snapshot.
+    await expect.poll(async()=>{
+      await page.locator('main').evaluate(node=>node.scrollTop=node.scrollHeight);
+      return calls.includes(300);
+    },{timeout:12000}).toBe(true);
     await page.locator('main').evaluate(node=>node.scrollTop=0);
     await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
     expect(calls.filter(offset=>offset===0)).toHaveLength(1);
