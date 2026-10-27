@@ -98,7 +98,11 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       });
       const replacement = visible.find(node => node._gridIndex % columns === focusedColumn) ||
         visible[0] || desired[Math.min(desired.length-1, Math.max(0,focusedColumn))];
-      if (replacement) focusWithoutJump(replacement, false);
+      if (replacement) {
+        // Even when the wheel stops past the final row/sentinel, never leave
+        // focus on an invisible card or a focusless <main>.
+        focusWithoutJump(replacement, !visible.length);
+      }
     }
     schedulePosters();
   }
