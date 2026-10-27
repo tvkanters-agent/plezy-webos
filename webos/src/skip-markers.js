@@ -58,9 +58,11 @@ export function plexPlaybackNavigation(raw, settings = {}) {
     .map(m => ({type: m.type, start: Number(m.startTimeOffset) / 1000,
       end: Math.min(Number(m.endTimeOffset) / 1000, duration || Infinity)}));
   return {chapters: chapters.map(c => ({start: c.start, title: c.title})),
-    markers: withChapterFallback(chapters, markers, settings)};
+    markers: withChapterFallback(chapters, markers, settings)
+      .filter(m => ['intro','credits'].includes(m.type)).sort((a, b) => a.start - b.start)};
 }
 export function jellyfinPlaybackNavigation(raw, segments = [], settings = {}) {
+  raw = raw || {};
   const duration = valid(raw.RunTimeTicks) ? Number(raw.RunTimeTicks) / 10000000 : 0;
   const chapters = (Array.isArray(raw.Chapters) ? raw.Chapters : [])
     .filter(c => c && valid(c.StartPositionTicks))

@@ -49,3 +49,11 @@ test('custom patterns match one type and blank patterns use safe defaults', () =
   assert.equal(plexPlaybackNavigation(raw,{introPattern:'^foo$'}).markers.length,0);
   assert.equal(plexPlaybackNavigation(raw,{introPattern:' '}).markers[0].type,'intro');
 });
+
+test('unknown Plex marker types are not displayed as skip prompts', () => {
+  assert.deepEqual(plexPlaybackNavigation({duration:100000,
+    Marker:[{type:'commercial',startTimeOffset:0,endTimeOffset:1000}]}).markers, []);
+});
+test('Jellyfin missing metadata still supports playback', () => {
+  assert.deepEqual(jellyfinPlaybackNavigation(undefined), {chapters:[],markers:[]});
+});
