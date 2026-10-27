@@ -10,7 +10,8 @@ export function gridWindowRange(count, columns, firstRow, visibleRows, previous 
   if (count <= Math.max(80, width * (visibleRows + 8)))
     return {start:0, end:count, topRows:0, bottomRows:0};
   // Two spare rows on each edge permit D-pad movement without a DOM update.
-  if (previous && visibleStart >= previous.start / width + 2 &&
+  if (previous && !(previous.end < count && previous.end % width !== 0) &&
+      visibleStart >= previous.start / width + 2 &&
       visibleEnd <= Math.ceil(previous.end / width) - 2)
     return {...previous, bottomRows:rows - Math.ceil(previous.end / width)};
   const startRow = Math.max(0, visibleStart - 4);
