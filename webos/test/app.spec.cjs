@@ -958,6 +958,50 @@ test('Plezy person fallback handles absent and failed portraits on cast strip an
  await expect(page.locator('.actor-avatar .person-placeholder svg')).toHaveCount(1);
 });
 
+test('actor count loads without shifting the cast page header',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',
+     name:'Plex',token:'token'}]})));
+ const actor={id:'411',tag:'Movie Actor',role:'The Lead'};
+ const film={ratingKey:'film',type:'movie',title:'Film with Actor',Role:[actor]};
+ let unblock, markRequested;
+ const held=new Promise(resolve=>{unblock=resolve;});
+ const requested=new Promise(resolve=>{markRequested=resolve;});
+ await page.route('http://plex.test/**',async route=>{
+   const path=new URL(route.request().url()).pathname;
+   if(path==='/library/people/411/media'){
+     markRequested();
+     await held;
+     return route.fulfill({json:{MediaContainer:{Metadata:[film],totalSize:1}}});
+   }
+   if(path==='/hubs')return route.fulfill({json:{MediaContainer:{
+     Hub:[{title:'Movies',Metadata:[film]}]}}});
+   const entries=path==='/library/metadata/film'?[film]:[];
+   return route.fulfill({json:{MediaContainer:{Metadata:entries,totalSize:entries.length}}});
+ });
+ await page.goto('/');
+ await page.getByRole('button',{name:/Film with Actor/}).first().click();
+ await page.locator('.cast-strip').focus();
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{name:'Movie Actor'})).toBeVisible();
+ await requested;
+ const count=page.locator('.actor-count');
+ await expect(count).toBeEmpty();
+ const geometry=()=>page.locator('.actor-hero').evaluate(hero=>{
+   const box=selector=>hero.querySelector(selector).getBoundingClientRect();
+   const top=hero.getBoundingClientRect().top;
+   return {heroHeight:hero.getBoundingClientRect().height,
+     identityHeight:box('.actor-identity').height, headingTop:box('h1').top-top,
+     roleTop:box('.actor-role').top-top, countTop:box('.actor-count').top-top,
+     countHeight:box('.actor-count').height};
+ });
+ const before=await geometry();
+ expect(before.countHeight).toBe(20);
+ unblock();
+ await expect(count).toHaveText('1 title');
+ expect(await geometry()).toEqual(before);
+});
+
 test('Plezy actor page displays compact portrait, character, biography and filmography',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
