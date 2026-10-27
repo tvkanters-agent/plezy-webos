@@ -104,7 +104,11 @@ function preferredPaneControl() {
   // rewind scroll to the first buffered card after Magic Remote scrolling.
   const media = Array.from(main.querySelectorAll(
     '.grid .card, .shelf .card, .episode-list .episode-row, .cards .card'));
-  return media.find(cardWithinPane) || media[0] ||
+  const view = main.getBoundingClientRect();
+  return media.find(cardWithinPane) || media.find(node => {
+    const box = node.getBoundingClientRect();
+    return box.bottom > view.top + 4 && box.top < view.bottom - 4;
+  }) || media[0] ||
     main.querySelector('button:not(:disabled),input,select');
 }
 function el(tag, text, className) {
