@@ -536,7 +536,9 @@ test('library artwork fills three rows before and after the viewport while dista
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.locator('.grid .card').first()).toBeVisible();
-  await page.evaluate(()=>{
+  // Populate and measure in a single browser task: a concurrent catalog
+  // refresh must not replace our synthetic cards between these operations.
+  const ids=await page.evaluate(()=>{
     const grid=document.querySelector('.grid');
     const entry=grid.querySelector('.card');
     for(let n=0;n<160;n++){
@@ -552,26 +554,28 @@ test('library artwork fills three rows before and after the viewport while dista
     const main=document.querySelector('main');
     const target=grid.children[Math.floor(grid.children.length/2)];
     main.scrollTop+=target.getBoundingClientRect().top-main.getBoundingClientRect().top-30;
-  });
-  const ids=await page.evaluate(()=>{
-    const main=document.querySelector('main'), grid=document.querySelector('.grid');
     const view=main.getBoundingClientRect();
-    const rowPositions=Array.from(new Set(Array.from(grid.children)
-      .map(node=>node.offsetTop))).sort((a,b)=>a-b);
-    const stride=rowPositions[1]-rowPositions[0];
     const images=Array.from(grid.querySelectorAll('img[data-offscreen-id]'));
-    const above=images.find(img=>{
+    // Select the second completely off-screen row in each direction using
+    // rendered geometry; flex and CSS Grid need not share offsetTop metrics.
+    function rowIds(candidates, backwards) {
+      candidates.sort((a,b)=>backwards ? b.top-a.top : a.top-b.top);
+      const seen=new Set(), result=[];
+      for(const candidate of candidates) {
+        const row=Math.round(candidate.top);
+        if(seen.has(row))continue;
+        seen.add(row);
+        result.push(candidate.id);
+      }
+      return result;
+    }
+    const positioned=images.map(img=>{
       const rect=img.getBoundingClientRect();
-      return rect.bottom<view.top-stride && rect.bottom>view.top-2*stride;
+      return {id:img.getAttribute('data-offscreen-id'),top:rect.top,bottom:rect.bottom};
     });
-    const below=images.find(img=>{
-      const rect=img.getBoundingClientRect();
-      return rect.top>view.bottom+stride && rect.top<view.bottom+2*stride;
-    });
-    const far=images.find(img=>img.getBoundingClientRect().top>view.bottom+5*stride);
-    return {above:above?.getAttribute('data-offscreen-id'),
-      below:below?.getAttribute('data-offscreen-id'),
-      far:far?.getAttribute('data-offscreen-id')};
+    const above=rowIds(positioned.filter(x=>x.bottom<view.top),true);
+    const below=rowIds(positioned.filter(x=>x.top>view.bottom),false);
+    return {above:above[1],below:below[1],far:below[6]};
   });
   expect(ids.above).toBeDefined();
   expect(ids.below).toBeDefined();
