@@ -203,3 +203,34 @@ for(const layout of ['grid','flex']) {
       expect(Math.max(...strides)-Math.min(...strides)).toBeLessThan(2);
   });
 }
+
+test('recycling reuses nearby artwork DOM and suspends both scroll listeners',async({page})=>{
+  const calls=await mockLongJellyfinLibrary(page);
+  await page.setViewportSize({width:1280,height:720});
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(60);
+  await page.evaluate(()=>{
+    window.mainScrollRemoved=0;
+    const original=Element.prototype.removeEventListener;
+    Element.prototype.removeEventListener=function(type,...args) {
+      if(type==='scroll' && this.tagName==='MAIN')window.mainScrollRemoved++;
+      return original.call(this,type,...args);
+    };
+  });
+  await page.locator('main .grid .card[data-focus="0"]').click();
+  await expect(page.getByRole('heading',{name:'Title 000'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>window.mainScrollRemoved)).toBeGreaterThanOrEqual(2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('main .grid .card[data-focus="0"]')).toBeFocused();
+  await fillFivePages(page,calls);
+  await page.locator('main').evaluate(main=>main.scrollTop=0);
+  await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
+  await page.evaluate(()=>{window.savedCard=document.querySelector('.grid .card[data-focus="0"]')});
+  await page.locator('main').evaluate(main=>main.scrollTop=main.scrollHeight*.7);
+  await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(0);
+  await page.locator('main').evaluate(main=>main.scrollTop=0);
+  await expect(page.locator('main .grid .card[data-focus="0"]')).toHaveCount(1);
+  expect(await page.evaluate(()=>document.querySelector('.grid .card[data-focus="0"]')===window.savedCard))
+    .toBe(true);
+});
