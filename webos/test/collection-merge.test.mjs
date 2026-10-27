@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {matchingCollections, mergedCollectionLoader} from '../src/collection-merge.js';
+import {CollectionIndex} from '../src/collection-index.js';
 
 const collection = (id, title, library) => ({
   id, title, type: 'collection', raw: {librarySectionID: library}
@@ -141,4 +142,49 @@ test('unavailable collection discovery still shows original titles under its lib
     id:'c',title:'Favorites',raw:{librarySectionID:7,librarySectionTitle:'My Movies'}
   })(0);
   assert.deepEqual(page.groups.map(group => group.libraryTitle), ['My Movies']);
+});
+
+test('collection discovery is shared between different names and refreshed in background',async()=>{
+  let now=1000, listings=0, resolveRefresh;
+  const api={
+    libraries:async()=>[{id:'film',title:'Films'},{id:'tv',title:'Shows'}],
+    collections:async id=>{
+      listings++;
+      if(listings>2) await new Promise(resolve=>{resolveRefresh=resolve;});
+      return {items:[collection(id, id==='film'?'Holiday':'Other',id)],total:1};
+    }
+  };
+  const index=new CollectionIndex({now:()=>now,ttl:500});
+  assert.equal((await matchingCollections(api,collection('film','Holiday','film'),index)).length,1);
+  assert.equal(listings,2);
+  assert.equal((await matchingCollections(api,collection('tv','Other','tv'),index)).length,1);
+  assert.equal(listings,2,'other collection names must reuse the shared index');
+  now=1600;
+  const stale=await matchingCollections(api,collection('film','Holiday','film'),index);
+  assert.equal(stale.length,1,'stale results should return while refreshing');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(listings>2);
+  resolveRefresh();
+});
+
+test('collection discovery persists across API clients with account-scoped keys',async()=>{
+  const saved=new Map();
+  const catalog={
+    id:(scope,key)=>scope+':'+key,
+    read:async key=>saved.get(key),
+    write:async(key,value)=>{saved.set(key,value);}
+  };
+  const makeApi=counter=>({
+    libraries:async()=>{counter.calls++;return [{id:'movies',title:'Movies'}];},
+    collections:async()=>({items:[collection('c','Favorites','movies')],total:1})
+  });
+  const first={calls:0},second={calls:0};
+  const index=new CollectionIndex({catalog,now:()=>100,ttl:5000});
+  await matchingCollections(makeApi(first),collection('c','Favorites','movies'),index,'userA');
+  assert.equal(first.calls,1);
+  await new Promise(resolve=>setImmediate(resolve));
+  await matchingCollections(makeApi(second),collection('c','Favorites','movies'),index,'userA');
+  assert.equal(second.calls,0);
+  await matchingCollections(makeApi(second),collection('c','Favorites','movies'),index,'userB');
+  assert.equal(second.calls,1,'another account must not read the previous index');
 });

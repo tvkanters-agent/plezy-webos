@@ -10,6 +10,7 @@ import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
+import {CollectionIndex} from './collection-index.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
@@ -20,6 +21,7 @@ const main = document.querySelector('#main'), nav = document.querySelector('#nav
 const artworkCache = new ArtworkCache();
 const catalogCache = new CatalogCache({ttl: Infinity});
 const savedCatalog = new PersistentCatalogCache();
+const collectionIndex = new CollectionIndex({catalog:savedCatalog});
 function savedPage(key, loader, options) {
   return savedCatalog.page(catalogScope(activeServer()), key, loader, options);
 }
@@ -124,6 +126,7 @@ let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
 function setClient() {
   // Never reuse catalog metadata across accounts or server connections.
   catalogCache.clear();
+  collectionIndex.clear();
   const server = activeServer();
   api = server ? client(server, state.deviceId) : null;
   libraryCache = null; libraryCacheFor = null; libraryLoading = false;
@@ -1793,7 +1796,8 @@ async function render(prepared = null) {
           heading.className = 'detail-children-title';
           main.append(heading);
         }
-        const loadChildren = grouped ? mergedCollectionLoader(currentApi, item)
+        const loadChildren = grouped ? mergedCollectionLoader(currentApi, item,
+          collectionIndex, catalogScope(activeServer()))
           : start => currentApi.children(item.id, start, item.type);
         // Merged collections have a stateful cursor. Cached pages can be
         // consumed before revalidation finishes, so serialize cursor advances.

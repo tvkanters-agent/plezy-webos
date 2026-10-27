@@ -1,74 +1,47 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Plex stores collections per library. A movie and a TV collection with the
 // same name are separate Plex IDs, but represent one collection to the viewer.
+import {CollectionIndex} from './collection-index.js';
 const nameKey = value => String(value || '').trim().toLocaleLowerCase();
 const PAGE_SIZE = 60;
+const sharedIndex = new CollectionIndex();
 
-export async function matchingCollections(api, collection) {
+export async function matchingCollections(api, collection, index = sharedIndex, scope = '') {
   const name = nameKey(collection.title);
   const originalLibrary = String(collection.raw?.librarySectionID || '');
-  const primary = {id: collection.id, libraryId: originalLibrary,
-    libraryTitle: collection.raw?.librarySectionTitle || 'Titles'};
+  const primary = {id:collection.id, libraryId:originalLibrary,
+    libraryTitle:collection.raw?.librarySectionTitle || 'Titles'};
   if (!name) return [primary];
-  let libraries;
-  try { libraries = await api.libraries(); }
+  let snapshot;
+  try { snapshot = await index.entries(api, scope); }
   catch (error) {
     console.warn('Could not look up collections in other libraries', error);
     return [primary];
   }
-  const matches = libraries.map(() => []);
-  // Limit parallel metadata requests on servers with many libraries. Keep
-  // results in library order rather than the order requests happen to finish.
-  let next = 0;
-  await Promise.all(Array.from({length: Math.min(4, libraries.length)}, async () => {
-    while (next < libraries.length) {
-      const index = next++;
-      const library = libraries[index];
-      let start = 0;
-      try {
-        for (;;) {
-          const page = await api.collections(library.id, start);
-          for (const item of page.items) {
-            if (nameKey(item.title) === name)
-              matches[index].push({libraryId: String(library.id),
-                libraryTitle: library.title, item});
-          }
-          start += page.items.length;
-          if (!page.items.length || start >= page.total) break;
-        }
-      } catch (error) {
-        // A broken or inaccessible library must not hide the chosen collection.
-        console.warn('Could not list collections in ' + library.title, error);
-      }
-    }
-  }));
-  const found = matches.reduce((all, items) => all.concat(items), []);
-  // Detail metadata may omit librarySectionID. The matching listing row
-  // supplies it, including the library's human-readable name.
+  const found = snapshot.rows.filter(item => nameKey(item.title) === name);
+  // Detail metadata can omit librarySectionID; the index has the source ID.
   const owner = originalLibrary ||
-    found.find(entry => String(entry.item.id) === String(collection.id))?.libraryId || '';
-  const owningLibrary = libraries.find(library => String(library.id) === owner);
+    found.find(item => String(item.id) === String(collection.id))?.libraryId || '';
+  const owningLibrary = snapshot.libraries.find(library => String(library.id) === owner);
   primary.libraryId = owner;
   primary.libraryTitle = owningLibrary?.title || primary.libraryTitle;
   const ids = new Set([String(collection.id)]);
-  const otherSources = found.filter(({libraryId, item}) => {
-    if ((owner && libraryId === owner) || ids.has(String(item.id))) return false;
+  const others = found.filter(item => {
+    if (owner && item.libraryId === owner || ids.has(String(item.id))) return false;
     ids.add(String(item.id));
     return true;
-  }).map(({libraryId, libraryTitle, item}) => ({
-    id: item.id, libraryId, libraryTitle: libraryTitle || 'Titles'
-  }));
-  return [primary, ...otherSources];
+  }).map(item => ({id:item.id, libraryId:item.libraryId, libraryTitle:item.libraryTitle}));
+  return [primary, ...others];
 }
 
 // PaginatedItemLoader-style merge. Read one source at a time to retain each
 // collection's own ordering; never eagerly fetch every child in large lists.
 // The page buffer survives a failed request, so pressing Retry cannot omit
 // titles already fetched but not yet rendered.
-export function mergedCollectionLoader(api, collection) {
+export function mergedCollectionLoader(api, collection, index = sharedIndex, scope = '') {
   let initialization, sources, sourceIndex = 0, emitted = 0;
   const pending = [], seen = new Set();
-  async function initialize() { sources = (await matchingCollections(api, collection))
+  async function initialize() { sources = (await matchingCollections(api, collection, index, scope))
     .map(source => ({...source, start: 0})); }
   return async function load() {
     if (!initialization) initialization = initialize();
