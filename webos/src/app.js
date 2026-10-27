@@ -3,7 +3,7 @@ import './compat.js';
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
-import {ArtworkCache} from './artwork-cache.js';
+import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
@@ -545,7 +545,7 @@ function artworkImage(url, persistent, failed, revision = '') {
   // Keep cached images indefinitely until their server-supplied artwork
   // revision changes. For versionless artwork, fall back to ordinary loading
   // instead of risking a permanently stale persistent entry.
-  const key = persistent && revision ? url + '|revision=' + encodeURIComponent(revision) : '';
+  const key = persistent ? artworkCacheKey(url, revision) : '';
   if (key) {
     img.setAttribute('data-artwork-cache', '1');
     img.setAttribute('data-artwork-key', key);
