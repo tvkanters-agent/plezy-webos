@@ -160,7 +160,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     try {
       const page = await loader(start, count);
       if (!alive() || id !== generation) return;
-      await prewarmPage(page.items);
+      await prewarmPage(page.items, target - start, columns);
       if (!alive() || id !== generation) return;
       rangeStart = start;
       items = page.items.slice();
@@ -217,7 +217,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     try {
       const page = await loader(start, count);
       if (!alive() || id !== generation) return;
-      await prewarmPage(page.items);
+      await prewarmPage(page.items, before ? page.items.length - 1 : 0, columns);
       if (!alive() || id !== generation) return;
       if (before) {
         items = page.items.concat(items);

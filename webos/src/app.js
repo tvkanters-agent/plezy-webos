@@ -5,7 +5,7 @@ import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.j
 import {Player} from './player.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
-import {artworkWindowCount, shelfWindow} from './artwork-window.js';
+import {artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
 import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
@@ -552,8 +552,6 @@ async function prepareNavigation(next, sourceApi) {
     else if (view === 'playlists') key = 'playlists:0';
     if (!key) return;
     const page = await read(key);
-    if (view === 'browse' && sourceApi instanceof Plex && (next.sort || 'title') === 'title')
-      read('characters:' + JSON.stringify([next.library.id,next.filter || 'all'])).catch(() => {});
     if (page) {
       if (view === 'recommended') await prewarmShelves(page, sourceApi);
       else await prewarmPosters(page.items, sourceApi, {protectFirst:24});
@@ -1354,7 +1352,8 @@ async function render(prepared = null) {
             loader: alphaLoader,
             card, schedulePosters, focusWithoutJump, isActive: valid,
             startedAt:contentStartedAt,
-            prewarmPage: items => prewarmPosters(items, currentApi)
+            prewarmPage: (items, targetOffset = 0, columns = 1) =>
+              prewarmPosters(items.slice(artworkWindowStart(targetOffset, columns)), currentApi)
           });
           if (firstResult.fresh) firstResult.fresh.then(async update => {
             if (!update.changed || !valid() || !activeAlphabet) return;

@@ -20,3 +20,9 @@ export function shelfWindow(shelves, width, height) {
     items.push(...shelf.items.slice(0, columns));
   return items;
 }
+
+export function artworkWindowStart(targetOffset, columns) {
+  const stride = Math.max(1, Number(columns) || 1);
+  const row = Math.floor(Math.max(0, Number(targetOffset) || 0) / stride);
+  return Math.max(0, (row - 2) * stride);
+}
