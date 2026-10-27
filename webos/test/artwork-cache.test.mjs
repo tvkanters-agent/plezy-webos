@@ -106,3 +106,36 @@ test('session tracks direct browser-loaded artwork within bounded metadata', () 
   assert.equal(cache.sawDirectImage('http://plex.test/image'),false);
   assert.equal(cache.directLoaded.size,512);
 });
+
+test('deep scrolling does not evict the first viewport even with hundreds of posters', () => {
+  let serial=0;
+  const revoked=[];
+  const cache=new ArtworkCache({indexedDB:null,memoryBytes:100,
+    urls:{createObjectURL:()=> 'blob:key-'+(++serial),
+      revokeObjectURL:url=>revoked.push(url)}});
+  const tiny=new Blob([new Uint8Array(1)]);
+  const landing=Array.from({length:12},(_,i)=>'landing-'+i);
+  cache.protect(landing);
+  landing.forEach(key=>cache.remember(key,tiny));
+  for(let i=0;i<600;i++)cache.remember('scrolled-'+i,tiny);
+  assert.deepEqual(landing.map(key=>!!cache.peek(key)),Array(12).fill(true));
+  assert.ok(cache.memoryBytes<=100);
+  assert.ok(cache.memory.size<=100);
+  assert.ok(revoked.length>0);
+});
+
+test('compressed artwork memory is limited by bytes, not 128-item entry count', () => {
+  let serial=0;
+  const cache=new ArtworkCache({indexedDB:null,memoryBytes:1024*1024,
+    urls:{createObjectURL:()=> 'blob:key-'+(++serial),revokeObjectURL:()=>{}}});
+  for(let i=0;i<350;i++)cache.remember('art-'+i,new Blob([new Uint8Array(1)]));
+  assert.equal(cache.memory.size,350);
+});
+
+test('first-viewport protection is capped and does not grow without bound', () => {
+  const cache=new ArtworkCache({indexedDB:null});
+  cache.protect(Array.from({length:400},(_,i)=>'photo-'+i));
+  assert.equal(cache.protectedKeys.size,96);
+  assert.ok(cache.protectedKeys.has('photo-399'));
+  assert.equal(cache.protectedKeys.has('photo-0'),false);
+});
