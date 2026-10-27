@@ -37,3 +37,20 @@ export function quotaRecoveryTarget(totalBytes, regularBudget, minimumReclaim) {
   return Math.max(0, Math.min(regularBudget,
     totalBytes - Math.max(minimumReclaim, Math.ceil(totalBytes / 4))));
 }
+
+// Avoid costly IndexedDB cursor scans while a TV still has ample cache
+// capacity. Old Chromium builds may not support storage.estimate(); they
+// instead prune on actual QuotaExceededError.
+export async function diskPressure(fallbackTotalBytes) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage &&
+        typeof navigator.storage.estimate === 'function') {
+      const result = await navigator.storage.estimate();
+      const quota = Number(result && result.quota);
+      const used = Number(result && result.usage);
+      if (Number.isFinite(quota) && quota > 0 && Number.isFinite(used))
+        return used >= Math.min(fallbackTotalBytes, quota * .8);
+    }
+  } catch (_) { /* Feature not supported on this TV. */ }
+  return false;
+}
