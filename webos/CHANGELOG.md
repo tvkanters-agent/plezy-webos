@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.3.1 — Collection sections by library
+
+- Group a Plex collection's movies and shows in distinct sections headed with each source library's actual name.
+- Continue paginated results in the correct library grid instead of mixing titles from different libraries.
+- Omit empty library sections and preserve navigation, artwork caching, and back-navigation behavior.
+- Expand collection grouping regressions and stabilize an existing asynchronous artwork test.
+
+
 ## 1.3.0 — Cross-library Plex collections
 
 - Combine matching Plex collection names across movie and television libraries on the collection detail page.
