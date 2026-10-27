@@ -36,6 +36,8 @@ export class PersistentCatalogCache {
     this.memory = new Map();
     this.memoryBytes = 0;
     this.generations = new Map();
+    // Same-page readers share the server request, even while IndexedDB opens.
+    this.inflight = new Map();
     this.writes = 0;
     this.pruning = null;
   }
@@ -222,12 +224,23 @@ export class PersistentCatalogCache {
   // Every open has a fresh task, even if the data is in memory.
   async page(scope, key, loader, {force = false, priority = false} = {}) {
     const id = this.id(scope, key);
-    const serial = (this.generations.get(id) || 0) + 1;
-    this.generations.set(id, serial);
-    const requested = Promise.resolve().then(loader);
-    // Observe a rejected request immediately, including while IndexedDB is
-    // opening, so browsers do not report an unhandled rejection.
-    const live = requested.then(value => ({value}), error => ({error}));
+    // A forced refresh supersedes an ordinary in-flight revalidation. A
+    // second forced caller can still share an already-forced request.
+    let flight = this.inflight.get(id);
+    if (!flight || (force && !flight.force)) {
+      const serial = (this.generations.get(id) || 0) + 1;
+      this.generations.set(id, serial);
+      const requested = Promise.resolve().then(loader);
+      // Handle rejections immediately, including during a slow IDB open.
+      const live = requested.then(value => ({value}), error => ({error}));
+      flight = {serial, live, force};
+      this.inflight.set(id, flight);
+      const active = flight;
+      live.then(() => {
+        if (this.inflight.get(id) === active) this.inflight.delete(id);
+      });
+    }
+    const {serial, live} = flight;
     const cached = force ? null : await this.read(id, priority);
     if (cached !== null && cached !== undefined) {
       const fresh = live.then(result => {
@@ -256,6 +269,8 @@ export class PersistentCatalogCache {
       if (key.startsWith(prefix)) this.forget(key);
     for (const key of this.generations.keys())
       if (key.startsWith(prefix)) this.generations.set(key, this.generations.get(key) + 1);
+    for (const key of this.inflight.keys())
+      if (key.startsWith(prefix)) this.inflight.delete(key);
     const db = await this.open();
     if (!db) return;
     await new Promise(resolve => {

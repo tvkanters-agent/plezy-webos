@@ -93,3 +93,38 @@ test('catalog memory eviction keeps first page before deep-scrolled pages', asyn
   assert.equal(first.value.items[0],'landing');
   assert.ok(cache.memoryBytes<=256);
 });
+
+test('overlapping page readers share one request without losing background updates', async () => {
+  const cache = new PersistentCatalogCache({indexedDB:null});
+  await cache.page('s','page',()=>['old']);
+  let release, requests=0;
+  const loader=()=>{requests++;return new Promise(resolve=>{release=resolve;});};
+  const [a,b]=await Promise.all([
+    cache.page('s','page',loader),cache.page('s','page',loader)
+  ]);
+  assert.equal(requests,1);
+  assert.deepEqual(a.value,['old']);
+  assert.deepEqual(b.value,['old']);
+  release(['new']);
+  assert.equal((await a.fresh).changed,true);
+  assert.deepEqual((await b.fresh).value,['new']);
+  assert.deepEqual(cache.memory.get(cache.id('s','page')).data,['new']);
+});
+
+test('force refresh replaces a pending ordinary request, and logout cannot restore it', async () => {
+  const cache = new PersistentCatalogCache({indexedDB:null});
+  await cache.page('s','page',()=>['seed']);
+  let oldResolve;
+  const older=await cache.page('s','page',()=>new Promise(resolve=>{oldResolve=resolve;}));
+  const forced=await cache.page('s','page',()=>['forced'],{force:true});
+  assert.deepEqual(forced.value,['forced']);
+  oldResolve(['late']);
+  assert.equal((await older.fresh).changed,false);
+  assert.deepEqual(cache.memory.get(cache.id('s','page')).data,['forced']);
+  let abandoned;
+  const pending=await cache.page('s','page',()=>new Promise(resolve=>{abandoned=resolve;}));
+  await cache.removeScope('s');
+  abandoned(['discarded']);
+  assert.equal((await pending.fresh).changed,false);
+  assert.deepEqual((await cache.page('s','page',()=>['next'])).value,['next']);
+});
