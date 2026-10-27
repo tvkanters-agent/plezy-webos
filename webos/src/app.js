@@ -547,9 +547,11 @@ function artworkImage(url, persistent, failed) {
   img.onload = () => {
     if (persistent && img.src.indexOf('blob:') === 0) artworkCache.markReady(url);
     if (img.classList.contains('artwork-ready')) return;
-    requestAnimationFrame(() => {
+    // A second frame guarantees the transparent starting style was painted,
+    // even when IndexedDB or the browser cache resolves during initial layout.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       if (img.isConnected && img.naturalWidth > 0) img.classList.add('artwork-loaded');
-    });
+    }));
   };
   img.onerror = () => {
     if (persistent && img.src.indexOf('blob:') === 0 && !img.hasAttribute('data-artwork-retry')) {
