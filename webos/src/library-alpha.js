@@ -291,8 +291,20 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     handleKey: code => railVisible && rail.handleKey(code),
     focus: () => { if (railVisible) rail.focus(); },
     setRailVisible(visible) {
+      if (railVisible === !!visible) return;
       railVisible = !!visible;
       rail.element.hidden = !railVisible;
+      // App navigation adjusts the content-pane padding in the same task.
+      // Recompute columns after that style change; otherwise letter jumps
+      // may use the old row stride when the async index finally arrives.
+      requestAnimationFrame(() => {
+        if (!alive()) return;
+        resize();
+        if (railVisible) {
+          rail.draw();
+          rail.update(helper.currentLetter(firstVisibleIndex()));
+        }
+      });
     },
     updateCharacters(next) {
       if (!alive() || JSON.stringify(next) === JSON.stringify(helper.letters.map(letter => ({title:letter,size:helper.sizes[letter]})))) {
