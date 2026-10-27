@@ -2039,3 +2039,15 @@ test('sidebar change from an open detail discards obsolete drilldown history',as
   await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
   await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
 });
+
+test('returning to a cached library tab retains the focused poster',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  const poster=page.getByRole('button',{name:'The Test Film',exact:true}).first();
+  await expect(poster).toBeVisible();
+  await poster.focus();
+  await page.locator('#nav').getByRole('button',{name:'Search',exact:true}).click();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(poster).toBeFocused();
+});
