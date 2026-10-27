@@ -526,11 +526,13 @@ function clearNavigationHistory() {
   rootSnapshots.forEach(releaseSnapshot);
   rootSnapshots.clear();
 }
-function capturePage() {
+function capturePage(previousPaneFocus = null) {
   const snapshot = document.createDocumentFragment();
   const scroll = main.scrollTop;
+  const remembered = previousPaneFocus && previousPaneFocus.isConnected &&
+    main.contains(previousPaneFocus) ? previousPaneFocus : null;
   const focused = main.contains(document.activeElement) ?
-    document.activeElement.dataset.focus : null;
+    document.activeElement.dataset.focus : remembered ? remembered.dataset.focus : route.focus || null;
   const alphabet = activeAlphabet;
   if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
   main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
@@ -616,13 +618,10 @@ function restoreRootPage(entry) {
     activeAlphabet = entry.alphabet;
     activeAlphabet.resume(() => revision === mountedRevision);
   }
-  if (fromRail) focusFirst(main, preferredPaneControl(), true);
-  else {
-    const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
-      node => node.dataset.focus === route.focus);
-    if (focused) focusWithoutJump(focused, false);
-    else focusFirst();
-  }
+  const focused = Array.from(main.querySelectorAll('[data-focus]')).find(
+    node => node.dataset.focus === route.focus);
+  if (focused) focusWithoutJump(focused, false);
+  else focusFirst(main, fromRail ? preferredPaneControl() : null, fromRail);
   schedulePosters();
   revalidateRestoredLibrary(route, mountedRevision);
 }
@@ -683,10 +682,11 @@ async function go(next, remember = true) {
       (next.alpha || '') === (route.alpha || '') && !next.forceRefresh) return;
   const fromRail = nav.contains(document.activeElement);
   enterPaneAfterNavigation = fromRail;
+  const previousPaneFocus = rememberedPaneFocus;
   rememberedPaneFocus = null;
   const destination = rootKey(next);
   if (destination && (destination !== rootKey(route) || history.length)) {
-    if (rootKey(route)) cacheRootPage(capturePage());
+    if (rootKey(route)) cacheRootPage(capturePage(previousPaneFocus));
     else {
       // A detail view covers a root tab retained in the drilldown stack.
       // Move that original snapshot to the tab cache before clearing details.
@@ -702,7 +702,7 @@ async function go(next, remember = true) {
   }
   if (remember) {
     // Pushed details preserve their covered route, including scroll/focus.
-    history.push(capturePage());
+    history.push(capturePage(previousPaneFocus));
     if (history.length > 8) releaseSnapshot(history.shift());
   }
   route = next;
