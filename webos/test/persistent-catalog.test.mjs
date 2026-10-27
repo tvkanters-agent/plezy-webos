@@ -56,7 +56,7 @@ test('newer refresh wins when network responses arrive out of order', async () =
   const old = await cache.page('server','browse',()=>new Promise(resolve=>{older=resolve;}));
   // A forced refresh deliberately supersedes the coalesced ordinary request.
   const newer = await cache.page('server','browse',()=>['new'],{force:true});
-  assert.equal((await newer.fresh).changed,true);
+  assert.deepEqual(newer.value,['new']);
   older(['old']);
   assert.equal((await old.fresh).changed,false);
   assert.deepEqual((await cache.page('server','browse',()=>['new'])).value,['new']);
