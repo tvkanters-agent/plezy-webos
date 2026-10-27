@@ -80,3 +80,29 @@ test('artwork keys ignore client release version but honor server revisions and 
     artworkCacheKey(base.replace('width=320','width=600'),'9876'));
   assert.equal(artworkCacheKey(base,''),'');
 });
+
+test('unversioned artwork reuses memory without reading or writing disk', async () => {
+  let opens=0, fetches=0, created=0;
+  const cache = new ArtworkCache({
+    indexedDB:{open(){opens++;throw new Error('disk is forbidden');}},
+    urls:{createObjectURL:()=> 'blob:session-'+(++created),revokeObjectURL:()=>{}},
+    fetch:async()=>{fetches++; return new Response(blob(),{headers:{'content-type':'image/png'}});}
+  });
+  const url='https://plex.test/library/metadata/4/thumb';
+  const key='session:'+url;
+  assert.equal(await cache.resolve(key,url,false),'blob:session-1');
+  cache.markReady(key);
+  assert.equal(cache.peekReady(key),'blob:session-1');
+  assert.equal(await cache.resolve(key,url,false),'blob:session-1');
+  assert.equal(fetches,1);
+  assert.equal(opens,0);
+});
+test('session tracks direct browser-loaded artwork within bounded metadata', () => {
+  const cache = new ArtworkCache({indexedDB:null});
+  assert.equal(cache.sawDirectImage('http://plex.test/image'),false);
+  cache.markDirectImage('http://plex.test/image');
+  assert.equal(cache.sawDirectImage('http://plex.test/image'),true);
+  for(let i=0;i<514;i++) cache.markDirectImage('http://plex.test/art/'+i);
+  assert.equal(cache.sawDirectImage('http://plex.test/image'),false);
+  assert.equal(cache.directLoaded.size,512);
+});
