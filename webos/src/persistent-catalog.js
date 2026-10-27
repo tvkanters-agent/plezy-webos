@@ -7,6 +7,7 @@ const MAX_DISK_BYTES = 20 * 1024 * 1024;
 const MAX_DISK_ENTRIES = 120;
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 const MAX_MEMORY_ENTRIES = 40;
+const MAX_MEMORY_BYTES = 10 * 1024 * 1024;
 
 function fingerprint(value) {
   // Do not store the Plex/Jellyfin access token in IndexedDB keys.
@@ -30,6 +31,7 @@ export class PersistentCatalogCache {
     this.now = now;
     this.dbPromise = null;
     this.memory = new Map();
+    this.memoryBytes = 0;
     this.inFlight = new Map();
     this.generations = new Map();
     this.writes = 0;
@@ -54,17 +56,28 @@ export class PersistentCatalogCache {
     });
     return this.dbPromise;
   }
-  remember(key, data) {
+  forget(key) {
+    const entry = this.memory.get(key);
+    if (entry) this.memoryBytes -= entry.bytes;
     this.memory.delete(key);
-    this.memory.set(key, data);
-    while (this.memory.size > MAX_MEMORY_ENTRIES)
-      this.memory.delete(this.memory.keys().next().value);
+  }
+  remember(key, data, bytes) {
+    if (!bytes) {
+      try { bytes = JSON.stringify(data).length * 2; }
+      catch (_) { return; }
+    }
+    this.forget(key);
+    if (bytes > MAX_MEMORY_BYTES) return;
+    this.memory.set(key, {data, bytes});
+    this.memoryBytes += bytes;
+    while (this.memory.size > MAX_MEMORY_ENTRIES || this.memoryBytes > MAX_MEMORY_BYTES)
+      this.forget(this.memory.keys().next().value);
   }
   async read(key) {
     if (this.memory.has(key)) {
-      const value = this.memory.get(key);
-      this.remember(key, value);
-      return value;
+      const entry = this.memory.get(key);
+      this.remember(key, entry.data, entry.bytes);
+      return entry.data;
     }
     const db = await this.open();
     if (!db) return null;
@@ -75,7 +88,7 @@ export class PersistentCatalogCache {
         request.onsuccess = () => {
           const entry = request.result;
           if (entry && entry.data !== undefined && entry.bytes <= MAX_ENTRY_BYTES) {
-            this.remember(key, entry.data);
+            this.remember(key, entry.data, entry.bytes);
             resolve(entry.data);
           } else resolve(null);
         };
@@ -149,7 +162,7 @@ export class PersistentCatalogCache {
         tx.oncomplete = resolve; tx.onabort = resolve; tx.onerror = resolve;
       } catch (_) { resolve(); }
     });
-    remove.forEach(key => this.memory.delete(key));
+    remove.forEach(key => this.forget(key));
   }
   // Start revalidation at the same time as disk lookup. Fresh responses only
   // replace a page when different; a failed request leaves the saved page.
@@ -187,7 +200,7 @@ export class PersistentCatalogCache {
   async removeScope(scope) {
     const prefix = scope + ':';
     for (const key of this.memory.keys())
-      if (key.startsWith(prefix)) this.memory.delete(key);
+      if (key.startsWith(prefix)) this.forget(key);
     for (const key of this.generations.keys())
       if (key.startsWith(prefix)) this.generations.set(key, this.generations.get(key) + 1);
     const db = await this.open();
