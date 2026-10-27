@@ -518,8 +518,14 @@ function rootKey(value) {
   if (value.type === 'library') return 'library:' + value.library.id;
   return ['home', 'search', 'settings'].includes(value.type) ? value.type : null;
 }
+function forEachPagedGrid(container, callback) {
+  Array.from(container.querySelectorAll('.grid,.collection-sections,.episode-list'))
+    .forEach(node => { if (node._resumeCatalog) callback(node); });
+}
 function releaseSnapshot(entry) {
-  if (entry && entry.alphabet) entry.alphabet.destroy();
+  if (!entry) return;
+  if (entry.alphabet) entry.alphabet.destroy();
+  if (entry.snapshot) forEachPagedGrid(entry.snapshot, node => node._destroyCatalog());
 }
 function clearDrilldownHistory() {
   history.forEach(releaseSnapshot);
@@ -539,6 +545,7 @@ function capturePage(previousPaneFocus = null) {
     document.activeElement.dataset.focus : remembered ? remembered.dataset.focus : route.focus || null;
   const alphabet = activeAlphabet;
   if (alphabet) { alphabet.suspend(); activeAlphabet = null; }
+  forEachPagedGrid(main, node => node._suspendCatalog());
   main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
   while (main.firstChild) snapshot.appendChild(main.firstChild);
   return {route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
@@ -634,9 +641,7 @@ function restoreRootPage(entry) {
   const libraryTabs = main.querySelector('.library-tabs');
   if (libraryTabs && libraryTabs._resumeLibraryView)
     libraryTabs._resumeLibraryView(mountedRevision);
-  const pagedGrid = Array.from(main.querySelectorAll('.grid,.collection-sections,.episode-list'))
-    .find(node => node._resumeCatalog);
-  if (pagedGrid) pagedGrid._resumeCatalog(mountedRevision);
+  forEachPagedGrid(main, node => node._resumeCatalog(mountedRevision));
   if (entry.alphabet) {
     activeAlphabet = entry.alphabet;
     activeAlphabet.resume(() => revision === mountedRevision);
@@ -771,6 +776,7 @@ function back() {
       cancelAuth();
       main.textContent = '';
       main.appendChild(previous.snapshot);
+      forEachPagedGrid(main, node => node._resumeCatalog(revision));
       navigation();
       main.scrollTop = route.scroll || 0;
       main.classList.toggle('has-alpha-bar', !!previous.alphabet);
@@ -1225,6 +1231,8 @@ async function paginated(loader, currentRevision, options = {}) {
     const original = loadedPages.get(offset);
     if (original) return applyFresh(offset, original, update);
   };
+  grid._suspendCatalog = cleanup;
+  grid._destroyCatalog = cleanup;
   grid._resumeCatalog = restoredRevision => {
     mountedRevision = restoredRevision;
     if (!completed) { listen(); requestAnimationFrame(check); }
