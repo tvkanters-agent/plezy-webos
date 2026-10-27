@@ -530,66 +530,58 @@ test('offscreen library posters are deferred until reaching the viewport',async(
 
 test('library artwork fills three rows before and after the viewport while distant art waits',async({page})=>{
   await mockServer(page);
-  await page.route('http://media.test/Items/offscreen-*/Images/Primary',route=>
-    route.fulfill({status:404}));
+  // Exercise real server-backed card data. Synthetic DOM clones can be removed
+  // by normal catalog refresh, producing timing-dependent false negatives.
+  const titles=Array.from({length:180},(_,i)=>({...item,
+    Id:'prefetch-'+i,Name:'Prefetch Film '+i,ImageTags:{Primary:'cover-'+i}}));
+  await page.route('http://media.test/Users/user/Items?**',route=>
+    route.fulfill({json:{Items:titles,TotalRecordCount:titles.length}}));
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/XZYAAAAASUVORK5CYII=','base64');
+  await page.route('http://media.test/**/Images/**',route=>
+    route.fulfill({status:200,contentType:'image/png',body:png,
+      headers:{'Access-Control-Allow-Origin':'*'}}));
   await page.goto('/');
   await expect(page.locator('.rail-library-items')).toBeVisible();
   await page.getByRole('button',{name:'Movies',exact:true}).click();
-  await expect(page.locator('.grid .card').first()).toBeVisible();
-  // Populate and measure in a single browser task: a concurrent catalog
-  // refresh must not replace our synthetic cards between these operations.
+  await expect(page.locator('main .grid .card')).toHaveCount(titles.length);
   const ids=await page.evaluate(()=>{
-    const grid=document.querySelector('.grid');
-    const entry=grid.querySelector('.card');
-    for(let n=0;n<160;n++){
-      const clone=entry.cloneNode(true);
-      const poster=clone.querySelector('.poster');
-      poster.textContent='';
-      const img=document.createElement('img');
-      img.setAttribute('data-offscreen-id',String(n));
-      img.setAttribute('data-poster-src','http://media.test/Items/offscreen-'+n+'/Images/Primary');
-      poster.appendChild(img);
-      grid.appendChild(clone);
-    }
     const main=document.querySelector('main');
-    const target=grid.children[Math.floor(grid.children.length/2)];
+    const cards=Array.from(main.querySelectorAll('.grid .card'));
+    const target=cards[Math.floor(cards.length/2)];
     main.scrollTop+=target.getBoundingClientRect().top-main.getBoundingClientRect().top-30;
     const view=main.getBoundingClientRect();
-    const images=Array.from(grid.querySelectorAll('img[data-offscreen-id]'));
-    // Select the second completely off-screen row in each direction using
-    // rendered geometry; flex and CSS Grid need not share offsetTop metrics.
-    function rowIds(candidates, backwards) {
+    const positioned=cards.map((card,id)=>{
+      const rect=card.querySelector('.poster img').getBoundingClientRect();
+      return {id,top:rect.top,bottom:rect.bottom};
+    });
+    function rows(candidates,backwards) {
       candidates.sort((a,b)=>backwards ? b.top-a.top : a.top-b.top);
       const seen=new Set(), result=[];
-      for(const candidate of candidates) {
-        const row=Math.round(candidate.top);
+      for(const card of candidates) {
+        const row=Math.round(card.top);
         if(seen.has(row))continue;
         seen.add(row);
-        result.push(candidate.id);
+        result.push(card.id);
       }
       return result;
     }
-    const positioned=images.map(img=>{
-      const rect=img.getBoundingClientRect();
-      return {id:img.getAttribute('data-offscreen-id'),top:rect.top,bottom:rect.bottom};
-    });
-    const above=rowIds(positioned.filter(x=>x.bottom<view.top),true);
-    const below=rowIds(positioned.filter(x=>x.top>view.bottom),false);
+    const above=rows(positioned.filter(x=>x.bottom<view.top),true);
+    const below=rows(positioned.filter(x=>x.top>view.bottom),false);
     return {above:above[1],below:below[1],far:below[6]};
   });
   expect(ids.above).toBeDefined();
   expect(ids.below).toBeDefined();
   expect(ids.far).toBeDefined();
   await expect.poll(()=>page.evaluate(markers=>{
-    const images=Array.from(document.querySelectorAll('img[data-offscreen-id]'));
+    const cards=document.querySelectorAll('main .grid .card');
     return ['above','below'].map(side=>{
-      const img=images.find(node=>node.getAttribute('data-offscreen-id')===markers[side]);
-      return img && !img.hasAttribute('data-poster-src') && !!img.getAttribute('src');
+      const img=cards[markers[side]]?.querySelector('.poster img');
+      return !!img && !img.hasAttribute('data-poster-src') && !!img.getAttribute('src');
     });
   },ids)).toEqual([true,true]);
-  const stillDeferred=await page.locator('img[data-offscreen-id="'+ids.far+'"]')
-    .getAttribute('data-poster-src');
-  expect(stillDeferred).toContain('offscreen-');
+  const stillDeferred=await page.locator('main .grid .card').nth(ids.far)
+    .locator('.poster img').getAttribute('data-poster-src');
+  expect(stillDeferred).toContain('prefetch-');
 });
 
 test('navigation follows Plezy rail layout without invented webOS branding',async({page})=>{
