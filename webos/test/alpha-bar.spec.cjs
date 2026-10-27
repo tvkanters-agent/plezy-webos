@@ -267,3 +267,39 @@ test('D-pad reuses bounds per decision and refreshes them on the next key', asyn
   expect(exit.reads).toEqual([]);
   await expect(page.locator('#nav [data-nav-id="library:movies"]')).toBeFocused();
 });
+
+test('Plex alphabet grid and letter index restore before server responds after restart',async({page})=>{
+  await mockPlexAlphabet(page);
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.locator('.alpha-window-grid .card')).toHaveCount(60);
+  await expect(page.getByRole('group',{name:'Alphabet navigation'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const request=indexedDB.open('plezy-catalog-v1',1);
+    request.onerror=()=>resolve(0);
+    request.onsuccess=()=>{
+      const tx=request.result.transaction('pages','readonly');
+      const count=tx.objectStore('pages').count();
+      count.onsuccess=()=>resolve(count.result);
+      count.onerror=()=>resolve(0);
+    };
+  }))).toBeGreaterThanOrEqual(3);
+  let releasePage, releaseLetters, requests=0;
+  await page.route('http://plex.test/library/sections/movies/all**',async route=>{
+    requests++;
+    await new Promise(resolve=>{releasePage=resolve;});
+    await route.fallback();
+  });
+  await page.route('http://plex.test/library/sections/movies/firstCharacter**',async route=>{
+    requests++;
+    await new Promise(resolve=>{releaseLetters=resolve;});
+    await route.fallback();
+  });
+  await page.reload();
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.locator('.alpha-window-grid .card')).toHaveCount(60);
+  await expect(page.getByRole('group',{name:'Alphabet navigation'})).toBeVisible();
+  await expect.poll(()=>requests).toBeGreaterThanOrEqual(2);
+  releasePage();releaseLetters();
+  await expect(page.locator('.alpha-window-grid .card')).toHaveCount(60);
+});
