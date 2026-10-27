@@ -862,7 +862,7 @@ async function paginated(loader, currentRevision, options = {}) {
       if (currentRevision !== revision || !grid.isConnected) return;
       await prewarmPosters(page.items, api, options.episodes ? {landscape:true} : {});
       if (currentRevision !== revision || !grid.isConnected) return;
-      if (start === 0) fadeDelayedContent(grid, startedAt);
+      if (start === 0 && !response.cached) fadeDelayedContent(grid, startedAt);
       addPage(grid, page);
       loadedPages.set(offset, page);
       start += page.items.length;
@@ -987,7 +987,7 @@ async function render() {
             document.activeElement.dataset.focus : null;
           const scroll = main.scrollTop;
           next.forEach(node => {
-            if (!updated) fadeDelayedContent(node, contentStartedAt);
+            if (!updated && !result.cached) fadeDelayedContent(node, contentStartedAt);
             fragment.appendChild(node);
           });
           main.insertBefore(fragment, anchor);
@@ -1100,6 +1100,7 @@ async function render() {
           };
           activeAlphabet = mountAlphabetLibrary({
             main, firstPage: firstResult.value, characters:firstCharacters.value,
+            cached: firstResult.cached,
             loader: alphaLoader,
             card, schedulePosters, focusWithoutJump, isActive: valid,
             startedAt:contentStartedAt,
