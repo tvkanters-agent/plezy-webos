@@ -1289,7 +1289,7 @@ test('artwork persists through reload and decoded memory hits render before inse
   expect(imageRequests).toBe(before);
   await page.reload();
   const fromDisk=page.locator('main .card .poster img').first();
-  await expect(fromDisk).toHaveClass(/artwork-loaded/);
+  await expect(fromDisk).toHaveClass(/artwork-ready/);
   expect(await fromDisk.getAttribute('src')).toMatch(/^blob:/);
   expect(imageRequests).toBe(before);
 });
@@ -1498,4 +1498,90 @@ test('all media artwork inherits the exact frame radius, including future frames
     expect(item.parent,item.name+' frame radius').toBe(item.expected);
     expect(item.image,item.name+' fading image radius').toBe(item.expected);
   }
+});
+
+test('persisted Home and library artwork paint ready on the first DOM frame after restart',async({page})=>{
+  await mockServer(page);
+  const titles=Array.from({length:4},(_,i)=>({
+    Id:'cached-'+i,Name:'Persisted '+i,Type:'Movie',
+    ImageTags:{Primary:'tag-'+i}
+  }));
+  const picture='<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">'+
+    '<rect width="12" height="12"/></svg>';
+  let requests=0;
+  await page.route('http://media.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.includes('/Images/')){
+      requests++;
+      return route.fulfill({body:picture,headers:{
+        'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}});
+    }
+    if(path.endsWith('/Items/Resume'))return route.fulfill({json:{Items:titles}});
+    if(path.endsWith('/Items/Latest'))return route.fulfill({json:[]});
+    if(path==='/Users/user/Items')return route.fulfill({
+      json:{Items:titles,TotalRecordCount:titles.length}});
+    return route.fallback();
+  });
+  // Observe the exact DOM insertion, before paint or image load handlers.
+  // This observer is installed on both initial load and the restarted app.
+  await page.addInitScript(()=>{
+    window.firstHomeArtwork=null;
+    const record=()=>{
+      if(window.firstHomeArtwork)return;
+      const shelf=document.querySelector('main .shelf');
+      if(!shelf || shelf.querySelectorAll('.poster img').length!==4)return;
+      window.firstHomeArtwork=Array.from(shelf.querySelectorAll('.poster img')).map(img=>({
+        ready:img.classList.contains('artwork-ready'),src:img.getAttribute('src'),
+        opacity:getComputedStyle(img).opacity
+      }));
+    };
+    const start=()=>{
+      const obs=new MutationObserver(record);
+      obs.observe(document.documentElement,{subtree:true,childList:true});
+    };
+    if(document.documentElement)start();
+    else document.addEventListener('readystatechange',start,{once:true});
+  });
+  await page.goto('/');
+  await expect.poll(()=>page.locator('main .shelf .poster img.artwork-loaded').count()).toBe(4);
+  // The async disk write is not on the image-load critical path.
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const req=indexedDB.open('plezy-artwork-v1',1);
+    req.onerror=()=>resolve(0);
+    req.onsuccess=()=>{
+      const tx=req.result.transaction('images','readonly');
+      const n=tx.objectStore('images').count();
+      n.onsuccess=()=>resolve(n.result);
+      n.onerror=()=>resolve(0);
+    };
+  }))).toBeGreaterThanOrEqual(4);
+  const before=requests;
+  await page.reload();
+  await expect.poll(()=>page.evaluate(()=>window.firstHomeArtwork)).not.toBeNull();
+  const home=await page.evaluate(()=>window.firstHomeArtwork);
+  expect(home).toHaveLength(4);
+  expect(home.every(img=>img.ready && img.src.startsWith('blob:') && img.opacity==='1')).toBe(true);
+  expect(requests).toBe(before);
+  // A separate route has the same requirement: all images are already ready
+  // when the library grid is appended, not restored in two-image waves.
+  await page.evaluate(()=>{
+    window.firstLibraryArtwork=null;
+    const obs=new MutationObserver(()=>{
+      if(window.firstLibraryArtwork)return;
+      const grid=document.querySelector('main .grid');
+      if(!grid || grid.querySelectorAll('.poster img').length!==4)return;
+      window.firstLibraryArtwork=Array.from(grid.querySelectorAll('.poster img')).map(img=>({
+        ready:img.classList.contains('artwork-ready'),src:img.getAttribute('src'),
+        opacity:getComputedStyle(img).opacity
+      }));
+      obs.disconnect();
+    });
+    obs.observe(document.querySelector('main'),{subtree:true,childList:true});
+  });
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.firstLibraryArtwork)).not.toBeNull();
+  const library=await page.evaluate(()=>window.firstLibraryArtwork);
+  expect(library).toHaveLength(4);
+  expect(library.every(img=>img.ready && img.src.startsWith('blob:') && img.opacity==='1')).toBe(true);
+  expect(requests).toBe(before);
 });
