@@ -139,3 +139,62 @@ test('protection spans many libraries without discarding first-screen keys by co
   assert.ok(cache.protectedKeys.has('photo-399'));
   assert.ok(cache.protectedKeys.has('photo-0'));
 });
+
+test('bitmap pressure releases decoders without revoking compressed artwork', async () => {
+  const previous=globalThis.Image, revoked=[];
+  let created=0, fetches=0;
+  globalThis.Image=class {
+    naturalWidth=10; naturalHeight=10;
+    set src(value) { queueMicrotask(()=>this.onload()); }
+  };
+  try {
+    const cache=new ArtworkCache({indexedDB:null,decodedBytes:800,memoryBytes:10000,
+      urls:{createObjectURL:()=> 'blob:bitmap-'+(++created),revokeObjectURL:url=>revoked.push(url)},
+      fetch:async()=>{fetches++;return new Response(blob());}});
+    cache.protect(['landing-a','landing-b']);
+    await cache.resolve('landing-a','https://media.test/a');
+    await cache.resolve('landing-b','https://media.test/b');
+    const scrolled=await cache.resolve('scroll','https://media.test/scroll');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(cache.memory.size,3);
+    assert.ok(cache.decodedBytes<=800);
+    assert.deepEqual(revoked,[]);
+    assert.equal(cache.peekReady('scroll'),scrolled,'recent scrolling must get bitmap RAM too');
+    assert.equal(await cache.resolve('landing-a','https://media.test/a'),'blob:bitmap-1');
+    assert.equal(fetches,3,'bitmap eviction must not force another download');
+    await cache.prewarm(['landing-a']);
+    assert.equal(cache.peekReady('landing-a'),'blob:bitmap-1','prewarm redecodes a retained blob');
+    assert.equal(fetches,3);
+  } finally { globalThis.Image=previous; }
+});
+
+test('a temporarily unreachable server can populate artwork again after backoff',async()=>{
+  let now=0,requests=0;
+  const cache=new ArtworkCache({indexedDB:null,now:()=>now,
+    urls:{createObjectURL:()=> 'blob:recovered',revokeObjectURL:()=>{}},
+    fetch:async()=>{if(++requests===1)throw new TypeError('disconnected');return new Response(blob());}});
+  assert.equal(await cache.resolve('a','https://media.test/a'),'https://media.test/a');
+  now=1000;
+  assert.equal(await cache.resolve('b','https://media.test/b'),'https://media.test/b');
+  now=31000;
+  assert.equal(await cache.resolve('c','https://media.test/c'),'blob:recovered');
+  assert.equal(requests,2);
+});
+
+test('an entry rejected by the compressed budget never returns a revoked URL',()=>{
+  const cache=new ArtworkCache({indexedDB:null,memoryBytes:1,
+    urls:{createObjectURL:()=> 'blob:evicted',revokeObjectURL:()=>{}}});
+  assert.equal(cache.remember('oversized',blob()),null);
+});
+
+test('protected landing files cannot starve newly scrolled compressed artwork',()=>{
+  let serial=0;
+  const cache=new ArtworkCache({indexedDB:null,memoryBytes:12,
+    urls:{createObjectURL:()=> 'blob:reserve-'+(++serial),revokeObjectURL:()=>{}}});
+  cache.protect(['a','b','c']);
+  for(const key of ['a','b','c'])cache.remember(key,blob());
+  const scrolled=cache.remember('scroll',blob());
+  assert.ok(scrolled);
+  assert.equal(cache.peek('scroll'),scrolled);
+  assert.ok(cache.memoryBytes<=12);
+});

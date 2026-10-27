@@ -36,7 +36,8 @@ export class ArtworkCache {
     this.protectedKeys = new Set();
     this.memoryBytes = 0;
     this.pending = new Map();
-    this.unsupportedOrigins = new Set();
+    this.diskMisses = new Set();
+    this.unsupportedOrigins = new Map();
     this.dbPromise = null;
     this.writes = 0;
     this.pruning = null;
@@ -67,13 +68,28 @@ export class ArtworkCache {
     }
   }
   memoryVictim() {
-    for (const key of this.memory.keys())
-      if (!this.protectedKeys.has(key)) return key;
+    const protectedBytes = [...this.memory].reduce((total, [key, entry]) =>
+      total + (this.protectedKeys.has(key) ? entry.bytes : 0), 0);
+    if (protectedBytes <= this.memoryLimit * 0.75) {
+      for (const key of this.memory.keys())
+        if (!this.protectedKeys.has(key)) return key;
+    }
     return this.memory.keys().next().value;
   }
   trimMemory() {
-    while (this.memoryBytes > this.memoryLimit ||
-           this.decodedBytes > this.decodedLimit) {
+    // Compressed files and decoded bitmaps have separate lifetimes. Releasing
+    // bitmap RAM must not revoke reusable URLs (including detached route DOM).
+    while (this.decodedBytes > this.decodedLimit) {
+      const decoded = [...this.memory].filter(([, entry]) => entry.decodedBytes > 0);
+      const protectedBytes = decoded.reduce((total, [key, entry]) =>
+        total + (this.protectedKeys.has(key) ? entry.decodedBytes : 0), 0);
+      // Landing pages get preference, not exclusive ownership of bitmap RAM.
+      const victim = (protectedBytes <= this.decodedLimit * 0.75 &&
+        decoded.find(([key]) => !this.protectedKeys.has(key))) || decoded[0];
+      if (!victim) break;
+      this.releaseDecoded(victim[1]);
+    }
+    while (this.memoryBytes > this.memoryLimit) {
       if (!this.memory.size) break;
       this.drop(this.memoryVictim());
     }
@@ -91,7 +107,14 @@ export class ArtworkCache {
   }
   markReady(key) {
     const entry = this.memory.get(key);
-    if (entry) entry.ready = true;
+    if (entry && (entry.image || typeof Image === 'undefined')) entry.ready = true;
+  }
+  releaseDecoded(entry) {
+    this.decodedBytes -= entry.decodedBytes || 0;
+    entry.decodedBytes = 0;
+    entry.ready = false;
+    entry.image = null;
+    entry.decoded = null;
   }
   drop(key) {
     const entry = this.memory.get(key);
@@ -110,31 +133,35 @@ export class ArtworkCache {
     try { src = this.urls.createObjectURL(blob); }
     catch (_) { return null; }
     const entry = {src, bytes: blob.size, ready: false, decodedBytes: 0};
-    // Keep a decoded image reference alive for the immediate next route paint.
-    entry.decoded = new Promise(resolve => {
-      if (typeof Image === 'undefined') { resolve(false); return; }
-      entry.image = new Image();
-      entry.image.onload = () => {
-        if (this.memory.get(key) !== entry) { resolve(false); return; }
-        entry.ready = true;
-        // JPEG compression ratios vary hugely. A byte-only limit would let
-        // thousands of tiny files retain hundreds of MiB of decoded bitmaps.
-        const width = entry.image.naturalWidth || 0;
-        const height = entry.image.naturalHeight || 0;
-        entry.decodedBytes = width * height * 4;
-        this.decodedBytes += entry.decodedBytes;
-        this.trimMemory();
-        resolve(this.memory.get(key) === entry);
-      };
-      entry.image.onerror = () => resolve(false);
-      try { entry.image.src = src; } catch (_) { resolve(false); }
-    });
     this.memory.set(key, entry);
     this.memoryBytes += blob.size;
-    // The compressed-blob budget, not the number of titles viewed, bounds
-    // storage. Keep first-screen art even after scrolling thousands of titles.
     this.trimMemory();
+    // Do not return a URL that trimMemory has just revoked.
+    if (this.memory.get(key) !== entry) return null;
+    this.decode(key);
     return src;
+  }
+  decode(key) {
+    const entry = this.memory.get(key);
+    if (!entry) return Promise.resolve(false);
+    if (entry.ready) return Promise.resolve(true);
+    if (entry.decoded) return entry.decoded;
+    entry.decoded = new Promise(resolve => {
+      if (typeof Image === 'undefined') { resolve(false); return; }
+      const image = new Image();
+      entry.image = image;
+      image.onload = () => {
+        if (this.memory.get(key) !== entry || entry.image !== image) { resolve(false); return; }
+        entry.ready = true;
+        entry.decodedBytes = (image.naturalWidth || 0) * (image.naturalHeight || 0) * 4;
+        this.decodedBytes += entry.decodedBytes;
+        this.trimMemory();
+        resolve(entry.ready);
+      };
+      image.onerror = () => resolve(false);
+      try { image.src = entry.src; } catch (_) { resolve(false); }
+    });
+    return entry.decoded;
   }
   open() {
     if (!this.factory) return Promise.resolve(null);
@@ -187,11 +214,9 @@ export class ArtworkCache {
   // must be NO network fetches in this method.
   async prewarm(keys) {
     const unique = [...new Set(keys.filter(Boolean))];
-    const missing = unique.filter(key => !this.peekReady(key) && !this.memory.has(key));
-    if (!missing.length) return;
-    const db = await this.open();
-    if (!db) return;
-    const rows = await new Promise(resolve => {
+    const missing = unique.filter(key => !this.peekReady(key) && !this.memory.has(key) && !this.diskMisses.has(key));
+    const db = missing.length ? await this.open() : null;
+    const rows = !db ? [] : await new Promise(resolve => {
       const found = [];
       try {
         const tx = db.transaction('images', 'readonly');
@@ -209,6 +234,10 @@ export class ArtworkCache {
         tx.onerror = () => resolve([]);
       } catch (_) { resolve([]); }
     });
+    if (db) {
+      const found = new Set(rows.map(row => row.key));
+      missing.forEach(key => { if (!found.has(key)) this.diskMisses.add(key); });
+    }
     // Update disk LRU once per day at most, in one background transaction.
     // Rehydrated artwork is actively used and should not be evicted first just
     // because it bypasses resolve()'s single-item read/touch path.
@@ -226,11 +255,8 @@ export class ArtworkCache {
     }
     // The image decoder can fail or be slow on older webOS versions. Never
     // block the screen indefinitely waiting for a malformed cached image.
-    const decoding = rows.map(row => {
-      this.remember(row.key, row.blob);
-      const entry = this.memory.get(row.key);
-      return entry ? entry.decoded : Promise.resolve(false);
-    });
+    rows.forEach(row => this.remember(row.key, row.blob));
+    const decoding = unique.map(key => this.decode(key));
     if (!decoding.length) return;
     let timeout;
     try {
@@ -241,6 +267,7 @@ export class ArtworkCache {
     } finally { clearTimeout(timeout); }
   }
   async save(key, blob) {
+    this.diskMisses.delete(key);
     const db = await this.open();
     if (!db) return;
     const write = () => new Promise((resolve, reject) => {
@@ -319,6 +346,13 @@ export class ArtworkCache {
     try { db.transaction('images', 'readwrite').objectStore('images').delete(key); }
     catch (_) { /* Best effort. */ }
   }
+  async cachedSource(key, persistent = true) {
+    const hit = this.peek(key);
+    if (hit) return hit;
+    if (!persistent) return null;
+    const stored = await this.read(key);
+    return stored ? this.remember(key, stored.blob) : null;
+  }
   // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
   resolve(key, url = key, persistent = true) {
     const hit = this.peek(key);
@@ -341,11 +375,11 @@ export class ArtworkCache {
     }
     let origin = '';
     try { origin = new URL(url).origin; } catch (_) { return url; }
-    if (this.unsupportedOrigins.has(origin)) return url;
+    if ((this.unsupportedOrigins.get(origin) || 0) > this.now()) return url;
     try {
       // Normal <img> works without CORS; reading bytes for IndexedDB does not.
       // If the TV/server rejects a cross-origin fetch, use <img> directly and
-      // stop retrying the unsupported origin for the remainder of this launch.
+      // back off before probing the origin again.
       const controller = typeof AbortController === 'undefined' ? null : new AbortController();
       const timer = controller ? setTimeout(() => controller.abort(), 7000) : null;
       let response;
@@ -363,7 +397,9 @@ export class ArtworkCache {
       if (persistent) this.save(key, blob).catch(() => {});
       return src;
     } catch (_) {
-      this.unsupportedOrigins.add(origin);
+      // A fetch rejection can mean a transient disconnect, not just CORS.
+      // Back off briefly, then allow this server to populate disk again.
+      this.unsupportedOrigins.set(origin, this.now() + 30000);
       return url;
     }
   }
