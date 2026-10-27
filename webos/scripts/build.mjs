@@ -1,5 +1,6 @@
 import {build} from 'esbuild';
 import {VERSION} from '../src/core.js';
+import {generateSplash} from './splash.mjs';
 import {cp, mkdir, rm, readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -8,6 +9,9 @@ await rm(path.join(root, 'dist'), {recursive: true, force: true});
 await mkdir(path.join(root, 'dist'), {recursive: true});
 await cp(path.join(root, 'public'), path.join(root, 'dist'), {recursive: true});
 await cp(path.join(root, '../LICENSE'), path.join(root, 'dist/LICENSE.txt'));
+// Prepare LG's native loading image before packaging, not at TV startup.
+await generateSplash(root, path.join(root, 'dist/splash.png'));
+
 // The primary hardware target is webOS 4.4.3 (Chromium 53). Modern desktop
 // Playwright does not expose its missing APIs, so bundle syntax must be
 // downlevelled and runtime polyfills are loaded from src/compat.js.

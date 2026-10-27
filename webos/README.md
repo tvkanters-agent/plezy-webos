@@ -119,13 +119,13 @@ From a checkout of this fork, with Node.js 22:
 cd webos
 npm ci
 npm test
+npx playwright install chromium
 npm run build
-npx playwright install --with-deps chromium
 npm run test:e2e
 npm run package
 ```
 
-The app is built to `webos/dist/`; the IPK is written to `webos/build/`. The bundle targets Chromium 53 and contains no CDN runtime dependencies. `npm run dev` serves the built app using LG's CLI; desktop Chrome is useful for navigation and MP4 playback, but native HLS availability differs from an LG TV.
+The app is built to `webos/dist/`; the IPK is written to `webos/build/`. The native splash PNG is generated during build from Plezy's original `assets/plezy.svg` using Playwright Chromium; install Chromium before building. Neither Chromium nor Playwright is included in the TV package. The bundle targets Chromium 53 and contains no CDN runtime dependencies. `npm run dev` serves the built app using LG's CLI; desktop Chrome is useful for navigation and MP4 playback, but native HLS availability differs from an LG TV.
 
 For TV debugging:
 
