@@ -528,6 +528,66 @@ test('offscreen library posters are deferred until reaching the viewport',async(
   expect(pending).toBeGreaterThan(0);
 });
 
+test('library artwork fills three rows before and after the viewport while distant art waits',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Items/offscreen-*/Images/Primary',route=>
+    route.fulfill({status:404}));
+  await page.goto('/');
+  await expect(page.locator('.rail-library-items')).toBeVisible();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('.grid .card').first()).toBeVisible();
+  await page.evaluate(()=>{
+    const grid=document.querySelector('.grid');
+    const entry=grid.querySelector('.card');
+    for(let n=0;n<160;n++){
+      const clone=entry.cloneNode(true);
+      const poster=clone.querySelector('.poster');
+      poster.textContent='';
+      const img=document.createElement('img');
+      img.setAttribute('data-offscreen-id',String(n));
+      img.setAttribute('data-poster-src','http://media.test/Items/offscreen-'+n+'/Images/Primary');
+      poster.appendChild(img);
+      grid.appendChild(clone);
+    }
+    const main=document.querySelector('main');
+    const target=grid.children[Math.floor(grid.children.length/2)];
+    main.scrollTop+=target.getBoundingClientRect().top-main.getBoundingClientRect().top-30;
+  });
+  const ids=await page.evaluate(()=>{
+    const main=document.querySelector('main'), grid=document.querySelector('.grid');
+    const view=main.getBoundingClientRect();
+    const rowPositions=Array.from(new Set(Array.from(grid.children)
+      .map(node=>node.offsetTop))).sort((a,b)=>a-b);
+    const stride=rowPositions[1]-rowPositions[0];
+    const images=Array.from(grid.querySelectorAll('img[data-offscreen-id]'));
+    const above=images.find(img=>{
+      const rect=img.getBoundingClientRect();
+      return rect.bottom<view.top-stride && rect.bottom>view.top-2*stride;
+    });
+    const below=images.find(img=>{
+      const rect=img.getBoundingClientRect();
+      return rect.top>view.bottom+stride && rect.top<view.bottom+2*stride;
+    });
+    const far=images.find(img=>img.getBoundingClientRect().top>view.bottom+5*stride);
+    return {above:above?.getAttribute('data-offscreen-id'),
+      below:below?.getAttribute('data-offscreen-id'),
+      far:far?.getAttribute('data-offscreen-id')};
+  });
+  expect(ids.above).toBeDefined();
+  expect(ids.below).toBeDefined();
+  expect(ids.far).toBeDefined();
+  await expect.poll(()=>page.evaluate(markers=>{
+    const images=Array.from(document.querySelectorAll('img[data-offscreen-id]'));
+    return ['above','below'].map(side=>{
+      const img=images.find(node=>node.getAttribute('data-offscreen-id')===markers[side]);
+      return img && !img.hasAttribute('data-poster-src') && !!img.getAttribute('src');
+    });
+  },ids)).toEqual([true,true]);
+  const stillDeferred=await page.locator('img[data-offscreen-id="'+ids.far+'"]')
+    .getAttribute('data-poster-src');
+  expect(stillDeferred).toContain('offscreen-');
+});
+
 test('navigation follows Plezy rail layout without invented webOS branding',async({page})=>{
   await page.goto('/');
   await expect(page.locator('.brand')).toHaveText('Plezy');
