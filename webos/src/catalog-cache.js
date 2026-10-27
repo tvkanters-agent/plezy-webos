@@ -16,6 +16,16 @@ export class CatalogCache {
     this.entries.clear();
     this.pending.clear();
   }
+  // Inspect a settled Home snapshot without crossing an async boundary.
+  // Allowing expired data is only for same-session stale-while-revalidate;
+  // the ordinary get() method still honors TTL and invalidation.
+  peek(key, {allowExpired = false} = {}) {
+    const entry = this.entries.get(key);
+    if (!entry || !allowExpired && entry.until <= this.now()) return null;
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.value;
+  }
   get(key, loader) {
     const entry = this.entries.get(key);
     if (entry && entry.until > this.now()) {
