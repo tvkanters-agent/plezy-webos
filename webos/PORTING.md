@@ -173,3 +173,7 @@ with the existing page-completion handoff, translating Flutter's retained
 preattachment focus request in `LibraryBrowseTab._navigateToGrid`. A deliberate
 focus move before completion cancels the handoff. Delayed-response tests cover
 both entering the first card and leaving the pane while data is pending.
+
+### Main-pane Left exit to the navigation rail
+
+On webOS, Left from the leftmost content item transfers focus to the vertically nearest visible sidebar destination instead of the selected destination. CastMemberStrip retains internal Left/Right movement, but Left from its first member exits instead of saturating (a user-requested departure from Flutter). Right from the sidebar restores the previously focused content item. Browser tests cover this behavior.

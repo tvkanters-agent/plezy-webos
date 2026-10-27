@@ -805,8 +805,45 @@ test('Plezy cast is below episode list with locked D-pad focus, invisible scroll
  });
  expect(order).toBe(true);
  await cast.focus();
+ // At the start of the cast row Left exits to the vertically nearest rail item.
+ const nearestRail=await cast.evaluate(strip=>{
+   const r=strip.getBoundingClientRect(),y=(r.top+r.bottom)/2;
+   const viewport=document.querySelector('nav').getBoundingClientRect();
+   const controls=Array.from(document.querySelectorAll('nav button:not(:disabled)'))
+     .filter(node=>node.getClientRects().length&&!node.hidden);
+   const visible=controls.filter(node=>{
+     const box=node.getBoundingClientRect();
+     return box.bottom>viewport.top&&box.top<viewport.bottom;
+   });
+   const candidates=visible.length?visible:controls;
+   const gap=node=>{
+     const box=node.getBoundingClientRect();
+     return Math.max(0,box.top-y,y-box.bottom);
+   };
+   const center=node=>{
+     const box=node.getBoundingClientRect();
+     return Math.abs((box.top+box.bottom)/2-y);
+   };
+   candidates.sort((a,b)=>gap(a)-gap(b)||center(a)-center(b));
+   return candidates[0]?.dataset.navId;
+ });
+ expect(nearestRail).toBeTruthy();
+ expect(nearestRail).not.toBe('home');
+ const target=page.locator('nav button[data-nav-id="'+nearestRail+'"]');
+ await page.keyboard.press('ArrowLeft');
+ await expect(target).toBeFocused();
  await page.keyboard.press('ArrowRight');
  await expect(cast).toBeFocused();
+ await page.keyboard.press('ArrowRight');
+ await expect(cast).toHaveAttribute('aria-label',/Person 1/);
+ await page.keyboard.press('ArrowLeft');
+ await expect(cast).toBeFocused();
+ await expect(cast).toHaveAttribute('aria-label',/Person 0/);
+ await page.keyboard.press('ArrowLeft');
+ await expect(target).toBeFocused();
+ await page.keyboard.press('ArrowRight');
+ await expect(cast).toBeFocused();
+ await page.keyboard.press('ArrowRight');
  await expect(cast).toHaveAttribute('aria-label',/Person 1/);
  // Moving among already visible actors must not snap each actor left.
  await expect.poll(()=>cast.evaluate(el=>el.scrollLeft)).toBe(0);

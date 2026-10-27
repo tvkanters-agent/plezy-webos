@@ -1355,9 +1355,11 @@ async function render() {
         }
         strip.addEventListener('focus',()=>select(selectedIndex));
         strip.castKey = code => {
+          if(code===37 && selectedIndex===0)return false;
           if(code===37)select(selectedIndex-1);
           if(code===39)select(selectedIndex+1);
           if(code===13)openActor(actors[selectedIndex]);
+          return true;
         };
         select(0);
         section.append(strip); main.append(section);
@@ -1652,10 +1654,10 @@ window.addEventListener('keydown', event => {
   }
   if (!direction) return;
   const current = document.activeElement;
-  if (current.classList?.contains('cast-strip') && [37,39,13].includes(event.keyCode)) {
+  if (current.classList?.contains('cast-strip') && [37,39].includes(event.keyCode)) {
     event.preventDefault();
-    current.castKey?.(event.keyCode);
-    return;
+    // Left at the first cast member exits its locked-focus row.
+    if (current.castKey?.(event.keyCode) !== false) return;
   }
   if (current.tagName === 'SELECT' && ['left', 'right'].includes(direction)) {
     event.preventDefault(); current.selectedIndex = Math.max(0, Math.min(current.options.length - 1, current.selectedIndex + (direction === 'left' ? -1 : 1)));
@@ -1711,6 +1713,31 @@ window.addEventListener('keydown', event => {
       node !== current && node.getClientRects().length && !node.hidden);
   const choose = (candidates, axis) => nextFocus(rectFor(current),
     candidates.map(value => ({value, rect: rectFor(value)})), axis);
+  const focusNearestRail = () => {
+    const origin = rectFor(current);
+    const y = (origin.top + origin.bottom) / 2;
+    const viewport = rectFor(nav);
+    const controls = validControls(nav);
+    // Do not jump to destinations scrolled out of the rail viewport.
+    const visible = controls.filter(node => {
+      const box = rectFor(node);
+      return box.bottom > viewport.top && box.top < viewport.bottom;
+    });
+    const candidates = visible.length ? visible : controls;
+    let nearest = null, gap = Infinity, centerDistance = Infinity;
+    candidates.forEach(node => {
+      const box = rectFor(node);
+      const distance = Math.max(0, box.top - y, y - box.bottom);
+      const center = Math.abs((box.top + box.bottom) / 2 - y);
+      if (distance < gap || (distance === gap && center < centerDistance)) {
+        nearest = node; gap = distance; centerDistance = center;
+      }
+    });
+    if (nearest) {
+      rememberedPaneFocus = current;
+      focusWithoutJump(nearest);
+    }
+  };
   if (dialog.hidden && !player.active && (inRail || inMain)) {
     // Match upstream CastMemberStrip's onNavigateDown/onNavigateUp: the
     // last season/episode row leads into Cast, not off to a distant action.
@@ -1733,17 +1760,17 @@ window.addEventListener('keydown', event => {
     // a filter button somewhere up the screen. Flutter's D-pad focus boundary
     // transfers to the active rail destination when the current row ends.
     if (inMain && direction === 'left') {
+      if (current.classList.contains('cast-strip')) {
+        focusNearestRail();
+        return;
+      }
       // The first poster in a media row has no left-hand peer. Never
       // diagonally select a toolbar/tab from the row above it.
       const card = current.closest('.grid .card, .cards .card');
       const firstPoster = card && card.parentNode && card ===
         card.parentNode.querySelector('.card');
       if (firstPoster) {
-        const selected=nav.querySelector('button.active') || nav.querySelector('button:not(:disabled)');
-        if (selected) {
-          rememberedPaneFocus=current;
-          focusWithoutJump(selected);
-        }
+        focusNearestRail();
         return;
       }
       const rect = rectFor(current);
@@ -1754,12 +1781,7 @@ window.addEventListener('keydown', event => {
       });
       const adjacent = choose(rowCandidates, 'left');
       if (adjacent) { focusWithoutJump(adjacent); return; }
-      const selected = nav.querySelector('button.active') ||
-        nav.querySelector('button:not(:disabled)');
-      if (selected) {
-        rememberedPaneFocus = current;
-        focusWithoutJump(selected);
-      }
+      focusNearestRail();
       return;
     }
     const local = choose(validControls(source), direction);
