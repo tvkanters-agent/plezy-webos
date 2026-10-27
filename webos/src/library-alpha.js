@@ -13,7 +13,7 @@ export function alphabetTopInset(grid) {
 
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
   card, schedulePosters, focusWithoutJump, isActive, startedAt = Date.now(),
-  prewarmPage = async () => {}}) {
+  prewarmPage = async () => {}, cached = false}) {
   const shell = document.querySelector('#shell');
   const topSpace = document.createElement('div');
   const bottomSpace = document.createElement('div');
@@ -28,7 +28,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   retry.className = 'library-retry';
   retry.textContent = 'Retry loading';
   retry.hidden = true;
-  fadeDelayedContent(grid, startedAt);
+  if (!cached) fadeDelayedContent(grid, startedAt);
   main.append(topSpace, grid, bottomSpace, error, retry);
   let rangeStart = 0, items = firstPage.items.slice(), total = firstPage.total;
   let leadingPageLength = firstPage.items.length;
