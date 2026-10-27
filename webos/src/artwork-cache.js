@@ -35,6 +35,22 @@ export class ArtworkCache {
     this.dbPromise = null;
     this.writes = 0;
     this.pruning = null;
+    // Direct <img> loads (e.g. unversioned Plex art or servers without CORS)
+    // are handled by the browser's image cache. Remember only URLs, not
+    // decoded bitmaps; first-frame reuse is confirmed synchronously by <img>.
+    this.directLoaded = new Map();
+  }
+  sawDirectImage(url) {
+    if (!this.directLoaded.has(url)) return false;
+    this.directLoaded.delete(url);
+    this.directLoaded.set(url, true);
+    return true;
+  }
+  markDirectImage(url) {
+    if (this.directLoaded.has(url)) this.directLoaded.delete(url);
+    this.directLoaded.set(url, true);
+    // Bounded metadata only; Chromium remains responsible for decoded bytes.
+    if (this.directLoaded.size > 512) this.directLoaded.delete(this.directLoaded.keys().next().value);
   }
   peek(key) {
     const entry = this.memory.get(key);
