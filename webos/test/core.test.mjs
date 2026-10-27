@@ -294,6 +294,43 @@ test('Plex artwork URLs request server-side resized images',()=>{
  assert.equal(url.searchParams.get('url'),'/library/metadata/123/thumb/old-image');
 });
 
+test('Plex artwork revisions use image timestamps, then own-item updatedAt',()=>{
+ const plex=new Plex(server,'device');
+ const poster={type:'movie',poster:'/library/metadata/7/thumb/1234',
+   raw:{thumb:'/library/metadata/7/thumb/1234',updatedAt:9000}};
+ assert.equal(plex.artworkVersion(poster),'1234');
+ poster.poster=poster.raw.thumb='/library/metadata/7/thumb';
+ assert.equal(plex.artworkVersion(poster),'9000');
+ const episode={type:'episode',poster:'/library/metadata/8/thumb',
+   raw:{grandparentThumb:'/library/metadata/8/thumb',updatedAt:9100,
+     thumb:'/library/metadata/9/thumb/4321'}};
+ assert.equal(plex.artworkVersion(episode),'');
+ assert.equal(plex.artworkVersion(episode,{landscape:true}),'4321');
+ assert.equal(plex.backdropVersion({background:'/library/metadata/7/art/5678',
+   raw:{art:'/library/metadata/7/art/5678',updatedAt:10}}),'5678');
+ assert.equal(plex.backdropVersion({background:'/library/metadata/7/art',
+   raw:{grandparentArt:'/library/metadata/7/art',updatedAt:10}}),'');
+});
+
+test('Jellyfin image tags version own images and inherited series posters',()=>{
+ const jelly=new Jellyfin(server,'device');
+ const movie={id:'movie',raw:{ImageTags:{Primary:'hash-old'}}};
+ const first=new URL(jelly.image(movie));
+ assert.equal(first.searchParams.get('tag'),'hash-old');
+ assert.equal(jelly.artworkVersion(movie),'hash-old');
+ movie.raw.ImageTags.Primary='hash-new';
+ assert.equal(jelly.artworkVersion(movie),'hash-new');
+ assert.equal(new URL(jelly.image(movie)).searchParams.get('tag'),'hash-new');
+ const episode={id:'episode',raw:{SeriesId:'series',SeriesPrimaryImageTag:'series-v3'}};
+ const inherited=new URL(jelly.image(episode));
+ assert.match(inherited.pathname,/\/Items\/series\/Images\/Primary$/);
+ assert.equal(inherited.searchParams.get('tag'),'series-v3');
+ assert.equal(jelly.artworkVersion(episode),'series-v3');
+ episode.raw.SeriesPrimaryImageTag=undefined;
+ assert.equal(jelly.artworkVersion(episode),'');
+ assert.equal(new URL(jelly.image(episode)).searchParams.get('tag'),null);
+});
+
 test('Plex backdrop requests a downsized server-transcoded photo',()=>{
  const api=new Plex(server,'device');
  const url=new URL(api.backdrop({background:'/library/metadata/9/art'}));

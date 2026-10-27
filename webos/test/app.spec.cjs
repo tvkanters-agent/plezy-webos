@@ -467,7 +467,7 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
     if(u.pathname==='/photo/:/transcode'){pending.push(route);return;}
     if(u.pathname==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{
       title:'Recently added',Metadata:Array.from({length:20},(_,i)=>({
-        ratingKey:String(i),type:'movie',title:'Film '+i,thumb:'/library/metadata/'+i+'/thumb'
+        ratingKey:String(i),type:'movie',title:'Film '+i,thumb:'/library/metadata/'+i+'/thumb/12345'
       }))
     }]}}});
     return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
@@ -1267,4 +1267,39 @@ test('cast pictures fade in but do not enter the persistent artwork cache',async
   await expect.poll(()=>portrait.evaluate(node=>Number(getComputedStyle(node).opacity))).toBe(1);
   expect(await portrait.getAttribute('data-artwork-cache')).toBe(null);
   expect(await portrait.getAttribute('src')).toMatch(/^http:/);
+});
+
+test('changed artwork tags refresh images while unchanged versions stay cached',async({page})=>{
+  await mockServer(page);
+  let tag='poster-old';
+  const requested=[];
+  await page.route('http://media.test/**',route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.includes('/Images/')){
+      requested.push(url.searchParams.get('tag'));
+      return route.fulfill({body:'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>',
+        headers:{'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}});
+    }
+    const media={...item,ImageTags:{Primary:tag}};
+    if(url.pathname.endsWith('/Items/Resume'))return route.fulfill({json:{Items:[media]}});
+    if(url.pathname.endsWith('/Items/Latest'))return route.fulfill({json:[media]});
+    if(url.pathname.endsWith('/Items/movie'))return route.fulfill({json:media});
+    if(url.pathname.endsWith('/Items'))return route.fulfill({json:{Items:[media],TotalRecordCount:1}});
+    return route.fallback();
+  });
+  await page.goto('/');
+  await expect.poll(()=>requested.includes('poster-old')).toBe(true);
+  await expect(page.locator('main .card .poster img').first()).toHaveClass(/artwork-loaded/);
+  tag='poster-new';
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect.poll(()=>requested.includes('poster-new')).toBe(true);
+  const updated=page.locator('main .grid .poster img').first();
+  await expect(updated).toHaveClass(/artwork-loaded/);
+  expect(new URL(await updated.getAttribute('data-artwork-url')).searchParams.get('tag')).toBe('poster-new');
+  const count=requested.length;
+  // A new navigation receives the same tag and reuses the decoded image.
+  await page.getByRole('button',{name:'Search',exact:true}).click();
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .poster img').first()).toHaveClass(/artwork-ready/);
+  expect(requested.length).toBe(count);
 });

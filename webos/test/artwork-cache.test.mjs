@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {ArtworkCache, ARTWORK_TTL_MS} from '../src/artwork-cache.js';
+import {ArtworkCache} from '../src/artwork-cache.js';
 
 const blob = () => new Blob(['test'], {type:'image/png'});
-test('memory image reuse is synchronous only after decode and expires on schedule', async () => {
+test('memory image reuse is synchronous after decode and never expires by age', async () => {
   let now = 1000, created = 0;
   const revoked = [];
   const cache = new ArtworkCache({indexedDB:null, now:()=>now,
@@ -15,10 +15,10 @@ test('memory image reuse is synchronous only after decode and expires on schedul
   assert.equal(cache.peekReady(key), null);
   cache.markReady(key);
   assert.equal(cache.peekReady(key), 'blob:test-1');
-  now += ARTWORK_TTL_MS + 1;
-  assert.equal(cache.peekReady(key), null);
-  assert.deepEqual(revoked, ['blob:test-1']);
-  assert.equal(await cache.resolve(key), 'blob:test-2');
+  now += 365 * 24 * 60 * 60 * 1000;
+  assert.equal(cache.peekReady(key), 'blob:test-1');
+  assert.deepEqual(revoked, []);
+  assert.equal(await cache.resolve(key), 'blob:test-1');
 });
 test('simultaneous artwork readers share one network request', async () => {
   let fetches = 0;
@@ -51,4 +51,22 @@ test('too-large images load normally without being retained', async () => {
       {headers:{'content-type':'image/png'}})});
   assert.equal(await cache.resolve('https://plex.test/huge'), 'https://plex.test/huge');
   assert.equal(created,0);
+});
+
+// Two artwork revisions for the same server URL must never share the same blob.
+test('revisioned keys fetch the real URL and refresh only on revision change', async () => {
+  let fetches = 0, created = 0;
+  const seen = [];
+  const cache = new ArtworkCache({indexedDB:null,
+    urls:{createObjectURL:()=> 'blob:revision-'+(++created),revokeObjectURL:()=>{}},
+    fetch:async url=>{fetches++; seen.push(url);
+      return new Response(blob(),{headers:{'content-type':'image/png'}});}});
+  const url='https://plex.test/photo/:/transcode?width=320';
+  const oldKey=url+'|revision=1';
+  const newKey=url+'|revision=2';
+  assert.equal(await cache.resolve(oldKey,url),'blob:revision-1');
+  assert.equal(await cache.resolve(oldKey,url),'blob:revision-1');
+  assert.equal(await cache.resolve(newKey,url),'blob:revision-2');
+  assert.equal(fetches,2);
+  assert.deepEqual(seen,[url,url]);
 });
