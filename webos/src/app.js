@@ -828,7 +828,8 @@ function card(item) {
 // Flutter's sliver-based library lists inflate artwork near the viewport.
  // Chromium 53 ignores <img loading="lazy">. Prefetch a few library rows
  // on both sides of the viewport without decoding entire catalog pages.
-const MAX_ARTWORK_IN_FLIGHT = 2;
+// Respect the six-request artwork limit in Plezy's full-performance tier.
+const MAX_ARTWORK_IN_FLIGHT = 6;
 let posterFrame = 0, artworkInFlight = 0;
 let previousPosterScrollTop = main.scrollTop, posterScrollDirection = 0;
 // A loading slot becoming free must not remeasure all offscreen images.
@@ -1049,7 +1050,7 @@ function poster(item, options = {}) {
 }
 // Page preparation is disk-only. Cached artwork becomes decoded memory hits
 // before cards are inserted, including across full app restarts. Uncached art
-// still loads lazily through the existing two-slot network queue and fades in.
+// still loads lazily through the bounded network queue and fades in.
 async function prewarmPosters(items, sourceApi = api, options = {}) {
   // Prewarm only the opening viewport and two adjacent rows, as Plezy's
   // sliver prefetch does. The rest is decoded on demand by the scroll queue.

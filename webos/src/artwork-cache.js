@@ -211,7 +211,7 @@ export class ArtworkCache {
   }
   // Rehydrate a page's persisted images before its cards are attached to
   // the DOM. One readonly transaction retrieves every key concurrently; the
-  // ordinary two-slot viewport queue is reserved for network misses. There
+  // bounded viewport queue is reserved for network misses. There
   // must be NO network fetches in this method.
   async prewarm(keys) {
     const unique = [...new Set(keys.filter(Boolean))];

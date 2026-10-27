@@ -610,7 +610,7 @@ test('libraries are navigable in the rail and can be hidden and restored',async(
   await expect(page.getByRole('heading',{name:'Movies'})).toBeVisible();
 });
 
-test('poster loading caps initial concurrent artwork requests',async({page})=>{
+test('poster loading fills six bounded requests and measures geometry before writing',async({page})=>{
   const pending=[];
   await page.addInitScript(() => {
     window.artworkOperations = [];
@@ -643,16 +643,16 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
     return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
   });
   await page.goto('/');
-  await expect.poll(()=>pending.length).toBe(2);
+  await expect.poll(()=>pending.length).toBe(6);
   await page.waitForTimeout(75);
-  expect(pending).toHaveLength(2);
+  expect(pending).toHaveLength(6);
   // Disk lookup/fetch is asynchronous; src isn't assigned until resolved.
   const operations=await page.evaluate(() => window.artworkOperations);
   expect(operations.length).toBeGreaterThanOrEqual(2);
   expect(operations.every(op=>op==='read')).toBe(true);
   for(const request of pending.splice(0))await request.fulfill({status:404});
   await expect.poll(()=>page.evaluate(() =>
-    window.artworkOperations.filter(op => op === 'write').length)).toBe(2);
+    window.artworkOperations.filter(op => op === 'write').length)).toBe(6);
 });
 
 test('Plex show detail displays metadata and browsable seasons',async({page})=>{
@@ -1979,17 +1979,17 @@ test('Home stays fresh for the session, but reload starts a new Home request',as
   await expect.poll(()=>calls.filter(c=>c.path.endsWith('/Items/Resume')).length).toBeGreaterThan(before);
 });
 
-test('scrolling reads disk artwork even while both download slots are blocked',async({page})=>{
+test('scrolling reads disk artwork even while six download slots are blocked',async({page})=>{
   await mockServer(page);
   const posters=Array.from({length:20},(_,i)=>({...item,Id:'disk-'+i,Name:'Disk Film '+i}));
   const pending=[];
   await page.route('http://media.test/Users/user/Items/Resume**',route=>route.fulfill({json:{Items:posters}}));
   await page.route('http://media.test/Items/disk-*/Images/Primary**',route=>{pending.push(route);});
   await page.goto('/');
-  await expect.poll(()=>pending.length).toBe(2);
+  await expect.poll(()=>pending.length).toBe(6);
   const target=page.locator('main .shelf').first().locator('img').nth(15);
   // Seed a previously downloaded, currently offscreen file after initial page
-  // preparation. Its load must bypass the two blocked network requests.
+  // preparation. Its load must bypass the six blocked network requests.
   await target.evaluate(img=>new Promise(resolve=>{
     const request=indexedDB.open('plezy-artwork-v1',1);
     request.onsuccess=()=>{
@@ -2002,7 +2002,7 @@ test('scrolling reads disk artwork even while both download slots are blocked',a
   await target.scrollIntoViewIfNeeded();
   await expect(target).toHaveAttribute('src',/^blob:/);
   await expect.poll(()=>target.evaluate(img=>img.complete&&img.naturalWidth>0)).toBe(true);
-  expect(pending).toHaveLength(2);
+  expect(pending).toHaveLength(6);
 });
 
 test('cold saved library navigation has no frame with an empty content pane',async({page})=>{

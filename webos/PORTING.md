@@ -288,7 +288,7 @@ the visible range. The webOS `loadVisiblePosters` queue now also hydrates
 three off-screen card rows above and below the pane during library scrolling.
 Since Chromium 53 does not support reliable native lazy loading, it measures
 the current card height and grid row gap (or flex row margin), prioritizes
-visible images, then favors the scroll direction while keeping two network
+visible images, then favors the scroll direction while keeping six network
 downloads in flight. Already persisted artwork is probed independently of
 those slots. Other images, such as Home shelves, keep their previous bounded
 window. This mirrors the original intent, with an additional backward buffer
