@@ -13,7 +13,7 @@ export function alphabetTopInset(grid) {
 
 export function mountAlphabetLibrary({main, loader, firstPage, characters,
   card, schedulePosters, focusWithoutJump, isActive, startedAt = Date.now(),
-  prewarmPage = async () => {}, cached = false}) {
+  prewarmPage = async () => {}}) {
   const shell = document.querySelector('#shell');
   const topSpace = document.createElement('div');
   const bottomSpace = document.createElement('div');
