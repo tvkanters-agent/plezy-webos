@@ -28,7 +28,7 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   retry.className = 'library-retry';
   retry.textContent = 'Retry loading';
   retry.hidden = true;
-  if (!cached) fadeDelayedContent(grid, startedAt);
+  fadeDelayedContent(grid, startedAt);
   main.append(topSpace, grid, bottomSpace, error, retry);
   let rangeStart = 0, items = firstPage.items.slice(), total = firstPage.total;
   let leadingPageLength = firstPage.items.length;
