@@ -514,8 +514,10 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .actor-heading { min-width:0; }
 .actor-heading h1 { margin:0 0 4px; font-size:30px; font-weight:700; }
 .actor-heading .actor-role { font-size:18px; color:#b5b9c2;margin:0 0 4px; }
-.actor-heading .actor-count { color:#b5b9c2;font-size:15px;line-height:20px;
-  min-height:20px;margin:0; }
+.actor-heading .actor-count { color:#b5b9c2;font-size:15px;margin:0; }
+/* A blank line participates in normal text layout until the async count arrives.
+   This always reserves the element's own font metrics / inherited line-height. */
+.actor-heading .actor-count:empty::before { content:'\00a0'; }
 .actor-fact { margin:2px 0; font-size:17px; }
 .actor-fact span { color:#aeb2bc; }
 .actor-biography { max-width:800px; margin-top:12px; }

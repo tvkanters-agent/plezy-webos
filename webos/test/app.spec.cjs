@@ -999,10 +999,14 @@ test('actor count loads without shifting the cast page header',async({page})=>{
      countHeight:box('.actor-count').height};
  });
  const before=await geometry();
- expect(before.countHeight).toBe(20);
+ expect(before.countHeight).toBeGreaterThan(0);
+ // The reserved line must track typography changes, not a fixed pixel height.
+ await count.evaluate(node=>{node.style.fontSize='1.5em';});
+ const resized=await geometry();
+ expect(resized.countHeight).toBeGreaterThan(before.countHeight);
  unblock();
  await expect(count).toHaveText('1 title');
- expect(await geometry()).toEqual(before);
+ expect(await geometry()).toEqual(resized);
 });
 
 test('Plezy actor page displays compact portrait, character, biography and filmography',async({page})=>{
