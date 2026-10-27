@@ -69,6 +69,16 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
       if (grid.children[index] !== node)
         grid.insertBefore(node, grid.children[index] || null);
     });
+    if (focused && !grid.contains(focused)) {
+      // Wheel scrolling can move well beyond the old focused card. Keep the
+      // focus zone usable instead of leaving focus on the browser body.
+      const pane = main.getBoundingClientRect();
+      const visible = desired.find(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.bottom > pane.top && rect.top < pane.bottom;
+      });
+      if (visible) focusWithoutJump(visible, false);
+    }
     schedulePosters();
   }
   function sync(force = false) {
@@ -124,7 +134,16 @@ export function createGridWindow({main, grid, makeCard, focusWithoutJump, schedu
   }
   resume();
   return {
-    setItems(nextItems) { items = nextItems; sync(true); },
+    setItems(nextItems) {
+      items = nextItems;
+      if (!items.length) {
+        grid.textContent = '';
+        top.style.height = bottom.style.height = '0px';
+        range = null;
+        return;
+      }
+      sync(true);
+    },
     suspend, resume,
     destroy() { suspend(); live = false; items = []; }
   };
