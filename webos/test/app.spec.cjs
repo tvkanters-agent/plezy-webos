@@ -583,7 +583,9 @@ test('poster loading caps initial concurrent artwork requests',async({page})=>{
   await page.waitForTimeout(75);
   expect(pending).toHaveLength(2);
   // Disk lookup/fetch is asynchronous; src isn't assigned until resolved.
-  expect(await page.evaluate(() => window.artworkOperations)).toEqual(['read','read']);
+  const operations=await page.evaluate(() => window.artworkOperations);
+  expect(operations.length).toBeGreaterThanOrEqual(2);
+  expect(operations.every(op=>op==='read')).toBe(true);
   for(const request of pending.splice(0))await request.fulfill({status:404});
   await expect.poll(()=>page.evaluate(() =>
     window.artworkOperations.filter(op => op === 'write').length)).toBe(2);
@@ -1866,4 +1868,93 @@ test('a one-frame Home or library load fades even if under the old 120ms cutoff'
   await expect(page.locator('main .shelf').first()).toHaveClass(/content-enter/);
   await page.getByRole('button',{name:'Movies',exact:true}).click();
   await expect(page.locator('main .grid')).toHaveClass(/content-enter/);
+});
+
+test('saved detail paints after restart while its network refresh is blocked',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await expect(page.getByRole('heading',{name:'The Test Film',exact:true})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const request=indexedDB.open('plezy-catalog-v1',1);
+    request.onsuccess=()=>{
+      const tx=request.result.transaction('pages','readonly');
+      const read=tx.objectStore('pages').getAll();
+      read.onsuccess=()=>resolve(read.result.some(row=>row.key.includes(':detail:')));
+    };
+  }))).toBe(true);
+  await page.reload();
+  let release;
+  await page.route('http://media.test/Users/user/Items/movie**',async route=>{
+    await new Promise(resolve=>{release=resolve;});
+    await route.fulfill({json:{...item,Name:'Updated Film'}});
+  });
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await expect.poll(()=>!!release).toBe(true);
+  await expect(page.getByRole('heading',{name:'The Test Film',exact:true})).toBeVisible();
+  release();
+  await expect(page.getByRole('heading',{name:'Updated Film',exact:true})).toBeVisible();
+});
+
+test('Home stays fresh for the session, but reload starts a new Home request',async({page})=>{
+  const calls=await mockServer(page);
+  await page.goto('/');
+  await expect(page.locator('main .card').first()).toBeVisible();
+  const before=calls.filter(c=>c.path.endsWith('/Items/Resume')).length;
+  await page.evaluate(()=>{const now=Date.now();Date.now=()=>now+120000;});
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('main .shelf').first()).toBeVisible();
+  expect(calls.filter(c=>c.path.endsWith('/Items/Resume')).length).toBe(before);
+  await page.reload();
+  await expect.poll(()=>calls.filter(c=>c.path.endsWith('/Items/Resume')).length).toBeGreaterThan(before);
+});
+
+test('scrolling reads disk artwork even while both download slots are blocked',async({page})=>{
+  await mockServer(page);
+  const posters=Array.from({length:20},(_,i)=>({...item,Id:'disk-'+i,Name:'Disk Film '+i}));
+  const pending=[];
+  await page.route('http://media.test/Users/user/Items/Resume**',route=>route.fulfill({json:{Items:posters}}));
+  await page.route('http://media.test/Items/disk-*/Images/Primary**',route=>{pending.push(route);});
+  await page.goto('/');
+  await expect.poll(()=>pending.length).toBe(2);
+  const target=page.locator('main .shelf').first().locator('img').nth(15);
+  // Seed a previously downloaded, currently offscreen file after initial page
+  // preparation. Its load must bypass the two blocked network requests.
+  await target.evaluate(img=>new Promise(resolve=>{
+    const request=indexedDB.open('plezy-artwork-v1',1);
+    request.onsuccess=()=>{
+      const tx=request.result.transaction('images','readwrite');
+      const blob=new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>'],{type:'image/svg+xml'});
+      tx.objectStore('images').put({key:img.getAttribute('data-artwork-key'),blob,bytes:blob.size,used:Date.now()});
+      tx.oncomplete=resolve;
+    };
+  }));
+  await target.scrollIntoViewIfNeeded();
+  await expect(target).toHaveAttribute('src',/^blob:/);
+  await expect.poll(()=>target.evaluate(img=>img.complete&&img.naturalWidth>0)).toBe(true);
+  expect(pending).toHaveLength(2);
+});
+
+test('cold saved library navigation has no frame with an empty content pane',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  await expect.poll(()=>persistedCatalogRows(page)).toBeGreaterThanOrEqual(2);
+  await page.reload();
+  await expect(page.locator('main .shelf .card').first()).toBeVisible();
+  await page.evaluate(()=>{
+    window.blankNavigationFrames=0;window.checkNavigationFrames=true;
+    const check=()=>{
+      if(!window.checkNavigationFrames)return;
+      if(!document.querySelector('main .card'))window.blankNavigationFrames++;
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('main .grid .card')).toHaveCount(1);
+  expect(await page.evaluate(()=>{window.checkNavigationFrames=false;return window.blankNavigationFrames;})).toBe(0);
 });

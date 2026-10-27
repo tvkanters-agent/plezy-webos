@@ -16,7 +16,7 @@ import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 const artworkCache = new ArtworkCache();
-const catalogCache = new CatalogCache();
+const catalogCache = new CatalogCache({ttl: Infinity});
 const savedCatalog = new PersistentCatalogCache();
 function savedPage(key, loader, options) {
   return savedCatalog.page(catalogScope(activeServer()), key, loader, options);
@@ -52,6 +52,17 @@ function playbackClosed() {
     // Detail actions close over this item. Refresh it and the affected
     // controls in place rather than replacing the mounted screen.
     Object.assign(previous.item, updated);
+    const cacheId = savedCatalog.id(catalogScope(activeServer()),
+      'detail:' + JSON.stringify([route.id,route.kind]));
+    savedCatalog.read(cacheId).then(bundle => {
+      if (!bundle || previous.api !== api) return;
+      // Persist the playback result even when the in-memory item was mutated
+      // in place, so equality checks on the next visit cannot skip the write.
+      bundle.item = updated;
+      savedCatalog.generations.set(cacheId, (savedCatalog.generations.get(cacheId) || 0) + 1);
+      savedCatalog.remember(cacheId, bundle);
+      savedCatalog.write(cacheId, bundle).catch(() => {});
+    }).catch(() => {});
     refreshDetailAction(main.querySelector('.detail-actions .detail-play'),
       updated.resume > 0 ? 'Resume · ' + time(updated.resume) : 'Play', 'play');
     const restart = main.querySelector('.detail-actions .detail-restart');
@@ -74,6 +85,7 @@ nav.addEventListener('focusin', event => {
   if (item && nav.contains(item)) rememberedRailFocusId = item.dataset.navId;
 });
 let enterPaneAfterNavigation = false;
+let navigationIntent = 0;
 let pendingRailEntryRevision = null, libraryRenderRevision = null;
 let lastRailRightRevision = null;
 function preferredPaneControl() {
@@ -499,11 +511,9 @@ function restoreSessionHome() {
     entry.catalogGeneration === catalogCache.generation &&
     entry.snapshot && entry.snapshot.childNodes.length);
   if (!candidate) return false;
-  const needsRefresh = catalogCache.peek('home') === null;
-  const currentApi = api;
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
-  const expected = ++revision;
+  ++revision;
   pendingRailEntryRevision = null;
   lastRailRightRevision = null;
   cancelAuth();
@@ -515,19 +525,55 @@ function restoreSessionHome() {
   navigation();
   schedulePosters();
   focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
-  // A session can outlive the 45s Home freshness window. Show the preserved
-  // DOM immediately, but still honour TTL by updating it when data differs.
-  if (needsRefresh) {
-    catalogCache.get('home', () => currentApi.home()).then(rows => {
-      if (expected !== revision || currentApi !== api || route.type !== 'home') return;
-      if (JSON.stringify(rows) !== JSON.stringify(priorRows)) render();
-    }).catch(() => {
-      // Offline refresh must not blank already usable Home shelves.
-    });
-  }
   return true;
 }
-function go(next, remember = true) {
+// Read saved data/artwork while the current route still covers the screen.
+// IndexedDB and decoding are asynchronous even without any network traffic;
+// clearing the pane first exposes that work as a black navigation blink.
+async function prepareNavigation(next, sourceApi) {
+  if (!sourceApi || next.forceRefresh) return;
+  const scope = catalogScope(activeServer());
+  const read = key => savedCatalog.read(savedCatalog.id(scope, key));
+  if (next.type === 'home') {
+    const rows = catalogCache.peek('home');
+    if (rows) await prewarmShelves(rows, sourceApi);
+  } else if (next.type === 'library') {
+    const view = next.view || 'browse';
+    let key;
+    if (view === 'browse') key = 'browse:' + JSON.stringify([next.library.id,
+      next.sort || 'title', next.filter || 'all', next.alpha || '', 0, null]);
+    else if (view === 'recommended') key = 'recommended:' + next.library.id;
+    else if (view === 'collections') key = 'collections:' + next.library.id + ':0';
+    else if (view === 'playlists') key = 'playlists:0';
+    if (!key) return;
+    const page = await read(key);
+    if (view === 'browse' && sourceApi instanceof Plex && (next.sort || 'title') === 'title')
+      await read('characters:' + JSON.stringify([next.library.id,next.filter || 'all']));
+    if (page) {
+      if (view === 'recommended') await prewarmShelves(page, sourceApi);
+      else await prewarmPosters(page.items, sourceApi, {protectFirst:24});
+    }
+  } else if (next.type === 'detail') {
+    const bundle = await read('detail:' + JSON.stringify([next.id,next.kind]));
+    if (bundle) {
+      await prewarmDetail(bundle, sourceApi);
+      if (bundle.item.folder) {
+        const item = bundle.item, grouped = sourceApi instanceof Plex && item.type === 'collection';
+        const children = await read('children:' + JSON.stringify([item.id,item.type,grouped,0]));
+        if (children) await prewarmPosters(children.items, sourceApi,
+          {landscape:item.type === 'season' || item.type === 'Season', protectFirst:24});
+      }
+    }
+  } else if (next.type === 'person') {
+    const page = await read('person-media:' + JSON.stringify([next.id,next.actor,0]));
+    if (page) await prewarmPosters(page.items, sourceApi, {protectFirst:24});
+  }
+}
+async function go(next, remember = true) {
+  const intent = ++navigationIntent, sourceApi = api;
+  try { await prepareNavigation(next, sourceApi); } catch (_) { /* Cache is optional. */ }
+  if (intent !== navigationIntent || sourceApi !== api) return;
+
   // Re-selecting the current destination must not tear down its page.
   if (next.type === 'home' && route.type === 'home' && catalogCache.peek('home', {allowExpired:true}))
     return;
@@ -576,6 +622,7 @@ function dismissExitDialog() {
   else focusFirst();
 }
 function back() {
+  ++navigationIntent;
   if (detailMenu) { closeDetailMenu(); return; }
   if (!dialog.hidden) {
     if(ratingDialogReturnFocus){closeRatingSheet();return;}
@@ -586,7 +633,8 @@ function back() {
   if (history.length) {
     const previous = history.pop();
     route = previous.route || previous;
-    if (previous.snapshot && previous.sourceApi === api && previous.snapshot.childNodes.length) {
+    if (previous.snapshot && previous.sourceApi === api && previous.snapshot.childNodes.length &&
+        (route.type !== 'home' || previous.catalogGeneration === catalogCache.generation)) {
       ++revision;
       cancelAuth();
       main.textContent = '';
@@ -693,12 +741,11 @@ function artworkImage(url, persistent, failed, revision = '') {
 }
 function loadVisiblePosters() {
   posterFrame = 0;
-  if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) return;
   const view = main.getBoundingClientRect();
   const images = main.querySelectorAll('img[data-poster-src]');
-  const ready = [], capacity = MAX_ARTWORK_IN_FLIGHT - artworkInFlight;
+  const ready = [];
   // Collect geometry first: changing src/classes while measuring forces layout.
-  for (let i = 0; i < images.length && ready.length < capacity; i++) {
+  for (let i = 0; i < images.length; i++) {
     const img = images[i], rect = img.getBoundingClientRect();
     if (rect.bottom < view.top - 200 || rect.top > view.bottom + 200 ||
         rect.right < view.left - 180 || rect.left > view.right + 180) continue;
@@ -706,6 +753,20 @@ function loadVisiblePosters() {
   }
   for (const img of ready) {
     const url = img.getAttribute('data-poster-src');
+    const key = img.getAttribute('data-artwork-key');
+    if (key && !img.hasAttribute('data-artwork-probed')) {
+      // Disk reads do not consume download permits. A slow network miss must
+      // never hold already-downloaded posters behind it while scrolling.
+      img.removeAttribute('data-poster-src');
+      img.setAttribute('data-artwork-probed', '1');
+      artworkCache.cachedSource(key, img.hasAttribute('data-artwork-cache')).then(src => {
+        if (!img.isConnected) { img.setAttribute('data-poster-src', url); return; }
+        if (src) img.src = src;
+        else { img.setAttribute('data-poster-src', url); schedulePosters(); }
+      });
+      continue;
+    }
+    if (artworkInFlight >= MAX_ARTWORK_IN_FLIGHT) continue;
     img.removeAttribute('data-poster-src');
     ++artworkInFlight;
     let done = false;
@@ -726,8 +787,8 @@ function loadVisiblePosters() {
       img.src = src;
     };
     if (img.hasAttribute('data-artwork-key')) {
-      // Memory/disk hits share the same loader. Disk lookups are asynchronous
-      // and still fade in; only ready memory hits bypass the loading queue.
+      // Only cache misses consume a download slot. resolve still coalesces
+      // repeated URLs and catches a file written since the initial probe.
       artworkCache.resolve(img.getAttribute('data-artwork-key'), url,
         img.hasAttribute('data-artwork-cache')).then(attach, () => attach(url));
     } else attach(url); // Cast photos deliberately stay out of disk storage.
@@ -805,6 +866,16 @@ async function prewarmShelves(shelves, sourceApi = api) {
   }));
   artworkCache.protect(landing);
   await prewarmPosters(shelves.reduce((all, shelf) => all.concat(shelf.items), []), sourceApi);
+}
+async function prewarmDetail({item, parentShow}, sourceApi) {
+  const episode = item.type === 'episode' || item.type === 'Episode';
+  const posterItem = item.poster ? item : (parentShow || item);
+  await prewarmPosters([posterItem], sourceApi, {detail:true, landscape:episode});
+  const hero = item.background ? item : parentShow;
+  if (sourceApi instanceof Plex && hero?.background) {
+    const key = artworkCacheKey(sourceApi.backdrop(hero), sourceApi.backdropVersion(hero));
+    if (key) await artworkCache.prewarm([key]);
+  }
 }
 function cards(items, grid = false) {
   const node = el('div', undefined, grid ? 'grid' : 'cards'); items.forEach(item => node.append(card(item))); return node;
@@ -982,12 +1053,12 @@ async function paginated(loader, currentRevision, options = {}) {
   if (completed) cleanup();
   else requestAnimationFrame(check);
 }
-async function render() {
+async function render(prepared = null) {
   const currentRevision = ++revision;
   pendingRailEntryRevision=null;lastRailRightRevision=null;
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
-  let preferredFocus = null;
+  let preferredFocus = null, detailRefresh = null;
   cancelAuth(); detailMenu = null;
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
@@ -1152,12 +1223,13 @@ async function render() {
       toolbar.append(sortAction, filterAction, refreshAction);
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
+      const libraryRoute = {...route};
       const libraryLoader = (start, count) => savedPage(
-        'browse:' + JSON.stringify([route.library.id, selected, selectedFilter,
-          route.alpha || '', start, count || null]),
-        () => currentApi.list(route.library.id, start, selected, selectedFilter, count,
-          currentApi instanceof Jellyfin ? route.alpha : undefined),
-        {force:forceRefresh, priority:start === 0 && !route.alpha});
+        'browse:' + JSON.stringify([libraryRoute.library.id, selected, selectedFilter,
+          libraryRoute.alpha || '', start, count || null]),
+        () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
+          currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
+        {force:forceRefresh, priority:start === 0 && !libraryRoute.alpha});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -1239,7 +1311,7 @@ async function render() {
       }
     } else if (route.type === 'person' && api instanceof Plex) {
       // Plezy ActorMediaScreen._buildActorHeader, not a movie-detail poster.
-      const currentApi=api;
+      const currentApi=api, personRoute={...route};
       const header=el('section',undefined,'actor-hero');
       const identity=el('div',undefined,'actor-identity');
       const portrait=personPortrait(route.thumb?
@@ -1254,65 +1326,104 @@ async function render() {
       header.append(facts,bio);main.append(header);
       const contentStartedAt=beginContentEntrance();
       // The catalog lookup must survive unavailable Plex Discover details.
-      currentApi.personDetails(route.id).then(details=>{
-        if(!valid()||!header.isConnected||!details)return;
-        const formatDate=value=>{
-          if(!value)return '';
-          const date=new Date(value);
-          return Number.isNaN(date.valueOf())?String(value):date.toLocaleDateString(undefined,
-            {year:'numeric',month:'long',day:'numeric'});
-        };
-        for(const [label,value] of [['Born',details.bornAt],['Died',details.diedAt],
-          ['Birthplace',details.birthPlace]]){
-          if(!value)continue;
-          const line=el('p',undefined,'actor-fact');
-          line.append(el('span',label+'  '),document.createTextNode(
-            label==='Birthplace'?value:formatDate(value)));
-          facts.append(line);
-        }
-        if(facts.childNodes.length)fadeDelayedContent(facts,contentStartedAt);
-        if(details.biography){
-          const text=el('p',details.biography,'actor-biography-text');
-          const long=details.biography.length>320;
-          if(long)text.classList.add('collapsed');
-          bio.append(text);
-          fadeDelayedContent(bio,contentStartedAt);
-          if(long){
-            const expand=button('Show more',()=>{
-              const open=text.classList.toggle('collapsed');
-              expand.textContent=open?'Show more':'Show less';
-            },'actor-biography-toggle');
-            expand.dataset.focus='actor-biography';
-            bio.append(expand);
+      savedPage('person-details:' + personRoute.id, () => currentApi.personDetails(personRoute.id)).then(result=>{
+        const paintDetails = details => {
+          if(!valid()||!header.isConnected||!details)return;
+          facts.textContent=''; bio.textContent='';
+          const formatDate=value=>{
+            if(!value)return '';
+            const date=new Date(value);
+            return Number.isNaN(date.valueOf())?String(value):date.toLocaleDateString(undefined,
+              {year:'numeric',month:'long',day:'numeric'});
+          };
+          for(const [label,value] of [['Born',details.bornAt],['Died',details.diedAt],
+            ['Birthplace',details.birthPlace]]){
+            if(!value)continue;
+            const line=el('p',undefined,'actor-fact');
+            line.append(el('span',label+'  '),document.createTextNode(
+              label==='Birthplace'?value:formatDate(value)));
+            facts.append(line);
           }
-        }
+          if(facts.childNodes.length)fadeDelayedContent(facts,contentStartedAt);
+          if(details.biography){
+            const text=el('p',details.biography,'actor-biography-text');
+            const long=details.biography.length>320;
+            if(long)text.classList.add('collapsed');
+            bio.append(text);
+            fadeDelayedContent(bio,contentStartedAt);
+            if(long){
+              const expand=button('Show more',()=>{
+                const open=text.classList.toggle('collapsed');
+                expand.textContent=open?'Show more':'Show less';
+              },'actor-biography-toggle');
+              expand.dataset.focus='actor-biography';
+              bio.append(expand);
+            }
+          }
+        };
+        paintDetails(result.value);
+        if (result.fresh) result.fresh.then(update => {
+          if (update.changed) paintDetails(update.value);
+        }).catch(()=>{});
       }).catch(()=>{});
       await paginated(async start=>{
-        const page=await currentApi.personMedia(route.id,start,route.actor);
+        const result=await savedPage('person-media:' + JSON.stringify([personRoute.id,personRoute.actor,start]),
+          () => currentApi.personMedia(personRoute.id,start,personRoute.actor), {priority:start===0});
+        const page=result.value;
         if(!start&&valid()&&header.isConnected){
           fadeDelayedContent(count,contentStartedAt);
           count.textContent=page.total+' '+(page.total===1?'title':'titles');
         }
-        return page;
+        if (!start && result.fresh) result.fresh.then(update => {
+          if (update.changed && valid() && header.isConnected)
+            count.textContent=update.value.total+' '+(update.value.total===1?'title':'titles');
+        }).catch(()=>{});
+        return result;
       },currentRevision,{startedAt:contentStartedAt});
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
-      const item = await api.detail(route.id, route.kind); if (!valid()) return;
-      const isPlexShow = api instanceof Plex && item.type === 'show';
+      const currentApi = api, detailRoute = {...route};
+      const result = prepared?.detailBundle ? {value:prepared.detailBundle} :
+        await savedPage('detail:' + JSON.stringify([detailRoute.id, detailRoute.kind]), async () => {
+          const item = await currentApi.detail(detailRoute.id, detailRoute.kind);
+          const raw = item.raw || {};
+          const parentId = currentApi instanceof Plex
+            ? (item.type === 'season' ? raw.parentRatingKey :
+              item.type === 'episode' ? raw.grandparentRatingKey : null) : null;
+          let parentShow = null;
+          if (parentId) {
+            try { parentShow = await currentApi.detail(parentId, 'show'); } catch (_) {}
+          }
+          return {item, parentShow};
+        }, {force:!!prepared?.force});
+      if (!valid()) return;
+      const {item, parentShow} = result.value;
+      const isPlexShow = currentApi instanceof Plex && item.type === 'show';
       const isSeason = item.type === 'season' || item.type === 'Season';
       const isEpisode = item.type === 'episode' || item.type === 'Episode';
       const raw = item.raw || {};
-      // Season and episode metadata is often sparse in Plex; upstream Plezy's
-      // detail header also knows the containing show.
-      const parentShowId = api instanceof Plex
-        ? (isSeason ? raw.parentRatingKey : isEpisode ? raw.grandparentRatingKey : null)
-        : null;
-      let parentShow = null;
-      if (parentShowId) {
-        try { parentShow = await api.detail(parentShowId, 'show'); }
-        catch (_) { /* Standalone season/episode detail remains usable. */ }
+      if (!prepared?.detailBundle) {
+        await prewarmDetail(result.value, currentApi);
         if (!valid()) return;
       }
+      if (result.fresh) detailRefresh = async () => {
+        const update = await result.fresh;
+        if (!update.changed || !valid() || player.active || !dialog.hidden || detailMenu) return;
+        await prewarmDetail(update.value, currentApi);
+        if (!valid() || player.active || !dialog.hidden || detailMenu) return;
+        const focus = main.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+        const railFocus = nav.contains(document.activeElement) ? document.activeElement.dataset.navId : null;
+        const scroll = main.scrollTop, nextRevision = revision + 1;
+        await render({detailBundle:update.value});
+        if (revision !== nextRevision || api !== currentApi || route.id !== detailRoute.id || route.type !== 'detail') return;
+        if (railFocus) {
+          const railTarget = Array.from(nav.querySelectorAll('[data-nav-id]')).find(n => n.dataset.navId === railFocus);
+          if (railTarget) focusWithoutJump(railTarget, false);
+        }
+        main.scrollTop = scroll;
+        const target = focus && Array.from(main.querySelectorAll('[data-focus]')).find(n => n.dataset.focus === focus);
+        if (target) focusWithoutJump(target, false);
+      };
       const showRaw = parentShow?.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
       if (isSeason) content.classList.add('detail-season');
@@ -1533,7 +1644,7 @@ async function render() {
           const currentApi = api, watched = !item.watched;
           await currentApi.watched(item, watched);
           catalogCache.clear();
-          render();
+          render({force:true});
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
@@ -1571,7 +1682,7 @@ async function render() {
           await currentApi.watched(item, watched);
           catalogCache.clear();
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
-          render();
+          render({force:true});
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
@@ -1617,7 +1728,16 @@ async function render() {
         }
         const loadChildren = grouped ? mergedCollectionLoader(currentApi, item)
           : start => currentApi.children(item.id, start, item.type);
-        await paginated(loadChildren, currentRevision, {grouped,
+        // Merged collections have a stateful cursor. Cached pages can be
+        // consumed before revalidation finishes, so serialize cursor advances.
+        let childrenRequest = Promise.resolve();
+        const requestChildren = start => {
+          const task = childrenRequest.then(() => loadChildren(start));
+          childrenRequest = task.catch(() => {});
+          return task;
+        };
+        await paginated(start => savedPage('children:' + JSON.stringify([item.id,item.type,grouped,start]),
+          () => requestChildren(start), {priority:start===0}), currentRevision, {grouped,
           episodes: item.type === 'season' || item.type === 'Season',
           startedAt:beginContentEntrance()});
       }
@@ -1683,6 +1803,7 @@ async function render() {
     if (libraryRenderRevision === currentRevision) libraryRenderRevision = null;
   }
   if (valid()) {
+    if (detailRefresh) detailRefresh().catch(() => {});
     schedulePosters();
     if (route.focus) {
       const found = Array.from(main.querySelectorAll('[data-focus]')).find(n => n.dataset.focus === route.focus);

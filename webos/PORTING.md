@@ -178,3 +178,32 @@ both entering the first card and leaving the pane while data is pending.
 ### Main-pane Left exit to the navigation rail
 
 On webOS, Left from the leftmost content item transfers focus to the vertically nearest visible sidebar destination instead of the selected destination. CastMemberStrip retains internal Left/Right movement, but Left from its first member exits instead of saturating (a user-requested departure from Flutter). Right from the sidebar restores the previously focused content item. Browser tests cover this behavior.
+
+### Cached navigation and artwork under memory pressure
+
+The source `OptimizedMediaImage`, `PlexImageCacheManager` and library prefetch
+logic distinguish disk files from decoded image RAM. The webOS equivalent now
+releases its decoded `Image` references independently of the compressed Blob
+URL cache. Landing artwork receives preference but cannot monopolize either
+RAM budget and immediately evict every newly scrolled image. Disk-only probes
+run outside the two network-download slots, so slow downloads cannot block
+already-saved images. Transient fetch failures use a short origin backoff rather
+than disabling persistent downloads until restart.
+
+IndexedDB replaces native Plezy's filesystem/database services. Saved library,
+detail, child-list and actor pages are shown before background revalidation;
+changed responses reconcile with the active route. Navigation prepares available
+metadata and decoded artwork while the previous route is still mounted, avoiding
+an empty intermediate paint. Missing artwork probes are remembered for the
+session (and cleared on save), avoiding a second disk lookup during page render.
+Home metadata remains session-only and is refreshed after playback, watched-state
+changes, explicit refresh and account changes, including Back navigation. It no
+longer expires simply because 45 seconds elapsed. These cache-first/session
+policies follow the user's requested webOS behavior; they do not claim identical
+upstream persistence policy.
+
+Regression tests cover bitmap pressure without extra downloads, origin recovery,
+restart detail reuse and background changes, cached artwork behind blocked
+network slots, session Home behavior and frame-by-frame cached navigation.
+Browser simulations and Chromium 53 bundle validation do not establish physical
+LG TV disk latency, decoder behavior or server CORS support.
