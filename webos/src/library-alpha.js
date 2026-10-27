@@ -164,6 +164,12 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     try {
       const page = await loader(start, count);
       if (!alive() || id !== generation) return;
+      // A fling can reverse while this request is pending. Do not replace
+      // currently visible cards with a page that is already off screen.
+      if (keepScroll) {
+        const visible = firstVisibleIndex();
+        if (visible !== target && (visible < start || visible >= start + count)) return;
+      }
       // Ordinary scrolling must display titles as soon as metadata arrives.
       // The visible-artwork queue hydrates their placeholders independently.
       if (!keepScroll) await prewarmPage(page.items, target - start, columns);

@@ -402,6 +402,11 @@ test('a delayed scroll request follows the latest viewport without snapping back
   },fraction);
   await move(.7);
   await expect.poll(() => !!release).toBe(true);
+  await page.locator('.alpha-window-grid').evaluate(grid => {
+    window.scrollWindowStarts = [];
+    new MutationObserver(() => window.scrollWindowStarts.push(
+      Number(grid.querySelector('.card')?.dataset.focus))).observe(grid, {childList:true});
+  });
   const scroll = await move(.25);
   release();
   await expect.poll(() => page.locator('.alpha-window-grid .card').evaluateAll(cards => {
@@ -413,4 +418,5 @@ test('a delayed scroll request follows the latest viewport without snapping back
   })).toBe(true);
   expect(await page.locator('main').evaluate(main => main.scrollTop)).toBeCloseTo(scroll,0);
   expect(Number(await page.locator('.alpha-window-grid .card').first().getAttribute('data-focus'))).toBeLessThan(1000);
+  expect(await page.evaluate(() => window.scrollWindowStarts.every(start => start < 1000))).toBe(true);
 });
