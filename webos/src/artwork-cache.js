@@ -2,7 +2,8 @@
 // Bounded artwork cache for Chromium 53 / webOS 4.x.
 // In-memory object URLs keep recently decoded frames available across routes;
 // IndexedDB stores compressed image blobs across app launches.
-export const ARTWORK_DISK_BYTES = 192 * 1024 * 1024;
+import {evictionsForBudget, preferredDiskBudget, quotaRecoveryTarget} from './cache-budget.js';
+export const ARTWORK_DISK_BYTES = 768 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_PRIORITY_KEYS = 96; // About four library landing viewports.
@@ -257,20 +258,22 @@ export class ArtworkCache {
     });
     try {
       await write();
-      if (++this.writes % 24 === 0) this.prune();
+      if (++this.writes % 96 === 0) this.prune().catch(() => {});
     } catch (_) {
       // Quota can be much smaller on older LG TVs. Evict aggressively once,
       // then let normal image loading continue even if storage still fails.
-      await this.prune(this.diskLimit / 2);
+      await this.prune(undefined, true);
       try { await write(); } catch (_) { /* Storage optional. */ }
     }
   }
-  async prune(maxBytes = this.diskLimit) {
-    if (this.pruning) return this.pruning;
-    this.pruning = this.pruneEntries(maxBytes).catch(() => {});
+  async prune(maxBytes, quotaFailure = false) {
+    if (this.pruning) await this.pruning;
+    const budget = maxBytes === undefined
+      ? await preferredDiskBudget(this.diskLimit, 0.70) : maxBytes;
+    this.pruning = this.pruneEntries(budget, quotaFailure).catch(() => {});
     try { await this.pruning; } finally { this.pruning = null; }
   }
-  async pruneEntries(maxBytes) {
+  async pruneEntries(maxBytes, quotaFailure = false) {
     const db = await this.open();
     if (!db) return;
     const entries = await new Promise(resolve => {
@@ -291,16 +294,10 @@ export class ArtworkCache {
         tx.onabort = () => resolve([]);
       } catch (_) { resolve([]); }
     });
-    let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
-    const remove = [];
-    // No count or age expiration: versions determine freshness. Protect the
-    // landing viewports on disk as well as in memory, while respecting quotas.
-    for (const entry of entries.sort((a, b) =>
-      Number(a.priority) - Number(b.priority) || a.used - b.used)) {
-      if (total <= maxBytes) break;
-      remove.push(entry.key);
-      total -= entry.bytes;
-    }
+    const total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+    const budget = quotaFailure
+      ? quotaRecoveryTarget(total, maxBytes, 32 * 1024 * 1024) : maxBytes;
+    const remove = evictionsForBudget(entries, budget);
     if (!remove.length) return;
     await new Promise(resolve => {
       try {
