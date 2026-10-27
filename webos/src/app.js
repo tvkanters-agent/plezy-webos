@@ -6,7 +6,7 @@ import {Player} from './player.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {CatalogCache} from './catalog-cache.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
-import {fadeDelayedContent} from './content-entrance.js';
+import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
@@ -916,7 +916,7 @@ async function render() {
     else if (route.type === 'simkl') { await simklSignIn(); return; }
     else if (route.type === 'home') {
       title('Your next watch', activeServer().name);
-      const contentStartedAt = Date.now();
+      const contentStartedAt = beginContentEntrance();
       // Keep the first frame quiet instead of flashing a temporary text
       // message while the home shelves are fetched.
       const rows = await catalogCache.get('home', () => api.home()); if (!valid()) return;
@@ -931,7 +931,7 @@ async function render() {
       rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(fadeDelayedContent(section, contentStartedAt)); });
     } else if (route.type === 'libraries') {
       title('Libraries', activeServer().name);
-      const contentStartedAt = Date.now();
+      const contentStartedAt = beginContentEntrance();
       const libraries = libraryCacheFor === api ? libraryCache : await api.libraries(); if (!valid()) return;
       if (libraryCacheFor !== api) { libraryCacheFor = api; libraryCache = libraries; navigation(); }
       if (!libraries.length) main.append(fadeDelayedContent(el('p', 'No video libraries are available for this account.'), contentStartedAt));
@@ -951,7 +951,7 @@ async function render() {
         tabs.append(control);
       });
       main.append(tabs);
-      const contentStartedAt = Date.now();
+      const contentStartedAt = beginContentEntrance();
       if (currentApi instanceof Plex && view === 'collections') {
         await paginated(start => savedPage('collections:' + route.library.id + ':' + start,
           () => currentApi.collections(route.library.id, start), {force:forceRefresh}), currentRevision,
@@ -1164,7 +1164,7 @@ async function render() {
       const facts=el('div',undefined,'actor-facts');
       const bio=el('div',undefined,'actor-biography');
       header.append(facts,bio);main.append(header);
-      const contentStartedAt=Date.now();
+      const contentStartedAt=beginContentEntrance();
       // The catalog lookup must survive unavailable Plex Discover details.
       currentApi.personDetails(route.id).then(details=>{
         if(!valid()||!header.isConnected||!details)return;
@@ -1531,7 +1531,7 @@ async function render() {
           : start => currentApi.children(item.id, start, item.type);
         await paginated(loadChildren, currentRevision, {grouped,
           episodes: item.type === 'season' || item.type === 'Season',
-          startedAt:Date.now()});
+          startedAt:beginContentEntrance()});
       }
       // Port CastMemberStrip: one locked-focus D-pad row, internal horizontal
       // scroll with no browser scrollbar, placed AFTER seasons/episodes.
@@ -1754,7 +1754,7 @@ function searchForm() {
     route.query = query.value.trim(); if (!route.query) return;
     results.classList.remove('content-enter');
     results.textContent = 'Searching…';
-    const contentStartedAt=Date.now();
+    const contentStartedAt=beginContentEntrance();
     try {
       const items = await currentApi.search(route.query); if (current !== searchRevision || revision !== expected) return;
       results.textContent = ''; results.append(el('h2', items.length + ' results'), cards(items, true));
