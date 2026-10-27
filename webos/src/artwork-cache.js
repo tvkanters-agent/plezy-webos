@@ -6,6 +6,7 @@ export const ARTWORK_DISK_BYTES = 192 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_PRIORITY_KEYS = 96; // About four library landing viewports.
+const MAX_DECODED_BYTES = 96 * 1024 * 1024; // Approximate bitmap RAM budget.
 
 // Plex photo URLs include X-Plex-Version (our app release number); this is
 // unrelated to the server's artwork version and must not bust the disk cache.
@@ -28,8 +29,10 @@ export class ArtworkCache {
     this.urls = options.urls || (typeof URL === 'undefined' ? null : URL);
     this.now = options.now || (() => Date.now());
     this.memoryLimit = options.memoryBytes ?? ARTWORK_MEMORY_BYTES;
+    this.decodedLimit = options.decodedBytes ?? MAX_DECODED_BYTES;
     this.diskLimit = options.diskBytes ?? ARTWORK_DISK_BYTES;
     this.memory = new Map();
+    this.decodedBytes = 0;
     this.protectedKeys = new Set();
     this.memoryBytes = 0;
     this.pending = new Map();
@@ -70,6 +73,13 @@ export class ArtworkCache {
       if (!this.protectedKeys.has(key)) return key;
     return this.memory.keys().next().value;
   }
+  trimMemory() {
+    while (this.memoryBytes > this.memoryLimit ||
+           this.decodedBytes > this.decodedLimit) {
+      if (!this.memory.size) break;
+      this.drop(this.memoryVictim());
+    }
+  }
   peek(key) {
     const entry = this.memory.get(key);
     if (!entry) return null;
@@ -90,6 +100,7 @@ export class ArtworkCache {
     if (!entry) return;
     this.memory.delete(key);
     this.memoryBytes -= entry.bytes;
+    this.decodedBytes -= entry.decodedBytes || 0;
     if (this.urls && this.urls.revokeObjectURL) this.urls.revokeObjectURL(entry.src);
   }
   remember(key, blob) {
@@ -100,12 +111,23 @@ export class ArtworkCache {
     let src;
     try { src = this.urls.createObjectURL(blob); }
     catch (_) { return null; }
-    const entry = {src, bytes: blob.size, ready: false};
+    const entry = {src, bytes: blob.size, ready: false, decodedBytes: 0};
     // Keep a decoded image reference alive for the immediate next route paint.
     entry.decoded = new Promise(resolve => {
       if (typeof Image === 'undefined') { resolve(false); return; }
       entry.image = new Image();
-      entry.image.onload = () => { entry.ready = true; resolve(true); };
+      entry.image.onload = () => {
+        if (this.memory.get(key) !== entry) { resolve(false); return; }
+        entry.ready = true;
+        // JPEG compression ratios vary hugely. A byte-only limit would let
+        // thousands of tiny files retain hundreds of MiB of decoded bitmaps.
+        const width = entry.image.naturalWidth || 0;
+        const height = entry.image.naturalHeight || 0;
+        entry.decodedBytes = width * height * 4;
+        this.decodedBytes += entry.decodedBytes;
+        this.trimMemory();
+        resolve(this.memory.get(key) === entry);
+      };
       entry.image.onerror = () => resolve(false);
       try { entry.image.src = src; } catch (_) { resolve(false); }
     });
@@ -113,9 +135,7 @@ export class ArtworkCache {
     this.memoryBytes += blob.size;
     // The compressed-blob budget, not the number of titles viewed, bounds
     // storage. Keep first-screen art even after scrolling thousands of titles.
-    while (this.memoryBytes > this.memoryLimit) {
-      this.drop(this.memoryVictim());
-    }
+    this.trimMemory();
     return src;
   }
   open() {
