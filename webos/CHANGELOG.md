@@ -1,5 +1,9 @@
 # webOS changelog
 
+## 1.5.7 — Keep fast library scrolling populated
+
+Load the visible sparse range directly in either direction, display scrolling cards independently of artwork decoding, and start adjacent metadata prefetch at least three rows ahead. Preserve the current scroll position when delayed requests complete.
+
 ## 1.5.6 — Preload artwork while scrolling libraries
 
 - Prefetch artwork three card rows above and below the visible library viewport, including both regular and sparse alphabetical grids and episode lists.

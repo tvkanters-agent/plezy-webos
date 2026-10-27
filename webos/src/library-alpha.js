@@ -99,7 +99,9 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     const gridTop = grid.offsetTop + inset;
     // A small epsilon avoids rounding a correctly aligned first row into the
     // preceding row if the browser's pixel snapping loses a fraction of a px.
-    const row = Math.floor(Math.max(0, main.scrollTop + inset - gridTop + 1) / rowHeight);
+    // Allow negative rows: the viewport can be in the leading spacer after
+    // a fast reverse scroll. Clamp the absolute index, not the local row.
+    const row = Math.floor((main.scrollTop + inset - gridTop + 1) / rowHeight);
     return Math.max(0, Math.min(total - 1, rangeStart + row * columns));
   };
   const focusGrid = () => {
@@ -147,33 +149,41 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     rail.update(helper.currentLetter(index));
     schedulePosters();
   };
-  async function jump(index, forcePage = false) {
+  async function jump(index, forcePage = false, keepScroll = false) {
     if (!alive()) return;
     const target = Math.max(0, Math.min(total - 1, index));
     if (!forcePage && target >= rangeStart && target < loadedEnd()) { position(target); return; }
     const id = ++generation;
-    const start = alphaPageStart(target, columns, total);
-    const count = Math.min(total - start, columns * Math.ceil(60 / columns));
+    const start = keepScroll ? Math.max(0, (Math.floor(target / columns) - 3) * columns) :
+      alphaPageStart(target, columns, total);
+    const count = Math.min(total - start, columns * Math.max(Math.ceil(60 / columns),
+      Math.ceil(main.clientHeight / rowHeight) + 7));
     loading = true;
     retry.hidden = true;
     error.textContent = '';
     try {
       const page = await loader(start, count);
       if (!alive() || id !== generation) return;
-      await prewarmPage(page.items, target - start, columns);
+      // Ordinary scrolling must display titles as soon as metadata arrives.
+      // The visible-artwork queue hydrates their placeholders independently.
+      if (!keepScroll) await prewarmPage(page.items, target - start, columns);
       if (!alive() || id !== generation) return;
+      const scroll = main.scrollTop;
       rangeStart = start;
       items = page.items.slice();
       leadingPageLength = page.items.length;
       total = page.total;
       paint(items, 'replace');
       spacers();
-      position(target);
+      if (keepScroll) {
+        main.scrollTop = scroll;
+        updateLetter();
+      } else position(target);
     } catch (e) {
       if (alive() && id === generation) {
         error.textContent = 'Could not load library titles: ' + e.message;
         retry.hidden = false;
-        pending = () => jump(target);
+        pending = () => jump(target, forcePage, keepScroll);
       }
     } finally {
       if (id === generation) {
@@ -216,8 +226,6 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
     error.textContent = '';
     try {
       const page = await loader(start, count);
-      if (!alive() || id !== generation) return;
-      await prewarmPage(page.items, before ? page.items.length - 1 : 0, columns);
       if (!alive() || id !== generation) return;
       if (before) {
         items = page.items.concat(items);
@@ -262,9 +270,20 @@ export function mountAlphabetLibrary({main, loader, firstPage, characters,
   const check = () => {
     if (!alive() || loading || error.textContent) return;
     const pane = main.getBoundingClientRect(), content = grid.getBoundingClientRect();
-    if (content.bottom < pane.bottom + pane.height * .8 && loadedEnd() < total)
+    // Like ensureRangeLoaded upstream, request where the viewport actually is.
+    // Walking adjacent pages through a spacer leaves a black screen for many
+    // serial requests. Keep one request in flight and recheck its latest target.
+    if (content.bottom < pane.top || content.top > pane.bottom) {
+      const index = firstVisibleIndex();
+      if (index < rangeStart || index >= loadedEnd()) {
+        jump(index, true, true);
+        return;
+      }
+    }
+    const buffer = Math.max(pane.height, rowHeight * 3);
+    if (content.bottom < pane.bottom + buffer && loadedEnd() < total)
       loadAdjacent('append');
-    else if (content.top > pane.top - pane.height * .6 && rangeStart > 0)
+    else if (content.top > pane.top - buffer && rangeStart > 0)
       loadAdjacent('prepend');
   };
   let lastAlphaUpdate = 0;

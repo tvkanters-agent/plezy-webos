@@ -1290,8 +1290,10 @@ async function paginated(loader, currentRevision, options = {}) {
         ? response.value : response;
       const fresh = response && response.fresh;
       if (mountedRevision !== revision || !grid.isConnected) return;
-      await prewarmPosters(page.items, api,
-        {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
+      // Preserve first-frame cached navigation, but never gate scrolling
+      // entries on disk reads or image decoding. schedulePosters handles them.
+      if (offset === 0) await prewarmPosters(page.items, api,
+        {landscape:!!options.episodes, protectFirst:24});
       if (mountedRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       addPage(grid, page);

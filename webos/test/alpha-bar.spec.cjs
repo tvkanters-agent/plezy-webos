@@ -319,3 +319,98 @@ test('a missing firstCharacter index never blocks a cached Plex library grid',as
   await expect(page.locator('.alpha-jump-bar')).toBeVisible();
   await expect(page.locator('.alpha-letter-slot')).toHaveCount(6);
 });
+
+for (const layout of ['grid', 'flex']) {
+  test(`fast scroll requests the visible range directly in both directions (${layout})`, async ({page}) => {
+    const calls = await mockPlexAlphabet(page, {count:3000});
+    await page.goto('/');
+    if (layout === 'flex') await page.addStyleTag({content:'.grid { display:flex !important; flex-wrap:wrap !important; gap:0 !important; } .grid > .card { flex:0 0 180px !important; margin:0 24px 26px 0 !important; }'});
+    await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+    await expect(page.locator('.alpha-window-grid .card').first()).toBeVisible();
+    const scrollToIndex = index => page.locator('.alpha-window-grid').evaluate((grid,index) => {
+      const cards = Array.from(grid.querySelectorAll('.card'));
+      const y = cards[0].offsetTop;
+      const columns = cards.filter(card => card.offsetTop === y).length;
+      const stride = cards[columns].offsetTop - y;
+      const start = Number(cards[0].dataset.focus);
+      const main = grid.parentElement;
+      main.scrollTop = grid.offsetTop + (Math.floor(index / columns) - Math.floor(start / columns)) * stride + 17;
+      return main.scrollTop;
+    },index);
+    for (const target of [2100, 300]) {
+      const before = calls.filter(call => call.path.endsWith('/all')).length;
+      const scroll = await scrollToIndex(target);
+      await expect(page.locator(`.alpha-window-grid .card[data-focus="${target}"]`)).toBeVisible();
+      const requests = calls.filter(call => call.path.endsWith('/all')).slice(before);
+      expect(requests.length).toBeLessThanOrEqual(3);
+      expect(requests.some(call => Math.abs(Number(call.params['X-Plex-Container-Start']) - target) < 80)).toBe(true);
+      expect(await page.locator('main').evaluate(main => main.scrollTop)).toBeCloseTo(scroll, 0);
+      expect(await page.locator('.alpha-window-grid .card').count()).toBeLessThanOrEqual(360);
+    }
+  });
+}
+
+test('scrolling cards do not wait for artwork prewarming', async ({page}) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  await page.route('**/scroll-test/**', route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'../src',name),'utf8')});
+  });
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const {mountAlphabetLibrary} = await import('/scroll-test/library-alpha.js');
+    document.body.innerHTML = '<div id="shell"><main style="height:600px;overflow:auto;position:relative;width:1000px"></main></div>';
+    const main = document.querySelector('main');
+    const items = start => Array.from({length:60},(_,i) => ({id:String(start+i)}));
+    window.prewarmCalls = 0;
+    window.scrollLibrary = mountAlphabetLibrary({main,
+      firstPage:{items:items(0),total:3000}, characters:[],showRail:false,
+      loader:async start => ({items:items(start),total:3000}),
+      card:item => {
+        const card = document.createElement('button');
+        card.className = 'card'; card.dataset.focus = item.id;
+        card.textContent = item.id; card.style.height = '100px';
+        return card;
+      }, schedulePosters:()=>{}, focusWithoutJump:()=>{},isActive:()=>true,
+      prewarmPage:()=> { window.prewarmCalls++; return new Promise(()=>{}); }
+    });
+    main.scrollTop = document.querySelector('.alpha-window-grid').offsetHeight - 500;
+  });
+  await expect(page.locator('.alpha-window-grid .card[data-focus="60"]')).toHaveCount(1);
+  expect(await page.evaluate(() => window.prewarmCalls)).toBe(0);
+});
+
+test('a delayed scroll request follows the latest viewport without snapping back', async ({page}) => {
+  await mockPlexAlphabet(page, {count:3000});
+  let release;
+  let held = false;
+  await page.route('**/library/sections/movies/all?**', async route => {
+    const start = Number(new URL(route.request().url()).searchParams.get('X-Plex-Container-Start'));
+    if (start > 1000 && !held) {
+      held = true;
+      await new Promise(resolve => { release = resolve; });
+    }
+    await route.fallback();
+  });
+  await page.goto('/');
+  await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+  await expect(page.locator('.alpha-window-grid .card').first()).toBeVisible();
+  const move = fraction => page.locator('main').evaluate((main,fraction) => {
+    main.scrollTop = main.scrollHeight * fraction;
+    return main.scrollTop;
+  },fraction);
+  await move(.7);
+  await expect.poll(() => !!release).toBe(true);
+  const scroll = await move(.25);
+  release();
+  await expect.poll(() => page.locator('.alpha-window-grid .card').evaluateAll(cards => {
+    const pane = document.querySelector('main').getBoundingClientRect();
+    return cards.some(card => {
+      const r = card.getBoundingClientRect();
+      return r.top < pane.bottom && r.bottom > pane.top;
+    });
+  })).toBe(true);
+  expect(await page.locator('main').evaluate(main => main.scrollTop)).toBeCloseTo(scroll,0);
+  expect(Number(await page.locator('.alpha-window-grid .card').first().getAttribute('data-focus'))).toBeLessThan(1000);
+});

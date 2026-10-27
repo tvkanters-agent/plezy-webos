@@ -293,3 +293,9 @@ downloads in flight. Already persisted artwork is probed independently of
 those slots. Other images, such as Home shelves, keep their previous bounded
 window. This mirrors the original intent, with an additional backward buffer
 for remote navigation, without inflating the entire library.
+
+### Fast library scroll range loading
+
+Following LibraryBrowseTab._computeVisibleRange and PaginatedItemLoader.ensureRangeLoaded, the sparse HTML grid requests the current viewport directly when scrolling completely beyond its mounted range. It no longer walks every intervening page through empty spacers. Negative local rows map correctly into the leading spacer for reverse scrolling. One metadata request remains in flight; its completion rechecks the latest viewport without snapping scroll to the old target. Adjacent prefetch covers at least three rows or one viewport.
+
+Scrolling cards mount immediately after metadata arrives, letting the bounded artwork queue hydrate placeholders independently, as native sliver cards do. Explicit alphabet jumps and initial navigation keep their cached-artwork preparation. Browser tests cover both grid and Chromium 53 flex geometry, blocked prewarming and delayed-request direction changes; hardware performance remains unverified.
