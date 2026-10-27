@@ -6,7 +6,7 @@ export const ARTWORK_DISK_BYTES = 80 * 1024 * 1024;
 export const ARTWORK_MEMORY_BYTES = 12 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_DISK_ENTRIES = 500;
-const MAX_MEMORY_ENTRIES = 48;
+const MAX_MEMORY_ENTRIES = 128; // Enough for a previously browsed library page, bounded by bytes.
 
 // Plex photo URLs include X-Plex-Version (our app release number); this is
 // unrelated to the server's artwork version and must not bust the disk cache.
