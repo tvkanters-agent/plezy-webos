@@ -2288,7 +2288,7 @@ async function simklSignIn() {
       if (controller.signal.aborted) return;
       if (result.session) {
         simklTracker.reset();
-        state.simkl = result.session; persist(); history = [];
+        state.simkl = result.session; persist(); clearNavigationHistory();
         go({type: 'settings'}, false);
         notify('Simkl connected. Plex playback will now be tracked automatically.');
         return;
