@@ -771,6 +771,11 @@ for(const layout of ['grid','flex']) {
     `});
     await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
     await expect(page.locator('.grid .card')).toHaveCount(60);
+    // Clear focus scrolling from entering the library before measuring. The
+    // poster must become visible due only to changing the viewport height.
+    await page.locator('nav button[data-nav-id="library:movies"]').focus();
+    await page.locator('main').evaluate(main=>{main.scrollTop=0;});
+    await expect.poll(()=>page.locator('main').evaluate(main=>main.scrollTop)).toBe(0);
     const target=await page.locator('main').evaluate(main=>{
       const view=main.getBoundingClientRect();
       const img=Array.from(main.querySelectorAll('img[data-poster-src]')).find(node=>{
