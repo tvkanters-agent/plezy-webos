@@ -70,3 +70,26 @@ test('a removed account cannot reuse its in-memory library pages', async () => {
   assert.equal(reread.cached,false);
   assert.deepEqual((await cache.page('s2','browse',()=>['other'])).value,['other']);
 });
+
+test('hundreds of cached pages do not expire just because of entry count', async () => {
+  const cache = new PersistentCatalogCache({indexedDB:null,memoryBytes:1024*1024});
+  for(let i=0;i<400;i++)await cache.page('same-account','browse:'+i,
+    ()=>({items:[{title:'Movie '+i}],total:400}));
+  assert.equal(cache.memory.size,400);
+  const reused=await cache.page('same-account','browse:0',()=>({items:[],total:0}));
+  assert.equal(reused.cached,true);
+  assert.equal(reused.value.items[0].title,'Movie 0');
+});
+
+test('catalog memory eviction keeps first page before deep-scrolled pages', async () => {
+  const cache=new PersistentCatalogCache({indexedDB:null,memoryBytes:256});
+  await cache.page('same-account','browse:0',()=>({items:['landing'],total:2000}),
+    {priority:true});
+  for(let i=1;i<200;i++)await cache.page('same-account','browse:'+i,
+    ()=>({items:['scrolled-'+i],total:2000}));
+  const first=await cache.page('same-account','browse:0',
+    ()=>({items:[],total:0}),{priority:true});
+  assert.equal(first.cached,true);
+  assert.equal(first.value.items[0],'landing');
+  assert.ok(cache.memoryBytes<=256);
+});
