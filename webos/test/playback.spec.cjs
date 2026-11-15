@@ -1,7 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
@@ -16,6 +16,9 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
+    if (url.pathname.endsWith('/indexes/sd'))
+      return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
+        : route.fulfill({status:404,body:''});
     if(url.pathname==='/video.webm' || url.pathname.endsWith('/start.m3u8')) {
       const match=/bytes=(\d+)-(\d*)/.exec(route.request().headers().range||'');
       if(match) {const start=+match[1],end=match[2]?+match[2]:video.length-1;
@@ -34,6 +37,20 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
   await expect.poll(()=>events.length).toBeGreaterThan(0);
   return {calls,events};
+}
+function buildBif(image) {
+  const count=2, tableEnd=64+(count+1)*8;
+  const bytes=Buffer.alloc(tableEnd+2*image.length);
+  Buffer.from([0x89,0x42,0x49,0x46,0x0d,0x0a,0x1a,0x0a]).copy(bytes);
+  bytes.writeUInt32LE(count,12);bytes.writeUInt32LE(1000,16);
+  for(let i=0;i<count;i++) {
+    bytes.writeUInt32LE(i*10,64+i*8);
+    bytes.writeUInt32LE(tableEnd+i*image.length,64+i*8+4);
+    image.copy(bytes,tableEnd+i*image.length);
+  }
+  bytes.writeUInt32LE(0xffffffff,64+count*8);
+  bytes.writeUInt32LE(bytes.length,64+count*8+4);
+  return bytes;
 }
 async function simulatePlaybackStarvation(page) {
   await page.locator('video').evaluate(video => {
@@ -370,6 +387,20 @@ test('remote focus can scrub player timeline independently of playback controls'
  await expect(page.locator('#player')).toBeVisible();
 });
 
+test('Plex BIF thumbnails appear over the timeline during remote seeking',async({page})=>{
+ const image=await readFile(path.join(__dirname,'../public/icon.png'));
+ const {calls}=await setup(page,{},undefined,[],{},null,buildBif(image));
+ await expect.poll(()=>calls.some(url=>url.pathname.endsWith('/indexes/sd'))).toBe(true);
+ await page.keyboard.press('Escape');
+ await page.keyboard.press('ArrowRight');
+ const preview=page.locator('.seek-preview');
+ await expect(preview).toBeVisible();
+ await expect(preview.locator('img')).toHaveAttribute('src',/^blob:/);
+ await expect.poll(()=>preview.locator('img').evaluate(img=>img.naturalWidth)).toBeGreaterThan(0);
+ await page.keyboard.press('Enter');
+ await expect(preview).toBeHidden();
+});
+
 test('upgrade clears a title-only saved stop and sends ID-only current playback',async({page})=>{
   const {events,calls}=await setup(page,{},undefined,[{id:'legacy',body:{
     movie:{ids:{},title:'Previously rejected film',year:2024},progress:85}}]);
@@ -411,6 +442,31 @@ test('remote seeks in hidden mode and center commits preview then dismisses cont
   await expect(page.locator('.controls')).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
   await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime)).toBeGreaterThanOrEqual(next-2);
+});
+test('leaving a timeline preview for Stop restores normal transport arrows',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('slider',{name:'Seek playback'})).toBeFocused();
+  await expect(page.locator('.seek-preview')).toBeVisible();
+  const stop=page.getByRole('button',{name:'Stop',exact:true});
+  await stop.focus();
+  await expect(page.locator('.seek-preview')).toBeHidden();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
+});
+test('refocusing transport during committed-seek buffering cancels deferred chrome hiding',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#player .controls')).toBeHidden();
+  await page.keyboard.press('ArrowUp');
+  const stop=page.getByRole('button',{name:'Stop',exact:true});
+  await stop.focus();
+  await page.locator('video').dispatchEvent('playing');
+  await expect(stop).toBeFocused();
+  await expect(page.locator('#player .controls')).toBeVisible();
 });
 test('buffering spinner takes over for waiting and clears on playback',async({page})=>{
   await setup(page);
@@ -540,6 +596,51 @@ test('TV skip marker gains focus only once its floating button is visible', asyn
   await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeFocused();
   await expect(page.locator('#player .controls')).toBeVisible();
+});
+
+test('skip prompt sits above the complete transport chrome, clear of the seekbar',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.locator('video').evaluate(video=>{
+    video.currentTime=5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  const placement=await page.evaluate(()=>({
+    skip:document.querySelector('.player-skip').getBoundingClientRect().bottom,
+    chrome:document.querySelector('#player .controls').getBoundingClientRect().top,
+    timeline:document.querySelector('.timeline-track').getBoundingClientRect().top
+  }));
+  expect(placement.skip).toBeLessThan(placement.chrome-10);
+  expect(placement.skip).toBeLessThan(placement.timeline);
+});
+
+test('controls keep Stop focused through intro-skip buffering and arrow navigation',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.locator('video').evaluate(video=>{
+    window.PalmSystem={};video.currentTime=5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeFocused();
+  await page.keyboard.press('Enter');
+  const stop=page.getByRole('button',{name:'Stop',exact:true});
+  await stop.focus();
+  await simulatePlaybackStarvation(page);
+  await page.locator('video').dispatchEvent('playing');
+  await expect(stop).toBeFocused();
+  // Some LG decoders remove DOM focus while seeking. Restore the transport
+  // control the user last selected, rather than blindly focusing Pause.
+  await page.evaluate(()=>document.activeElement.blur());
+  await page.locator('video').dispatchEvent('playing');
+  await expect(stop).toBeFocused();
+  // The five-second inactivity timer must not evict a focused control.
+  await page.waitForTimeout(5200);
+  await expect(stop).toBeFocused();
+  await expect(page.locator('#player .controls')).toBeVisible();
+  const before=await page.locator('video').evaluate(video=>video.currentTime);
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
+  expect(await page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(before+2);
 });
 
 test('LG OK skips the newly focused intro without opening player chrome',async({page})=>{
