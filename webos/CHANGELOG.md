@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.8.0 — Chapter controls and one-press intro skipping
+
+- Follow Plezy's chapter sheet: mark and initially focus the chapter currently playing, show title and timestamp on separate lines, and display chapter thumbnails supplied by Plex.
+- Show chapter boundaries on the timeline and provide previous/next chapter transport actions, including Plezy's three-second previous-chapter restart rule and remote media-skip key behavior.
+- Automatically focus the floating Skip Intro/Skip Credits button when a marker appears during playback on webOS, including when the first frame precedes the decoder's `playing` event. OK skips immediately; an open chapter/track sheet retains its focus.
+- Keep existing Plex and Jellyfin marker precedence, chapter-title fallback, auto-skip countdown, and dismissal semantics. Add model and browser regressions.
+
 ## 1.7.1 — Icon-only episode menus and persistent track sheets
 
 - Show only the three-dot SVG on season episode overflow buttons, retaining the per-episode accessible name without rendering “More options” behind the row.
