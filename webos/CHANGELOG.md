@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.5.8 — Restore horizontal shelf position on Back
+
+- Preserve the individual Home and recommended shelf scroll positions when opening and returning from a detail page, along with the existing poster focus and vertical position.
+- Restore offsets for retained DOM snapshots and after refreshed shelves are rebuilt. Match shelves by heading to avoid mixing up reordered rows.
+- Add a browser regression for returning from an offscreen carousel item.
+
 ## 1.5.7 — Keep fast library scrolling populated
 
 Load the visible sparse range directly in either direction, display scrolling cards independently of artwork decoding, and start adjacent metadata prefetch at least three rows ahead. Preserve the current scroll position when delayed requests complete.

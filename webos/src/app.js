@@ -537,9 +537,33 @@ function clearNavigationHistory() {
   rootSnapshots.forEach(releaseSnapshot);
   rootSnapshots.clear();
 }
+// A detached DOM shelf can lose scrollLeft when reattached (notably on LG's
+// Chromium 53). Native HubSection retains a ScrollController per shelf, so
+// persist the offsets alongside the route's vertical scroll and focus.
+function captureShelfScrolls() {
+  return Array.from(main.querySelectorAll('.shelf')).map(section => ({
+    title: (section.querySelector('h2') || {}).textContent || '',
+    left: (section.querySelector('.cards') || {}).scrollLeft || 0
+  }));
+}
+function restoreShelfScrolls(saved) {
+  if (!saved || !saved.length) return;
+  // Match by heading instead of row index when Home refreshes and reorders
+  // hubs. Consume duplicate headings in order so each row stays independent.
+  const pending = saved.slice();
+  Array.from(main.querySelectorAll('.shelf')).forEach(section => {
+    const row = section.querySelector('.cards');
+    if (!row) return;
+    const heading = (section.querySelector('h2') || {}).textContent || '';
+    const index = pending.findIndex(position => position.title === heading);
+    if (index < 0) return;
+    row.scrollLeft = pending.splice(index, 1)[0].left;
+  });
+}
 function capturePage(previousPaneFocus = null) {
   const snapshot = document.createDocumentFragment();
   const scroll = main.scrollTop;
+  const shelfScrolls = captureShelfScrolls();
   const remembered = previousPaneFocus && previousPaneFocus.isConnected &&
     main.contains(previousPaneFocus) ? previousPaneFocus : null;
   const focused = main.contains(document.activeElement) ?
@@ -549,7 +573,7 @@ function capturePage(previousPaneFocus = null) {
   forEachPagedGrid(main, node => node._suspendCatalog());
   main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
   while (main.firstChild) snapshot.appendChild(main.firstChild);
-  return {route:{...route,scroll,focus:focused},snapshot,sourceApi:api,alphabet,
+  return {route:{...route,scroll,focus:focused,shelfScrolls},snapshot,sourceApi:api,alphabet,
     catalogGeneration:catalogCache.generation};
 }
 function cacheRootPage(entry) {
@@ -637,6 +661,7 @@ function restoreRootPage(entry) {
   main.textContent = '';
   main.appendChild(entry.snapshot);
   main.scrollTop = route.scroll || 0;
+  restoreShelfScrolls(route.shelfScrolls);
   main.classList.toggle('has-alpha-bar', !!entry.alphabet);
   navigation();
   const libraryTabs = main.querySelector('.library-tabs');
@@ -780,6 +805,7 @@ function back() {
       forEachPagedGrid(main, node => node._resumeCatalog(revision));
       navigation();
       main.scrollTop = route.scroll || 0;
+      restoreShelfScrolls(route.shelfScrolls);
       main.classList.toggle('has-alpha-bar', !!previous.alphabet);
       if (previous.alphabet) {
         const restoredRevision = revision;
@@ -2102,6 +2128,7 @@ async function render(prepared = null) {
       // Restore the previous reading/scroll position BEFORE focusing its card.
       // Native focus scrolling must not pull a restored library back to row 1.
       main.scrollTop = route.scroll || 0;
+      restoreShelfScrolls(route.shelfScrolls);
       if (found) focusWithoutJump(found, false);
       else focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
     } else if (!(route.alphaFocus && activeAlphabet))

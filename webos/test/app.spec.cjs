@@ -353,6 +353,32 @@ test('Plex returning to the home shelf restores the activated poster focus',asyn
   await expect(page.getByRole('button',{name:'Plex Film',exact:true})).toBeFocused();
 });
 
+test('Back restores the horizontal position of the Home shelf, not only its focused poster',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',servers:[{id:'plex',kind:'plex',name:'Plex test',url:'http://plex.test',token:'token'}]
+  })));
+  const items=Array.from({length:20},(_,i)=>({ratingKey:'show'+i,title:'Show '+i,type:'show'}));
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    return route.fulfill({json:path==='/hubs'
+      ? {MediaContainer:{Hub:[{title:'Recommended shows',Metadata:items}]}}
+      : {MediaContainer:{Metadata:[items[13]]}}});
+  });
+  await page.goto('/');
+  const shelf=page.locator('main .shelf .cards');
+  await expect(shelf.locator('.card')).toHaveCount(20);
+  await shelf.locator('.card').first().focus();
+  for(let i=0;i<13;i++) await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('button',{name:'Show 13',exact:true})).toBeFocused();
+  const before=await shelf.evaluate(row=>row.scrollLeft);
+  expect(before).toBeGreaterThan(0);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading',{name:'Show 13'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button',{name:'Show 13',exact:true})).toBeFocused();
+  expect(await shelf.evaluate(row=>row.scrollLeft)).toBe(before);
+});
+
 test('Plex PIN login offers a choice when multiple servers are reachable',async({page})=>{
   await page.route('https://plex.tv/**',route=>{
     const pathname=new URL(route.request().url()).pathname;
