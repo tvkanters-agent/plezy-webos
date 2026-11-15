@@ -51,13 +51,13 @@ export function plexPlaybackNavigation(raw, settings = {}) {
     .filter(c => c && valid(c.startTimeOffset))
     .map((c, i) => ({start: Number(c.startTimeOffset) / 1000,
       end: valid(c.endTimeOffset) ? Number(c.endTimeOffset) / 1000 : null,
-      title: c.title || 'Chapter ' + (i + 1)}))
+      title: c.title || 'Chapter ' + (i + 1), thumb: c.thumb || null}))
     .filter(c => !duration || c.start < duration).sort((a, b) => a.start - b.start);
   const markers = (Array.isArray(raw.Marker) ? raw.Marker : [])
     .filter(m => m && valid(m.startTimeOffset) && valid(m.endTimeOffset))
     .map(m => ({type: m.type, start: Number(m.startTimeOffset) / 1000,
       end: Math.min(Number(m.endTimeOffset) / 1000, duration || Infinity)}));
-  return {chapters: chapters.map(c => ({start: c.start, title: c.title})),
+  return {chapters,
     markers: withChapterFallback(chapters, markers, settings)
       .filter(m => ['intro','credits'].includes(m.type)).sort((a, b) => a.start - b.start)};
 }
@@ -67,7 +67,7 @@ export function jellyfinPlaybackNavigation(raw, segments = [], settings = {}) {
   const chapters = (Array.isArray(raw.Chapters) ? raw.Chapters : [])
     .filter(c => c && valid(c.StartPositionTicks))
     .map((c, i) => ({start: Number(c.StartPositionTicks) / 10000000,
-      title: c.Name || 'Chapter ' + (i + 1)}));
+      title: c.Name || 'Chapter ' + (i + 1), thumb: c.ImagePath || null}));
   chapters.forEach((c, i) => { c.end = chapters[i + 1]?.start ?? (duration > c.start ? duration : null); });
   const items = Array.isArray(segments) ? segments : (Array.isArray(segments?.Items) ? segments.Items : []);
   const markers = items.filter(s => s && valid(s.StartTicks) && valid(s.EndTicks))
@@ -75,6 +75,6 @@ export function jellyfinPlaybackNavigation(raw, segments = [], settings = {}) {
       end: Number(s.EndTicks) / 10000000}))
     .filter(m => ['intro', 'outro', 'credits'].includes(m.type))
     .map(m => ({...m, type: m.type === 'outro' ? 'credits' : m.type}));
-  return {chapters: chapters.map(c => ({start: c.start, title: c.title})),
+  return {chapters,
     markers: withChapterFallback(chapters, markers, settings)};
 }
