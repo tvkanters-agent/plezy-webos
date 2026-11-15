@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.8.3 — Skip-prompt focus and seek cleanup
+
+- Replace the Skip Intro/Credits button's square-looking external focus outline with Plezy's filled, slightly scaled rounded focus state.
+- Keep a manually or automatically skipped marker dismissed while the video decoder still reports the old position during seeking and buffering; re-enable its prompt on an explicit user seek back into the marker.
+- Regress focus appearance and delayed media seek completion, including a subsequent manual rewind.
+
 ## 1.8.2 — Repair missing Plex intro prompts and chapter gaps
 
 - Fetch chapter and intro/credits marker metadata at playback startup, as native `PlexClient.getPlaybackExtras` does. Cached Home and episode rows can omit the markers even when Plex has them; refresh the playing session without delaying video startup.
