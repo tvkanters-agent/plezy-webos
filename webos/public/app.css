@@ -219,7 +219,7 @@ main > .collection-sections { position:relative; z-index:1; }
   background:transparent; color:#fff; padding:8px; margin-left:8px; }
 .player-secondary .transport-icon:focus { background:#fff; color:#111; outline:0; box-shadow:0 4px 14px rgba(0,0,0,.35); }
 .player-secondary .transport-icon svg { display:block; width:27px; height:27px; }
-.player-sheet { position:absolute; z-index:8; right:38px; bottom:130px; width:380px;
+.player-sheet { position:absolute; z-index:8; right:38px; bottom:130px; width:440px;
   max-height:70%; overflow-y:auto; padding:20px 24px 24px; border-radius:16px;
   background:rgba(20,21,25,.97); box-shadow:0 14px 50px rgba(0,0,0,.7); }
 .player-sheet-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
@@ -239,6 +239,17 @@ main > .collection-sections { position:relative; z-index:1; }
   font-size:17px; }
 .player-options-list button[aria-pressed="true"] { background:rgba(255,255,255,.2); }
 .player-options-list button:focus { background:#ededed; color:#121212; outline:0; }
+.player-options-list.player-track-columns { display:-webkit-flex; display:flex; flex-direction:row;
+  width:100%; }
+.player-track-column { -webkit-flex:1; flex:1; min-width:0; }
+.player-track-column + .player-track-column { margin-left:12px; }
+.player-track-column h4 { margin:2px 0 10px; font-size:16px; color:#b5b6bd; }
+.player-track-column strong, .episode-track-option strong { display:block; font-size:17px; font-weight:600; }
+.player-track-column small, .episode-track-option small { display:block; margin-top:3px;
+  font-size:13px; line-height:1.3; color:#a4a7ae; }
+.player-track-column button[aria-pressed="true"]:after { content:'✓'; float:right; }
+.player-track-column button:focus small { color:#454950; }
+.player-sheet.sheet-tracks { width:700px; }
 .player-sheet .track-controls { display:none; }
 
 /* Plezy's compact rail state + individually hidden libraries. */
@@ -350,6 +361,29 @@ nav button.active:focus, .rail-library-items button.active:focus {
 .episode-list { gap:0; }
 .episode-list > * { margin-bottom:8px; }
 .episode-row { gap:0; }
+.episode-entry { display:-webkit-flex; display:flex; align-items:center; position:relative; min-width:0; }
+.episode-entry .episode-row { -webkit-flex:1; flex:1; width:auto; min-width:0; }
+.episode-row-more { margin-left:8px; align-self:center; }
+.episode-row-more > .detail-icon { width:46px; height:46px; min-width:46px; padding:0;
+  border:0; border-radius:24px; background:rgba(72,75,85,.48); font-size:27px; }
+.episode-row-more > .detail-icon:before { content:'⋯'; }
+.episode-row-more > .detail-icon svg { display:none; }
+.episode-row-more > .detail-icon:focus { background:#ededed; color:#15171b; }
+.episode-entry .detail-more-menu { top:0; right:calc(100% + 8px); }
+.episode-entry .detail-more-menu button { min-height:46px; }
+.episode-track-dialog { left:18% !important; right:18% !important; top:16% !important;
+  max-height:72%; overflow-y:auto; }
+.episode-track-columns { display:-webkit-flex; display:flex; margin-bottom:22px; }
+.episode-track-column { -webkit-flex:1; flex:1; min-width:0; }
+.episode-track-column + .episode-track-column { margin-left:16px; }
+.episode-track-column h3 { font-size:19px; margin:0 0 8px; }
+.episode-track-option { display:block; width:100%; min-height:58px; text-align:left;
+  padding:10px 38px 10px 14px; margin-bottom:6px; position:relative;
+  border:0; border-radius:9px; background:rgba(255,255,255,.07); }
+.episode-track-option[aria-pressed="true"] { background:rgba(255,255,255,.19); }
+.episode-track-option:focus { background:#ededed; color:#111; }
+.episode-track-option:focus small { color:#454950; }
+.track-check { position:absolute; right:12px; top:12px; }
 .episode-row-info { margin-left:14px; }
 /* Artwork belongs in the details hero even when a backdrop is present. */
 .detail-backdrop + .detail > .poster { display:flex; }
