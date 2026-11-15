@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.8.4 — Recognize logo chapters as intros
+
+- Include `logo` and `logos` in the default intro-chapter regex, including labels such as "Studio Logos". This is a user-requested extension of upstream Plezy's default.
+- Preserve word boundaries, native marker precedence, the three-minute synthesized-intro limit, and custom intro patterns.
+- Cover Plex, Jellyfin and a playing video with chapters but no native intro marker.
+
 ## 1.8.3 — Skip-prompt focus and seek cleanup
 
 - Replace the Skip Intro/Credits button's square-looking external focus outline with Plezy's filled, slightly scaled rounded focus state.
