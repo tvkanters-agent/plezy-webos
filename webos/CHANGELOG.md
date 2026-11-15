@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.7.0 — Carry audio and subtitle choices across a series
+
+- Carry explicit language/track choices from the player and episode menus to other episodes of the same show, including across seasons. Resolve against each episode's source stream IDs instead of reusing IDs from another file.
+- Preserve distinct commentary audio, forced subtitle tracks, and subtitle Off. Decline ambiguous or unavailable matches and allow Plex's per-episode selection to take over, as Plezy does.
+- Fetch missing episode stream catalogs before playback so both the player menu and cross-episode carry work when a season row has only lightweight metadata.
+- Isolate choices by series and server account; latest series choice supersedes older sibling choices. Add unit and browser regression coverage.
+
 ## 1.6.0 — Episode menus and combined audio/subtitle selection
 
 - Open a combined audio/subtitle track picker from the player, with labeled source streams, Off for subtitles and current-selection indicators, following Plezy's TrackSheet.
