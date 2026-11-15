@@ -423,6 +423,15 @@ test('remote focus can scrub player timeline independently of playback controls'
  await expect(page.locator('#player')).toBeVisible();
 });
 
+test('timeline focus uses Plezy knob without a rectangular outline',async({page})=>{
+ await setup(page);
+ const slider=page.getByRole('slider',{name:'Seek playback'});
+ await slider.focus();
+ await expect(slider).toHaveCSS('outline-style','none');
+ await expect(slider).toHaveCSS('box-shadow','none');
+ await expect(slider).toHaveCSS('border-top-width','0px');
+});
+
 test('Plex BIF thumbnails appear over the timeline during remote seeking',async({page})=>{
  const image=await readFile(path.join(__dirname,'../public/icon.png'));
  const {calls}=await setup(page,{},undefined,[],{},null,buildBif(image));
@@ -433,6 +442,7 @@ test('Plex BIF thumbnails appear over the timeline during remote seeking',async(
  await expect(preview).toBeVisible();
  await expect(preview.locator('img')).toHaveAttribute('src',/^blob:/);
  await expect.poll(()=>preview.locator('img').evaluate(img=>img.naturalWidth)).toBeGreaterThan(0);
+ expect((await preview.boundingBox()).width).toBeGreaterThanOrEqual(300);
  await page.keyboard.press('Enter');
  await expect(preview).toBeHidden();
 });
@@ -649,6 +659,28 @@ test('skip prompt sits above the complete transport chrome, clear of the seekbar
   }));
   expect(placement.skip).toBeLessThan(placement.chrome-10);
   expect(placement.skip).toBeLessThan(placement.timeline);
+});
+
+test('skip prompt anchor does not alternate on repeated playback updates',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.locator('video').evaluate(video=>{
+    video.currentTime=5;video.dispatchEvent(new Event('timeupdate'));
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  const anchors=await page.evaluate(()=>{
+    const video=document.querySelector('#player video');
+    const button=document.querySelector('.player-skip');
+    const positions=[];
+    for(let i=0;i<24;i++){
+      video.dispatchEvent(new Event('timeupdate'));
+      positions.push(button.getBoundingClientRect().bottom);
+    }
+    return positions;
+  });
+  expect(new Set(anchors).size).toBe(1);
+  const chromeTop=await page.locator('#player .controls').evaluate(node=>node.getBoundingClientRect().top);
+  expect(anchors[0]).toBeLessThan(chromeTop-10);
 });
 
 test('hidden-chrome skip prompt stays under the pointer through a single click',async({page})=>{

@@ -419,6 +419,18 @@ skip prompt is positioned above the *measured* transport chrome instead of
 using a fixed bottom offset that overlaps the seekbar on different TVs. Moving
 a mouse over the floating prompt must not reveal the controls underneath it:
 that changes the prompt's anchor and can make a single click miss entirely.
+The measured offset is cached for the entire visible-chrome state: its
+render routine must not clear the offset on subsequent `timeupdate` events.
+Only an actual chrome hide, prompt dismissal, or viewport resize invalidates
+that measurement. Browser tests dispatch repeated playback events to catch
+alternation between the correct offset and the bottom of the screen.
+
+`TimelineSlider` focuses its range via `_FocusKnobThumbShape` and
+`paintPlayerFocusKnob`: a solid white disc of 9px radius with a shadow, not a
+border around the slider. The webOS input's focused WebKit thumb follows that
+shape, with a thin white handle otherwise. The user requested BIF tooltips
+roughly twice the 160px upstream size; they are now 320px wide on TV, capped
+to the track width for unusually narrow layouts.
 
 ### Viewport-bounded artwork and incremental catalog updates
 
