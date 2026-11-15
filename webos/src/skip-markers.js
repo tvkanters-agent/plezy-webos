@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Port of MediaMarker, PlaybackExtras.withChapterFallback and
 // jellyfinPlaybackExtrasFromRaw / jellyfinMediaSegmentsToMarkers.
-export const DEFAULT_INTRO_PATTERN = String.raw`(?:^|\b)(?:intro(?:duction)?|opening)(?:\b|$)|^op(?:\s?\d+)?$`;
+export const DEFAULT_INTRO_PATTERN = String.raw`(?:^|\b)(?:intro(?:duction)?|opening|logos?)(?:\b|$)|^op(?:\s?\d+)?$`;
 export const DEFAULT_CREDITS_PATTERN = String.raw`(?:^|\b)(?:outro|credits?|ending)(?:\b|$)|^ed(?:\s?\d+)?$`;
 
 function pattern(source, fallback) {
@@ -33,16 +33,29 @@ export function withChapterFallback(chapters, markers, settings = {}) {
     if (type === 'credits' && chapter.start < runtime * .75) return;
     synthetic.push({type, start: chapter.start, end});
   });
+  // Plex/Jellyfin may split the logos and opening into separate consecutive
+  // chapters. They are one intro for the viewer: a single skip must pass both.
+  // Accept sub-frame rounding gaps but never bridge an actual content chapter
+  // or bypass Plezy's three-minute safety cap for chapter-derived intros.
+  const joined = [];
+  for (const marker of synthetic) {
+    const previous = joined[joined.length - 1];
+    if (marker.type === 'intro' && previous?.type === 'intro' &&
+        marker.start >= previous.start && marker.start <= previous.end + .25 &&
+        Math.max(previous.end, marker.end) - previous.start <= 180) {
+      previous.end = Math.max(previous.end, marker.end);
+    } else joined.push(marker);
+  }
   const native = markers.filter(m => m && valid(m.start) && valid(m.end) && m.end > m.start)
     .map(m => ({...m, type: m.type === 'intro' || m.type === 'credits' ? m.type
       : markerType(String(m.type || ''), intro, credits) || m.type}));
-  if (!native.length) return synthetic;
-  if (!synthetic.length) return native;
-  const syntheticTypes = new Set(synthetic.map(m => m.type));
+  if (!native.length) return joined;
+  if (!joined.length) return native;
+  const syntheticTypes = new Set(joined.map(m => m.type));
   const nativeTypes = new Set(native.map(m => m.type));
   const merged = settings.forceSkipMarkerFallback
-    ? native.filter(m => !syntheticTypes.has(m.type)).concat(synthetic)
-    : native.concat(synthetic.filter(m => !nativeTypes.has(m.type)));
+    ? native.filter(m => !syntheticTypes.has(m.type)).concat(joined)
+    : native.concat(joined.filter(m => !nativeTypes.has(m.type)));
   return merged.sort((a, b) => a.start - b.start);
 }
 export function plexPlaybackNavigation(raw, settings = {}) {
