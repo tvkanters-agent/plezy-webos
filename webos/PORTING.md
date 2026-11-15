@@ -351,6 +351,15 @@ without synthesizing a DOM click on a programmatically focused button, so the
 player handles that key explicitly. Browser tests simulate TV detection and
 keyboard focus; physical LG remote and decoder timing remain unverified.
 
+Native `SkipMarkerButton` uses `FocusableWrapper(useBackgroundFocus: true)`
+with a 1.02x focus scale and 8px corner radius. Its HTML counterpart must not
+use an external CSS outline: older LG Chromium draws an ugly square even on a
+rounded button. The prompt fills brighter and scales slightly on focus.
+After activating a skip, LG can continue reporting a pre-seek position during
+buffering. The player keeps that exact marker suppressed until the viewer
+explicitly seeks again or playback resets, rather than reinstating its prompt
+while the native decoder catches up. This does not suppress other markers.
+
 ### Viewport-bounded artwork and incremental catalog updates
 
 Native LibraryBrowseTab uses lazily built sliver rows. Since Chromium 53 does

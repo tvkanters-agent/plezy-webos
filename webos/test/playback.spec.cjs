@@ -533,6 +533,50 @@ test('LG OK skips the newly focused intro without opening player chrome',async({
   await expect(skip).toBeHidden();
 });
 
+test('focused skip prompt has no square outline and stays hidden during a delayed seek',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000},
+    {type:'credits',startTimeOffset:30000,endTimeOffset:40000}]});
+  await page.evaluate(()=>{
+    window.PalmSystem={};
+    const video=document.querySelector('#player video');
+    video.currentTime=5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  await expect(skip).toBeFocused();
+  await expect(skip).toHaveCSS('outline-style','none');
+  await expect(skip).toHaveCSS('border-radius','8px');
+  await page.locator('video').evaluate(video=>{
+    // LG can keep reporting the pre-seek timestamp during buffering. Emulate
+    // that window by holding the media clock after currentTime is assigned.
+    const before=video.currentTime;
+    Object.defineProperty(video,'currentTime',{
+      configurable:true,get(){return before;},set(value){window.skipSeekTarget=value;}
+    });
+  });
+  await page.keyboard.press('Enter');
+  await expect(skip).toBeHidden();
+  expect(await page.evaluate(()=>window.skipSeekTarget)).toBeGreaterThanOrEqual(15);
+  await page.locator('video').dispatchEvent('timeupdate');
+  await page.locator('video').dispatchEvent('playing');
+  await expect(skip).toBeHidden();
+  // Suppressing one activated marker must not suppress a later, distinct one.
+  await page.locator('video').evaluate(video=>{
+    delete video.currentTime;
+    video.currentTime=32;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await expect(page.getByRole('button',{name:'Skip credits'})).toBeVisible();
+  // An explicit rewind is a new user choice and should offer Skip Intro again.
+  await page.locator('video').evaluate(video=>{
+    const slider=document.querySelector('[data-action="seek"]');
+    slider.value='5';
+    slider.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await expect(skip).toBeVisible();
+});
+
 test('an intro appearing behind the chapter sheet does not steal remote focus',async({page})=>{
   await setup(page,{Chapter:[{title:'Opening',startTimeOffset:0}],
     Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
