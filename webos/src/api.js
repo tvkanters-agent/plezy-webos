@@ -85,15 +85,22 @@ export function mediaSourceTracks(item, mediaIndex = 0) {
     return {
       audio: streams.filter(s => Number(s.streamType) === 2).map((s, i) =>
         ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
+          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle || s.extendedDisplayTitle,
+          codec:s.codec, channels:s.channels,
           ...plexTrackLabel(s, 'audio', i)})),
       subtitles: streams.filter(s => Number(s.streamType) === 3).map((s, i) =>
         ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
+          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle || s.extendedDisplayTitle,
+          codec:s.codec, forced:s.forced === true || s.forced === 1 || s.forced === '1',
+          external:!!s.key,
           ...plexTrackLabel(s, 'subtitle', i)}))
     };
   }
   const source = (raw.MediaSources || [])[mediaIndex];
   const streams = source?.MediaStreams || raw.MediaStreams || [];
   const make = (s, i) => ({id:s.Index, selected:!!s.IsDefault || !!s.IsSelected,
+    language:s.Language, title:s.Title, displayTitle:s.DisplayTitle,
+    codec:s.Codec, channels:s.Channels, forced:!!s.IsForced, external:!!s.IsExternal,
     ...plexTrackLabel({language:s.Language, title:s.Title,
       displayTitle:s.DisplayTitle, codec:s.Codec, channels:s.Channels,
       forced:s.IsForced}, s.Type === 'Audio' ? 'audio' : 'subtitle', i)});

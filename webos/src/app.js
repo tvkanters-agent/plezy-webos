@@ -3,6 +3,7 @@ import './compat.js';
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
 import {client, Jellyfin, Plex, mediaSourceTracks, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
+import {EpisodeTrackPreferences} from './episode-track-preferences.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
@@ -37,14 +38,14 @@ const rootSnapshots = new Map();
 let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
 let episodeTrackReturnFocus = null;
 let episodeTrackGeneration = 0;
-const episodeTrackChoices = new Map();
-function episodeTrackKey(item, index) { return item.id + ':' + index; }
+const episodeTrackChoices = new EpisodeTrackPreferences();
 let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
 }, message => notify(message));
 let playbackReturn = null;
-const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker, () => state);
+const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker, () => state,
+  (item, mediaIndex, kind, track) => episodeTrackChoices.record(item, mediaIndex, kind, track));
 // Plezy keeps the detail route beneath playback. Never clear/refetch that
 // page after hiding the player: it flashes blank and discards remote focus.
 function playbackClosed() {
@@ -470,7 +471,6 @@ function closeEpisodeTrackSheet() {
 async function showEpisodeTrackSheet(item) {
   const sourceApi = api, openedAt = revision, generation = ++episodeTrackGeneration;
   const mediaIndex = route.type === 'detail' ? route.mediaIndex || 0 : 0;
-  const preferenceKey = episodeTrackKey(item, mediaIndex);
   episodeTrackReturnFocus = document.activeElement;
   dialog.textContent = '';
   dialog.classList.add('episode-track-dialog');
@@ -482,16 +482,14 @@ async function showEpisodeTrackSheet(item) {
   dialog.hidden = false;
   focusWithoutJump(close, false);
   try {
-    const isComplete = source => source.raw?.Media?.[mediaIndex]?.Part?.[0]?.Stream ||
-      source.raw?.MediaSources?.[mediaIndex]?.MediaStreams || source.raw?.MediaStreams;
     // Plex listing rows commonly omit Stream. Never infer "no tracks" from
     // a season's lightweight children response.
-    const detailed = isComplete(item) ? item : await sourceApi.detail(item.id, 'episode');
+    const detailed = episodeStreamsComplete(item, mediaIndex) ? item : await sourceApi.detail(item.id, 'episode');
     if (api !== sourceApi || revision !== openedAt || generation !== episodeTrackGeneration || dialog.hidden ||
         !episodeTrackReturnFocus) return;
     if (detailed !== item) Object.assign(item, detailed);
     const tracks = mediaSourceTracks(detailed, mediaIndex);
-    const prior = episodeTrackChoices.get(preferenceKey) || {};
+    const prior = episodeTrackChoices.resolve(detailed, mediaIndex, tracks);
     columns.textContent = '';
     const selected = {
       audio: prior.audio !== undefined ? prior.audio :
@@ -505,8 +503,7 @@ async function showEpisodeTrackSheet(item) {
       tracksForKind.forEach(track => {
         const label = track.primary || track.label;
         const choice = button('', () => {
-          episodeTrackChoices.set(preferenceKey,
-            {...episodeTrackChoices.get(preferenceKey),[kind]:Number(track.id)});
+          episodeTrackChoices.record(detailed, mediaIndex, kind, track);
           closeEpisodeTrackSheet();
         }, 'episode-track-option');
         choice.setAttribute('aria-label', label);
@@ -2261,15 +2258,33 @@ async function render(prepared = null) {
       focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
   }
 }
-function play(item, start, transcode = false) {
+function episodeStreamsComplete(item, mediaIndex) {
+  return !!(item.raw?.Media?.[mediaIndex]?.Part?.[0]?.Stream ||
+    item.raw?.MediaSources?.[mediaIndex]?.MediaStreams || item.raw?.MediaStreams);
+}
+async function play(item, start, transcode = false) {
+  const sourceApi = api, sourceRoute = route, mediaIndex = route.mediaIndex || 0;
+  // Stream IDs are per-episode. Load the target episode's real catalog before
+  // carrying the player's semantic audio/subtitle choice from its siblings.
+  if (String(item.type).toLowerCase() === 'episode' && !episodeStreamsComplete(item, mediaIndex)) {
+    try {
+      const detailed = await sourceApi.detail(item.id, 'episode');
+      if (sourceApi !== api || sourceRoute !== route) return;
+      Object.assign(item, detailed);
+    } catch (error) {
+      // Metadata lookups should not prevent normal playback when offline.
+      if (sourceApi !== api || sourceRoute !== route) return;
+    }
+  }
+  const tracks = mediaSourceTracks(item, mediaIndex);
   playbackReturn = {
     route, api, item,
     focus: main.contains(document.activeElement) ? document.activeElement : null
   };
-  return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0,
+  return player.open(api, item, {start, mediaIndex,
     transcode: transcode || state.quality === 'transcode',
-    ...(item.type === 'episode' || item.type === 'Episode'
-      ? episodeTrackChoices.get(episodeTrackKey(item, route.mediaIndex || 0)) || {} : {})});
+    ...(String(item.type).toLowerCase() === 'episode'
+      ? episodeTrackChoices.resolve(item, mediaIndex, tracks) : {})});
 }
 function settings() {
   title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');

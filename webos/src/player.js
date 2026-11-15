@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {clamp, nextFocus, time} from './core.js';
 export class Player {
-  constructor(root, notify, onClose, tracker = null, preferences = () => ({})) {
+  constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
     this.preferences = preferences;
+    this.onTrackChoice = onTrackChoice;
     this.skipButton = root.querySelector('[data-action="skip"]');
     this.marker = null; this.hasFirstFrame = false;
     this.skipDismissed = false; this.skipTimer = null; this.skipDismissTimer = null;
@@ -119,7 +120,14 @@ export class Player {
     }
     root.querySelector('[data-action="close-options"]').onclick = () => this.closeSheet();
     for (const kind of ['audio', 'subtitle']) {
-      root.querySelector('[data-track="' + kind + '"]').onchange = event => this.reopen({[kind]: Number(event.target.value), transcode: true});
+      root.querySelector('[data-track="' + kind + '"]').onchange = event => {
+        const id = Number(event.target.value);
+        const track = (this.session?.[kind === 'audio' ? 'audio' : 'subtitles'] || [])
+          .find(entry => Number(entry.id) === id);
+        if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
+          this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
+        return this.reopen({[kind]:id, transcode:true});
+      };
     }
     root.addEventListener('mousemove', () => this.reveal());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
