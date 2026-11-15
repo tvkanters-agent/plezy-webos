@@ -387,6 +387,25 @@ buffering. The player keeps that exact marker suppressed until the viewer
 explicitly seeks again or playback resets, rather than reinstating its prompt
 while the native decoder catches up. This does not suppress other markers.
 
+Native `TimelineSlider` gets Plex scrub frames from
+`BifThumbnailService` (`/library/parts/{id}/indexes/sd`), using its indexed
+JPEGs in a 160px image tooltip above the timeline. The webOS range slider now
+uses the same BIF timestamp lookup, capped at the upstream 50 MiB TV budget,
+with an ordinary time tooltip if the server has no index. Frame URLs are
+revoked on scrub exit and source changes. Its use of a separate thumbnail
+source avoids depending on LG's video decoder producing a paused seek frame.
+Jellyfin Trickplay remains outside this Plex-focused port; full TV hardware
+verification is still needed.
+
+Unlike Flutter's persistent focus nodes, HTML video decoding on webOS may
+blur a transport control to the document body. The player tracks the last
+selected transport control and restores it on `playing` without taking focus
+from track/chapter sheets. It keeps chrome visible while the user is focused
+in that strip, and Left/Right can seek only from the slider or video surface.
+Moving focus off the remote timeline finalizes its preview state. The floating
+skip prompt is positioned above the *measured* transport chrome instead of
+using a fixed bottom offset that overlaps the seekbar on different TVs.
+
 ### Viewport-bounded artwork and incremental catalog updates
 
 Native LibraryBrowseTab uses lazily built sliver rows. Since Chromium 53 does
