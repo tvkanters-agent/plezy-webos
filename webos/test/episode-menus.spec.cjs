@@ -61,6 +61,10 @@ test('season episode overflow changes watched state without starting playback',a
   const row=page.locator('.episode-entry');
   await expect(row).toHaveCount(1);
   const more=row.getByRole('button',{name:'More options for 1. The First Episode'});
+  // EpisodeCard uses an icon-only overflow action, not a visible label
+  // protruding from underneath the ellipsis disc.
+  await expect(more).toHaveText('');
+  await expect(more.locator('svg')).toHaveCount(1);
   await more.click();
   await expect(page.getByRole('button',{name:'Mark as Watched'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Mark as Unwatched'})).toBeVisible();
@@ -85,14 +89,16 @@ test('season episode track choices load full metadata and reach Plex playback st
   await expect(page.locator('.episode-track-columns .episode-track-column')).toHaveCount(2);
   await expect(page.getByRole('button',{name:'English'}).first()).toHaveAttribute('aria-pressed','true');
   await page.locator('.episode-track-column').first().getByRole('button',{name:'French'}).click();
-  await expect(page.locator('#dialog')).toBeHidden();
-  await expect(more).toBeFocused();
-  await more.click();
-  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await expect(page.locator('#dialog')).toBeVisible();
   await expect(page.locator('.episode-track-column').first().getByRole('button',{name:'French'}))
     .toHaveAttribute('aria-pressed','true');
   await page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}).click();
+  await expect(page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}))
+    .toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#dialog')).toBeVisible();
   expect(calls.some(call=>call.path==='/library/parts/part')).toBe(false);
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
   await page.locator('.episode-row').click();
   await expect.poll(()=>calls.some(call=>{
     const params=new URLSearchParams(call.params);
@@ -121,9 +127,8 @@ test('language choices from an episode menu carry into another episode with diff
   await more.click();
   await page.getByRole('button',{name:'Audio & Subtitles'}).click();
   await page.locator('.episode-track-column').first().getByRole('button',{name:'French'}).click();
-  await more.click();
-  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
   await page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}).click();
+  await page.keyboard.press('Escape');
   const moreSecond=page.getByRole('button',{name:'More options for 2. The Second Episode'});
   await moreSecond.click();
   await page.getByRole('button',{name:'Audio & Subtitles'}).click();
@@ -159,6 +164,8 @@ test('subtitle Off carries between episodes and player audio changes update the 
   await expect(page.locator('.episode-track-column').first().getByRole('button',{name:'French'}))
     .toHaveAttribute('aria-pressed','true');
   await page.locator('.episode-track-column').last().getByRole('button',{name:'Off'}).click();
+  await expect(page.locator('#dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.locator('.episode-row').first().click();
   await expect.poll(()=>calls.some(call=>{
     const params=new URLSearchParams(call.params);

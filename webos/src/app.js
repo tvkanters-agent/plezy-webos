@@ -409,11 +409,11 @@ function showRatingSheet(item, client, onSaved=()=>{}) {
   // otherwise steals focus after the user selects the Simkl row.
   focusWithoutJump(firstRow,false);
 }
-function detailMoreOptions(options) {
+function detailMoreOptions(options, iconOnly = false) {
   const group = el('div', undefined, 'detail-more');
   const menu = el('div', undefined, 'detail-more-menu');
   menu.hidden = true;
-  const trigger = detailButton('More options', () => {
+  const trigger = detailButton(iconOnly ? '' : 'More options', () => {
     if (!menu.hidden) { closeDetailMenu(); return; }
     closeDetailMenu();
     menu.textContent = '';
@@ -427,6 +427,10 @@ function detailMoreOptions(options) {
     detailMenu = {menu, trigger};
     focusWithoutJump(menu.querySelector('button'), false);
   }, 'more', 'detail-icon');
+  if (iconOnly) {
+    trigger.setAttribute('aria-label', 'More options');
+    trigger.setAttribute('title', 'More options');
+  }
   trigger.setAttribute('aria-haspopup', 'true');
   trigger.setAttribute('aria-expanded', 'false');
   group.append(trigger, menu);
@@ -504,7 +508,15 @@ async function showEpisodeTrackSheet(item) {
         const label = track.primary || track.label;
         const choice = button('', () => {
           episodeTrackChoices.record(detailed, mediaIndex, kind, track);
-          closeEpisodeTrackSheet();
+          // Keep both columns open so audio and subtitle can be chosen in one
+          // visit. Update only this column's tick and pressed state.
+          Array.from(column.querySelectorAll('button')).forEach(option => {
+            const active = option === choice;
+            option.setAttribute('aria-pressed', String(active));
+            const tick = option.querySelector('.track-check');
+            if (tick) tick.remove();
+            if (active) option.append(el('span', '✓', 'track-check'));
+          });
         }, 'episode-track-option');
         choice.setAttribute('aria-label', label);
         choice.setAttribute('aria-pressed', String(String(selected[kind]) === String(track.id)));
@@ -1254,7 +1266,7 @@ function episodeCard(item) {
       progress.max=item.duration;progress.value=item.resume;image.append(progress);
     }
     entry._catalogSignature=JSON.stringify(item);
-  }));
+  }), true);
   more.classList.add('episode-row-more');
   more.querySelector('.detail-icon').setAttribute('aria-label','More options for '+label);
   more.querySelector('.detail-icon').setAttribute('title','More options for '+label);

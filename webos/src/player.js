@@ -126,7 +126,8 @@ export class Player {
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
-        return this.reopen({[kind]:id, transcode:true});
+        return this.reopen({[kind]:id, transcode:true},
+          !this.sheet.hidden && this.openSheetAction === 'tracks-options' ? {kind, id} : null);
       };
     }
     root.addEventListener('mousemove', () => this.reveal());
@@ -239,7 +240,7 @@ export class Player {
     this.skipDismissed = true;
     this.renderSkipMarker();
   }
-  openSheet(action) {
+  openSheet(action, preferredTrack = null) {
     const kind = {options:'settings', 'tracks-options':'tracks',
       'chapter-options':'chapter'}[action];
     this.openSheetAction = action;
@@ -279,6 +280,8 @@ export class Player {
           const control = document.createElement('button');
           control.setAttribute('aria-label', track.label || track.primary);
           control.setAttribute('aria-pressed', String(select.value === String(track.id)));
+          control.dataset.trackKind = column.kind;
+          control.dataset.trackId = String(track.id);
           const primary = document.createElement('strong');
           primary.textContent = track.primary || track.label;
           control.appendChild(primary);
@@ -287,9 +290,10 @@ export class Player {
             control.appendChild(secondary);
           }
           control.onclick = () => {
-            this.closeSheet();
             if (select.value === String(track.id)) return;
             select.value = String(track.id);
+            Array.from(wrapper.querySelectorAll('button')).forEach(option =>
+              option.setAttribute('aria-pressed', String(option === control)));
             select.dispatchEvent(new Event('change'));
           };
           wrapper.appendChild(control);
@@ -312,7 +316,10 @@ export class Player {
     if (!list.querySelector('button')) list.textContent = 'No tracks available.';
     this.sheet.hidden = false;
     this.reveal();
-    const first = list.querySelector('button[aria-pressed="true"]') || list.querySelector('button');
+    const restored = preferredTrack && Array.from(list.querySelectorAll('button')).find(button =>
+      button.dataset.trackKind === preferredTrack.kind &&
+      button.dataset.trackId === String(preferredTrack.id));
+    const first = restored || list.querySelector('button[aria-pressed="true"]') || list.querySelector('button');
     if (first) first.focus();
     else this.sheet.querySelector('[data-action="close-options"]').focus();
   }
@@ -321,7 +328,7 @@ export class Player {
     this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
-  async open(api, item, options = {}, preserveTracking = false) {
+  async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null) {
     const tracking = preserveTracking ? this.playbackTracking : null;
     this.closing = false;
     const cleanup = this.release(false, preserveTracking);
@@ -338,12 +345,12 @@ export class Player {
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
-    this.sheet.hidden = true;
+    if (!trackSheetFocus) this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
     this.clearSkipMarker(); this.hasFirstFrame = false;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
-    this.root.querySelector('[data-action="pause"]').focus();
+    if (!trackSheetFocus) this.root.querySelector('[data-action="pause"]').focus();
     let session;
     try {
       session = await api.playback(item, {...options, skipSettings: this.preferences()});
@@ -374,6 +381,7 @@ export class Player {
       }
       this.root.querySelector('[data-action="tracks-options"]').hidden =
         session.audio.length <= 1 && session.subtitles.length === 0;
+      if (trackSheetFocus) this.openSheet('tracks-options', trackSheetFocus);
       const chapters = this.root.querySelector('[data-chapter]'); chapters.textContent = '';
       const heading = document.createElement('option'); heading.value = ''; heading.textContent = 'Jump to chapter'; chapters.append(heading);
       (session.chapters || []).forEach(chapter => {
@@ -538,12 +546,21 @@ export class Player {
     this.closing = false;
     this.onClose();
   }
-  async reopen(changes) {
+  async reopen(changes, trackSheetFocus = null) {
     if (!this.item || this.closing) return;
+    // Decoder fallback can restart playback again after a track change.
+    // Preserve the open sheet and the remote's focused track through that
+    // secondary restart too, even when the fallback itself chose no track.
+    if (!trackSheetFocus && !this.sheet.hidden && this.openSheetAction === 'tracks-options') {
+      const focused = document.activeElement;
+      if (focused?.dataset?.trackKind)
+        trackSheetFocus = {kind:focused.dataset.trackKind, id:focused.dataset.trackId};
+      else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
+    }
     const options = {...this.options, ...changes, start: changes.start ?? this.position()};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
-    return this.open(this.api, this.item, options, true);
+    return this.open(this.api, this.item, options, true, trackSheetFocus);
   }
   async failed() {
     if (!this.session || this.recovering) return;
