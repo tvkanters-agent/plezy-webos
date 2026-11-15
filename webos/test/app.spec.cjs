@@ -49,6 +49,52 @@ async function mockServer(page,{saved=true,failed=false}={}){
     await route.fulfill({json:data});
   });return calls;
 }
+async function mockPlexEpisodeWatch(page) {
+  await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
+    deviceId:'device', active:'plex', servers:[{
+      id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'
+    }]
+  })));
+  const calls=[];
+  let watched=false;
+  const episode=()=>({ratingKey:'episode',type:'episode',title:'Episode One',
+    grandparentRatingKey:'show',parentRatingKey:'season',parentIndex:1,index:1,
+    viewCount:watched ? 1 : 0,viewOffset:watched ? 0 : 45000,duration:120000,
+    Media:[{videoResolution:'1080p',Part:[{id:'part',key:'/video.mp4'}]}]});
+  await page.route('http://plex.test/**', async route => {
+    const url=new URL(route.request().url());calls.push(url.pathname);
+    if(url.pathname==='/:/scrobble' || url.pathname==='/:/unscrobble') {
+      await new Promise(resolve=>setTimeout(resolve,60));
+      watched=url.pathname==='/:/scrobble';
+      return route.fulfill({contentType:'application/xml',body:'<MediaContainer />'});
+    }
+    const metadata=url.pathname==='/library/metadata/episode'?[episode()]:
+      url.pathname==='/library/metadata/show'?[{ratingKey:'show',type:'show',title:'Test Series'}]:[];
+    if(url.pathname==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{
+      title:'On Deck',Metadata:[episode()]
+    }]}}});
+    return route.fulfill({json:{MediaContainer:{Metadata:metadata}}});
+  });
+  return calls;
+}
+async function watchDetailAttachment(page) {
+  return page.evaluate(() => {
+    const detail=document.querySelector('#main .detail');
+    window.watchDetailOriginal=detail;
+    window.watchDetailDetached=false;
+    window.watchDetailObserver=new MutationObserver(() => {
+      if (!detail.isConnected) window.watchDetailDetached=true;
+    });
+    window.watchDetailObserver.observe(document.querySelector('#main'),{childList:true,subtree:true});
+    return !!detail;
+  });
+}
+async function expectWatchDetailStillAttached(page) {
+  expect(await page.evaluate(() => ({
+    identical:document.querySelector('#main .detail')===window.watchDetailOriginal,
+    detached:window.watchDetailDetached
+  }))).toEqual({identical:true,detached:false});
+}
 test('welcome and remote-only navigation into sign-in',async({page},testInfo)=>{
   await page.goto('/');await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
   await page.screenshot({path:testInfo.outputPath('welcome.png')});
@@ -70,6 +116,40 @@ test('libraries, details, watch-state and back restore focus',async({page})=>{
   await page.getByRole('button',{name:'Mark watched',exact:true}).click();await expect.poll(()=>calls.some(x=>x.path==='/Users/user/PlayedItems/movie'&&x.method==='POST')).toBe(true);
   await page.keyboard.press('Escape');await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'The Test Film',exact:true})).toBeFocused();
+});
+test('episode watch and unwatch update the mounted detail without a black frame or focus loss',async({page})=>{
+  const calls=await mockPlexEpisodeWatch(page);
+  await page.goto('/');
+  await page.locator('#main .shelf .card').first().click();
+  const detail=page.locator('#main .detail');
+  await expect(detail).toBeVisible();
+  await expect(page.locator('.detail-play')).toHaveAttribute('aria-label','Resume · 0:45');
+  await expect(page.locator('.detail-restart')).toBeVisible();
+  expect(await watchDetailAttachment(page)).toBe(true);
+  const mark=page.getByRole('button',{name:'Mark watched',exact:true});
+  await mark.click();
+  await expect(page.getByRole('button',{name:'Mark unwatched',exact:true})).toBeFocused();
+  await expect(page.locator('.detail-play')).toHaveAttribute('aria-label','Play');
+  await expect(page.locator('.detail-restart')).toBeHidden();
+  await expectWatchDetailStillAttached(page);
+  await page.getByRole('button',{name:'Mark unwatched',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Mark watched',exact:true})).toBeFocused();
+  await expectWatchDetailStillAttached(page);
+  expect(calls.filter(path=>path==='/:/scrobble')).toHaveLength(1);
+  expect(calls.filter(path=>path==='/:/unscrobble')).toHaveLength(1);
+});
+test('episode menu watched action preserves detail and updates primary action',async({page})=>{
+  await mockPlexEpisodeWatch(page);
+  await page.goto('/');
+  await page.locator('#main .shelf .card').first().click();
+  await expect(page.locator('.detail-restart')).toBeVisible();
+  expect(await watchDetailAttachment(page)).toBe(true);
+  await page.getByRole('button',{name:'More options',exact:true}).click();
+  await page.getByRole('button',{name:'Mark as Watched',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Mark unwatched',exact:true})).toBeVisible();
+  await expect(page.locator('.detail-restart')).toBeHidden();
+  await expect(page.getByRole('button',{name:'More options',exact:true})).toBeFocused();
+  await expectWatchDetailStillAttached(page);
 });
 test('slow library loading fades the first grid without re-fading back navigation',async({page})=>{
   await mockServer(page);

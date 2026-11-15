@@ -32,6 +32,7 @@ function tvStorage() {
   try { return window.localStorage; } catch (_) { return null; }
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
+let detailWatchEpoch = 0;
 // Sidebar destinations are persistent tabs, not pushed navigator routes.
 // Bounded detached DOM snapshots keep returning to a library instantaneous.
 const rootSnapshots = new Map();
@@ -281,6 +282,45 @@ function refreshDetailAction(control, label, symbol) {
   control.setAttribute('aria-label', label);
   control.setAttribute('title', label);
 }
+function updateLocalWatchState(item, watched) {
+  item.watched = watched;
+  item.resume = 0;
+  if (item.raw) {
+    if (item.raw.UserData) {
+      item.raw.UserData.Played = watched;
+      item.raw.UserData.PlaybackPositionTicks = 0;
+    }
+    item.raw.viewCount = watched ? 1 : 0;
+    item.raw.viewOffset = 0;
+  }
+}
+function refreshDetailWatchActions(actions, item) {
+  refreshDetailAction(actions.querySelector('.detail-watched'),
+    item.watched ? 'Mark unwatched' : 'Mark watched', item.watched ? 'unwatched' : 'watched');
+  refreshDetailAction(actions.querySelector('.detail-play'),
+    item.resume > 0 ? 'Resume · ' + time(item.resume) : 'Play', 'play');
+  const restart = actions.querySelector('.detail-restart');
+  if (restart) {
+    restart.hidden = !(item.resume > 0);
+    if (restart.hidden && document.activeElement === restart)
+      focusWithoutJump(actions.querySelector('.detail-play'), false);
+  }
+}
+// WatchActions in native Plezy patches mounted metadata without replacing the
+// detail route. Keep its saved first-frame snapshot coherent as well.
+function persistDetailWatchState(item, detailRoute, serverScope) {
+  const key = savedCatalog.id(serverScope,
+    'detail:' + JSON.stringify([detailRoute.id, detailRoute.kind]));
+  const generation = (savedCatalog.generations.get(key) || 0) + 1;
+  savedCatalog.generations.set(key, generation);
+  savedCatalog.read(key).then(bundle => {
+    if (!bundle || bundle.item?.id !== item.id ||
+        savedCatalog.generations.get(key) !== generation) return;
+    updateLocalWatchState(bundle.item, item.watched);
+    savedCatalog.remember(key, bundle);
+    savedCatalog.write(key, bundle).catch(() => {});
+  }).catch(() => {});
+}
 function closeDetailMenu() {
   if (!detailMenu) return;
   const {menu, trigger} = detailMenu;
@@ -440,16 +480,15 @@ function detailMoreOptions(options, iconOnly = false) {
 // state, including BOTH actions for partially watched episodes (upstream
 // MediaContextMenu._buildItemMenuActions). Source track choices are available
 // before playback as a TV-specific entry to the original TrackSheet controls.
-function episodeMenuActions(item, onChanged = () => {}) {
+function episodeMenuActions(item, onChanged = () => {}, onMarkStarted = () => {}) {
   const progress = item.resume > 0;
   const entries = [];
   async function mark(watched) {
     const sourceApi = api;
+    onMarkStarted();
     await sourceApi.watched(item, watched);
     if (sourceApi !== api) return;
-    item.watched = watched;
-    item.resume = 0;
-    if (item.raw) { item.raw.viewCount = watched ? 1 : 0; item.raw.viewOffset = 0; }
+    updateLocalWatchState(item, watched);
     catalogCache.clear();
     if (sourceApi instanceof Plex) simklTracker.markWatched(sourceApi, item, watched);
     onChanged();
@@ -1828,6 +1867,7 @@ async function render(prepared = null) {
     } else if (route.type === 'search') searchForm();
     else if (route.type === 'detail') {
       const currentApi = api, detailRoute = {...route};
+      const detailServerScope = catalogScope(activeServer());
       const result = prepared?.detailBundle ? {value:prepared.detailBundle} :
         await savedPage('detail:' + JSON.stringify([detailRoute.id, detailRoute.kind]), async () => {
           const item = await currentApi.detail(detailRoute.id, detailRoute.kind);
@@ -1843,6 +1883,7 @@ async function render(prepared = null) {
         }, {force:!!prepared?.force});
       if (!valid()) return;
       const {item, parentShow} = result.value;
+      const watchEpochAtRender = detailWatchEpoch;
       const isPlexShow = currentApi instanceof Plex && item.type === 'show';
       const isSeason = item.type === 'season' || item.type === 'Season';
       const isEpisode = item.type === 'episode' || item.type === 'Episode';
@@ -1853,9 +1894,11 @@ async function render(prepared = null) {
       }
       if (result.fresh) detailRefresh = async () => {
         const update = await result.fresh;
-        if (!update.changed || !valid() || player.active || !dialog.hidden || detailMenu) return;
+        if (!update.changed || !valid() || detailWatchEpoch !== watchEpochAtRender ||
+            player.active || !dialog.hidden || detailMenu) return;
         await prewarmDetail(update.value, currentApi);
-        if (!valid() || player.active || !dialog.hidden || detailMenu) return;
+        if (!valid() || detailWatchEpoch !== watchEpochAtRender ||
+            player.active || !dialog.hidden || detailMenu) return;
         const focus = main.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
         const railFocus = nav.contains(document.activeElement) ? document.activeElement.dataset.navId : null;
         const scroll = main.scrollTop, nextRevision = revision + 1;
@@ -2034,6 +2077,24 @@ async function render(prepared = null) {
         });
       }
       const actions = el('div', undefined, 'detail-actions');
+      let watchMutationPending = false;
+      const markDetailWatched = async watched => {
+        if (watchMutationPending) return;
+        watchMutationPending = true;
+        // Retire a background detail revalidation that may have started before
+        // the user's watch action, so it cannot remount stale metadata.
+        ++detailWatchEpoch;
+        try {
+          await currentApi.watched(item, watched);
+          updateLocalWatchState(item, watched);
+          catalogCache.clear();
+          if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
+          persistDetailWatchState(item, detailRoute, detailServerScope);
+          if (!valid() || currentApi !== api) return;
+          refreshDetailWatchActions(actions, item);
+          notify(watched ? 'Marked as watched' : 'Marked as unwatched');
+        } finally { watchMutationPending = false; }
+      };
       const chooseEpisode = async () => {
         if (item.type === 'show' || item.type === 'Series') {
           try {
@@ -2086,10 +2147,7 @@ async function render(prepared = null) {
           } else notify('No playable episodes were found.');
         }, 'shuffle', 'detail-icon'));
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
-          const currentApi = api, watched = !item.watched;
-          await currentApi.watched(item, watched);
-          catalogCache.clear();
-          render({force:true});
+          await markDetailWatched(!item.watched);
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
@@ -2123,11 +2181,7 @@ async function render(prepared = null) {
         restart.hidden = !(item.resume > 0);
         actions.append(restart);
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
-          const currentApi = api, watched = !item.watched;
-          await currentApi.watched(item, watched);
-          catalogCache.clear();
-          if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
-          render({force:true});
+          await markDetailWatched(!item.watched);
         }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
@@ -2150,13 +2204,9 @@ async function render(prepared = null) {
         if (isEpisode && raw.parentRatingKey) extra.push({label:'View season', action:() =>
           go({type:'detail',id:raw.parentRatingKey,kind:'season'})});
         actions.append(detailMoreOptions(() => isEpisode ? episodeMenuActions(item, () => {
-          refreshDetailAction(actions.querySelector('.detail-watched'),
-            item.watched ? 'Mark unwatched' : 'Mark watched', item.watched ? 'unwatched' : 'watched');
-          refreshDetailAction(actions.querySelector('.detail-play'),
-            item.resume > 0 ? 'Resume · ' + time(item.resume) : 'Play', 'play');
-          const restart = actions.querySelector('.detail-restart');
-          if(restart)restart.hidden = !(item.resume > 0);
-        }).concat(extra) : extra));
+          persistDetailWatchState(item, detailRoute, detailServerScope);
+          refreshDetailWatchActions(actions, item);
+        }, () => { ++detailWatchEpoch; }).concat(extra) : extra));
       }
       info.append(actions);
       // The parent-show link precedes season and episode actions. Start TV
