@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.8.9 — Keep episode details mounted after watched changes
+
+- Marking an episode watched or unwatched now updates the existing action buttons and play/resume state in place, without clearing or rebuilding the detail page, flashing its artwork black, or losing focus.
+- Apply the same behavior through the episode More options menu, retire stale in-flight detail revalidations, and update the saved detail snapshot after a successful mark.
+- Add real-browser regressions for watch/unwatch and menu actions, checking that the original detail DOM remains attached and remote focus survives.
+
 ## 1.8.8 — Stable skip prompt and Plezy timeline focus
 
 - Stop resetting the skip prompt's measured bottom offset on each playback update. Its position now remains stable while the same chrome state is visible, including repeated marker and playback events.

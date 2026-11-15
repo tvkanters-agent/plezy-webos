@@ -184,6 +184,19 @@ restore the focused launch action and refresh resume/watched controls from
 server metadata **in place**. Re-rendering the page after hiding the player
 temporarily empties the screen and loses remote focus.
 
+### Watched/unwatched actions without blank detail frames
+
+Native `WatchActions.setWatched` emits a watch-state event and
+`MediaDetailScreen` updates its mounted metadata without displaying a loader.
+The webOS detail action now patches the active item's watched/progress fields,
+refreshes its existing action buttons and saves the updated detail cache after
+server acknowledgement. It does not call the route renderer or reset artwork,
+scroll or remote focus. In-flight detail revalidation from before the action is
+retired to prevent stale responses from remounting the page during a mark.
+The episode More options watched actions use the same mounted-control refresh.
+Browser tests assert DOM identity and uninterrupted focus for both paths;
+actual LG playback and focus remain hardware-verification items.
+
 ### Alphabet rail in large libraries
 
 The library browse rail translates
