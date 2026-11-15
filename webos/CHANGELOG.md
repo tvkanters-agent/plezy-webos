@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.8.2 — Repair missing Plex intro prompts and chapter gaps
+
+- Fetch chapter and intro/credits marker metadata at playback startup, as native `PlexClient.getPlaybackExtras` does. Cached Home and episode rows can omit the markers even when Plex has them; refresh the playing session without delaying video startup.
+- Read Plex's `Chapter.tag` for chapter titles, including the chapter-name fallback used to identify intros.
+- Fix a CSS selector that accidentally assigned each chapter separator the timestamp's 52px minimum width. Seek-bar gaps now measure Plezy's intended 4px.
+- Permit LG's `playing` event to confirm the first frame when its reported media `readyState` is stale, so the floating prompt can appear and gain remote focus.
+- Regress thin metadata, late playback extras, focus and single-press skip, measured chapter-gap width, and stale decoder state.
+
 ## 1.8.1 — Keep Right navigation within each carousel
 
 - Match Plezy's locked-focus hub rows: Right moves to the next card in the same carousel, but does nothing at its final card instead of moving into another carousel.
