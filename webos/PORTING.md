@@ -265,6 +265,19 @@ leaves focus and the other carousels' scroll positions unchanged. Left from
 the first card continues to exit to the sidebar as explicitly requested.
 Multi-carousel browser tests cover the right boundary and normal movement.
 
+### Unclipped Home hub gutters
+
+Native `HubSection` builds its horizontal `ListView` with `clipBehavior: Clip.none`
+and applies the TV shelf inset to the list's initial/final padding. The webOS
+equivalent extends each top-level `.shelf .cards` scrollport through the main
+pane's left/right 48px padding (32px at narrow widths), while restoring that
+inset inside the scrollport and on the heading. Cards scrolling offscreen can
+remain visible throughout the side gutters; at rest their first card remains
+aligned with its heading. CSS overflow clipping still occurs at the actual
+main-pane edges, because Chromium 53 cannot implement Flutter's unclipped
+sliver viewports directly. Browser tests cover hit-testing in both gutters,
+initial alignment and the responsive inset; LG hardware is unverified.
+
 ### Cached navigation and artwork under memory pressure
 
 The source `OptimizedMediaImage`, `PlexImageCacheManager` and library prefetch

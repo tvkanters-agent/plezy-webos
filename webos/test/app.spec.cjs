@@ -419,6 +419,58 @@ test('Right stays in its Home carousel and stops at the last card',async({page})
   await expect(second.nth(long.length-2)).toBeFocused();
 });
 
+test('Home shelves scroll through the page gutters without clipping their cards',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]
+  })));
+  const items=Array.from({length:20},(_,i)=>({ratingKey:'show'+i,title:'Show '+i,type:'show'}));
+  await page.route('http://plex.test/**',route=>route.fulfill({json:
+    new URL(route.request().url()).pathname==='/hubs'
+      ? {MediaContainer:{Hub:[{title:'Recommended shows',Metadata:items}]}}
+      : {MediaContainer:{Metadata:[]}}
+  }));
+  await page.goto('/');
+  await expect(page.locator('main > .shelf .card')).toHaveCount(20);
+
+  for(const width of [1920,1000]){
+    await page.setViewportSize({width,height:1080});
+    const geometry=await page.evaluate(()=>{
+      const pane=document.querySelector('main');
+      const row=pane.querySelector('.shelf .cards');
+      const cards=row.querySelectorAll('.card');
+      row.scrollLeft=0;
+      const paneBounds=pane.getBoundingClientRect();
+      const rowBounds=row.getBoundingClientRect();
+      const inset=parseFloat(getComputedStyle(pane).paddingLeft);
+      const firstBounds=cards[0].getBoundingClientRect();
+      const headingBounds=pane.querySelector('.shelf h2').getBoundingClientRect();
+      const aligned=Math.abs(firstBounds.left-headingBounds.left)<1 &&
+        Math.abs(firstBounds.left-(paneBounds.left+inset))<1;
+      const fullWidth=Math.abs(rowBounds.left-paneBounds.left)<1 &&
+        Math.abs(rowBounds.right-paneBounds.right)<1;
+
+      // At a small horizontal offset, the first poster is still hit-testable
+      // within the left gutter instead of being cut at the heading inset.
+      row.scrollLeft=inset-12;
+      const leftPoster=cards[0].querySelector('.poster').getBoundingClientRect();
+      const leftHit=document.elementFromPoint(paneBounds.left+20,leftPoster.top+30);
+      const visibleLeft=!!leftHit && leftHit.closest('.card')===cards[0];
+
+      // Move a later poster partly into the right gutter. It must also remain
+      // rendered there, rather than stopping at the former row clip edge.
+      const target=cards[10];
+      const before=target.getBoundingClientRect();
+      row.scrollLeft+=before.left-(paneBounds.right-20);
+      const rightPoster=target.querySelector('.poster').getBoundingClientRect();
+      const rightHit=document.elementFromPoint(paneBounds.right-12,rightPoster.top+30);
+      const visibleRight=!!rightHit && rightHit.closest('.card')===target;
+      return {inset,aligned,fullWidth,visibleLeft,visibleRight};
+    });
+    expect(geometry.inset).toBe(width===1920?48:32);
+    expect(geometry).toMatchObject({aligned:true,fullWidth:true,visibleLeft:true,visibleRight:true});
+  }
+});
+
 test('Plex PIN login offers a choice when multiple servers are reachable',async({page})=>{
   await page.route('https://plex.tv/**',route=>{
     const pathname=new URL(route.request().url()).pathname;
