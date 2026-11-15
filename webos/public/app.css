@@ -610,14 +610,14 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 }
 
 
-/* lib/screens/libraries/alpha_jump_bar.dart (TV): 20px tonal rail, 24px
+/* lib/screens/libraries/alpha_jump_bar.dart (TV): 24px tonal rail, 24px
    overscan inset, complete A-Z on short displays, circles for the visible
    letter and the D-pad-highlighted letter. Never show native browser bars. */
 #shell { position:relative; }
 .alpha-jump-bar {
-  position:absolute; top:56px; right:24px; bottom:0; width:20px;
+  position:absolute; top:56px; right:24px; bottom:0; width:24px;
   z-index:4; display:flex; flex-direction:column; justify-content:space-evenly;
-  background:rgba(14,15,18,.7); border-radius:10px; cursor:pointer;
+  background:rgba(14,15,18,.7); border-radius:12px; cursor:pointer;
   touch-action:none; -webkit-user-select:none; user-select:none;
 }
 .alpha-jump-bar:focus { outline:none; border:none; box-shadow:none; }
@@ -631,9 +631,9 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .alpha-letter-slot.highlighted .alpha-letter-marker {
   background:#ededed; color:#111318;
 }
-/* AlphaJumpBar has a 20px lane plus 24px TV overscan, with a minimum
-   8px focus gap before the last grid card. */
-main.has-alpha-bar { padding-right:56px; }
+/* AlphaJumpBar has a 24px lane plus 24px TV overscan, with a 12px
+   focus gap before the last grid card. */
+main.has-alpha-bar { padding-right:60px; }
 .alpha-window-grid { margin-right:0; }
 .alpha-window-spacer { width:100%; padding:0; margin:0; pointer-events:none; }
 

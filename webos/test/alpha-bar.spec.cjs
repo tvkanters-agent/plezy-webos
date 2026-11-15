@@ -131,6 +131,27 @@ test('MediaBrowser alphabet filters by NameStartsWith and reselect toggles it of
   const bar=page.getByRole('group',{name:'Alphabet navigation'});
   await expect(bar).toBeVisible();
   await expect(bar.locator('.alpha-letter-slot')).toHaveCount(27);
+  const marker=bar.locator('.alpha-letter-marker').first();
+  const fullSize=await marker.evaluate(el=>({
+    font:parseFloat(getComputedStyle(el).fontSize),
+    circle:el.getBoundingClientRect().width,
+    lane:el.closest('.alpha-jump-bar').getBoundingClientRect().width
+  }));
+  expect(fullSize).toEqual({font:14,circle:22,lane:24});
+  // A-Z must still fit on short displays; resizing an existing rail must
+  // recompute the font/marker sizes without needing new alphabet data.
+  await page.setViewportSize({width:1280,height:540});
+  await expect.poll(()=>marker.evaluate(el=>parseFloat(getComputedStyle(el).fontSize)))
+    .toBeLessThan(14);
+  expect(await bar.locator('.alpha-letter-slot').count()).toBe(27);
+  const compact=await marker.evaluate(el=>({
+    circle:el.getBoundingClientRect().height,
+    slot:el.parentElement.getBoundingClientRect().height
+  }));
+  expect(compact.circle).toBeLessThan(compact.slot);
+  await page.setViewportSize({width:1280,height:1080});
+  await expect.poll(()=>marker.evaluate(el=>parseFloat(getComputedStyle(el).fontSize)))
+    .toBe(14);
   await expect(bar.locator('.alpha-letter-slot.current')).toHaveCount(0);
   await bar.getByRole('button',{name:'B',exact:true}).click();
   await expect.poll(()=>calls.some(c=>c.NameStartsWith==='B')).toBe(true);

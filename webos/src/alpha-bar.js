@@ -85,9 +85,24 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
     });
   };
   const draw = () => {
-    const count = Math.floor(element.clientHeight / 20);
+    const railHeight = element.clientHeight;
+    const count = Math.floor(railHeight / 20);
     const next = helper.letters.length <= 27 ? helper.letters : helper.displayLetters(count);
-    if (next.join('\u0000') === displayed.join('\u0000')) { mark(); return; }
+    const sizeMarkers = () => {
+      const height = railHeight / displayed.length;
+      const marker = Math.max(10, Math.min(22, height - 2));
+      const fontSize = Math.max(7, Math.min(14, height * .58));
+      Array.from(element.children).forEach(slot => {
+        const circle = slot.firstChild;
+        circle.style.width = circle.style.height = marker + 'px';
+        circle.style.fontSize = fontSize + 'px';
+      });
+    };
+    if (next.join('\u0000') === displayed.join('\u0000')) {
+      if (displayed.length) sizeMarkers();
+      mark();
+      return;
+    }
     displayed = next;
     element.textContent = '';
     displayed.forEach((letter, i) => {
@@ -99,10 +114,6 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
       circle.className = 'alpha-letter-marker';
       circle.textContent = letter;
       slot.append(circle);
-      const height = element.clientHeight / displayed.length;
-      const marker = Math.max(10, Math.min(18, height - 2));
-      circle.style.width = circle.style.height = marker + 'px';
-      circle.style.fontSize = Math.max(7, Math.min(10, height * .58)) + 'px';
       slot.addEventListener('click', () => {
         // A pointer gesture already jumped on down (like Flutter onTapDown).
         // Do not issue a second page request for its subsequent click.
@@ -111,6 +122,7 @@ export function createAlphaJumpBar(characters, {onJump, onExit}) {
       });
       element.append(slot);
     });
+    if (displayed.length) sizeMarkers();
     highlighted = Math.max(0, displayed.indexOf(nearest(current)));
     mark();
   };

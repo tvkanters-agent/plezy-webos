@@ -146,8 +146,11 @@ Cumulative offsets jump directly to nonloaded Plex items; the webOS grid
 retains an index-aligned window with spacers rather than attempting to render
 all intervening DOM cards. This is the Chrome 53 replacement for Flutter's
 sparse `SliverGrid`. The displayed/current letter, pointer gestures, 150ms
-D-pad stepping, remote Back/Left return, 20px tonal letter rail, 24px TV
-overscan, and circular highlight follow the original widgets.
+D-pad stepping, remote Back/Left return, 24px tonal letter rail, 24px TV
+overscan, and circular highlight follow the original widgets. At the user's
+request, TV letters grow to 14px (from upstream's 10px maximum), with 22px
+markers and a correspondingly wider lane. They still shrink dynamically when
+the viewport is too short to display the complete alphabet.
 
 Jellyfin and Emby use Plezy's separate `MediaBrowserAlphaBarStrategy`:
 27 synthetic `#`–`Z` entries acting as server-side `NameStartsWith` filters
