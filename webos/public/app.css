@@ -210,8 +210,18 @@ main > .collection-sections { position:relative; z-index:1; }
 .detail-meta { margin-bottom:7px; font-size:16px; color:#bbb !important; }
 .detail-meta strong { font-weight:600; color:#dedee2; }
 .detail-children-title { margin-top:44px; }
-.shelf { margin-right:-30px; }
-.shelf .cards { margin-left:-10px; padding:12px 50px 20px 10px; }
+/* Plezy HubSection uses an unclipped horizontal ListView: cards can travel
+   through the page gutters without disappearing at the heading's inset.
+   Extend the scroll viewport to the pane edges, but keep its resting cards
+   and heading aligned with the main content. */
+main > .shelf { margin-left:-48px; margin-right:-48px; }
+main > .shelf > h2 { margin-left:48px; }
+main > .shelf > .cards { margin-left:0; padding:12px 48px 20px; }
+@media (max-width:1100px) {
+  main > .shelf { margin-left:-32px; margin-right:-32px; }
+  main > .shelf > h2 { margin-left:32px; }
+  main > .shelf > .cards { padding-left:32px; padding-right:32px; }
+}
 
 /* Upstream TrackChapterControls — a compact tune disc opens an anchored
    settings surface, not raw native selects spread across the video. */

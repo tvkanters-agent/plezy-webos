@@ -1,5 +1,10 @@
 # webOS changelog
 
+## 1.8.4 — Let Home carousels extend through page gutters
+
+- Extend Home and recommended carousel scrollports to the actual main-pane edges, so moving cards remain visible through the page's horizontal padding instead of being clipped at the header inset.
+- Preserve the initial card/title alignment and final end padding, including the compact-screen 32px layout. Add a real-browser test for visible cards in both side gutters.
+
 ## 1.8.3 — Skip-prompt focus and seek cleanup
 
 - Replace the Skip Intro/Credits button's square-looking external focus outline with Plezy's filled, slightly scaled rounded focus state.
