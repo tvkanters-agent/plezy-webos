@@ -101,6 +101,19 @@ Release removes source children before unloading so a later open cannot reuse
 an old URL or resume option. Tests verify source configuration, startup reporting,
 no second seek, and source cleanup; actual buffering on LG requires TV validation.
 
+### Browser decoder buffering vs native cache pause
+
+Native Plezy's buffering overlay follows mpv's `paused-for-cache` state and
+retains its initial-frame gate. `HTMLMediaElement.stalled` instead means the
+network stopped delivering bytes; it does **not** mean the video has stopped
+advancing, especially for a fully cached file near credits/EOF. On webOS,
+`waiting` and `stalled` only raise the spinner when playback is active and the
+decoder has less than `HAVE_FUTURE_DATA` (readyState 3); paused or ended media
+must not raise it. Pause clears stale buffering except while a startup frame or
+seek preview is still pending, and `seeked` can clear a paused seek without
+waiting for a `playing` event. Browser-event unit tests exercise these guards;
+the native decoder's exact event ordering remains an LG TV verification item.
+
 ### Playback return without blank navigation frames
 
 Native Plezy retains the covered detail route during playback
