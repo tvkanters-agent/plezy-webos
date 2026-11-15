@@ -474,6 +474,34 @@ export class Plex {
       ...mediaSourceTracks(item, mediaIndex),
       options};
   }
+  async scrubPreview(session, signal) {
+    // Plezy obtains scrub frames from Plex's SD BIF index for the active part.
+    // Keep the same 50 MiB TV budget; some servers serve very large indexes.
+    if (!session.sourceId) return null;
+    const limit = 50 * 1024 * 1024;
+    const response = await fetch(this.url('/library/parts/' + enc(session.sourceId) + '/indexes/sd'), {signal});
+    if (!response.ok || Number(response.headers.get('Content-Length')) > limit) return null;
+    if (!response.body || !response.body.getReader) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return bytes.byteLength <= limit ? bytes : null;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let length = 0;
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        length += result.value.byteLength;
+        if (length > limit) { await reader.cancel(); return null; }
+        chunks.push(result.value);
+      }
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.byteLength;}
+    return bytes;
+  }
   async report(session, state, position, duration) {
     // Plex's timeline API is POST. It often returns XML or an empty 200,
     // neither of which is a request failure. Do not feed it to request()

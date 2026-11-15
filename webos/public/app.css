@@ -432,6 +432,20 @@ nav button.active:focus, .rail-library-items button.active:focus {
   border:2px solid #f8f8fa; background:#fff; box-shadow:0 0 0 4px rgba(0,0,0,.4); }
 .timeline-track input[type=range]:focus { outline:0; box-shadow:0 0 0 2px #fff; border-radius:15px; }
 .timeline-track input[type=range]:focus::-webkit-slider-thumb { width:23px; height:23px; margin-top:-9px; }
+/* Plezy TimelineSlider's 160px BIF preview floats above the track. */
+.timeline-track .seek-preview { position:absolute; bottom:calc(100% + 2px);
+  width:160px; overflow:hidden; border-radius:6px; background:#000;
+  box-shadow:0 0 8px 1px rgba(0,0,0,.5); pointer-events:none; z-index:8; }
+.timeline-track .seek-preview[hidden] { display:none; }
+.timeline-track .seek-preview img { display:block; width:100%; height:auto; }
+.timeline-track .seek-preview img[hidden] { display:none; }
+.timeline-track .seek-preview span { position:absolute; bottom:4px; left:50%;
+  -webkit-transform:translateX(-50%); transform:translateX(-50%);
+  white-space:nowrap; padding:4px 6px; border-radius:4px;
+  color:white; background:rgba(0,0,0,.6); font-size:12px; line-height:1; }
+.timeline-track .seek-preview.no-image { width:64px; box-shadow:none; }
+.timeline-track .seek-preview.no-image span { position:static; display:block;
+  -webkit-transform:none; transform:none; text-align:center; }
 
 /* Strong legibility at 1080p / webOS Chromium 53: size the actual vector
    shape, not just its surrounding tonal click target. */
@@ -711,7 +725,8 @@ main.has-alpha-bar { padding-right:60px; }
   -webkit-transition:background-color .15s, -webkit-transform .15s;
   transition:background-color .15s, transform .15s; }
 #player .player-skip[hidden] { display:none; }
-#player .player-skip.with-chrome { bottom:115px; }
+/* Player.renderSkipMarker positions this above the measured controls height,
+   which varies with TV resolution and font metrics. */
 /* Native FocusableWrapper uses background focus and a 1.02x paint scale,
    not an outside outline (square on Chromium 53 despite border-radius). */
 #player .player-skip:focus { outline:none; background:#fff;

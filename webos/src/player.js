@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {clamp, nextFocus, time} from './core.js';
 import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
+import {parseBif, bifFrameAt} from './scrub-preview.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -15,6 +16,14 @@ export class Player {
     this.autoSkipProgress = 0; this.skipCountdownStarted = 0;
     this.video = root.querySelector('video');
     this.controls = root.querySelector('.controls');
+    this.lastControlFocus = root.querySelector('[data-action="pause"]');
+    this.seekTooltip = root.querySelector('.seek-preview');
+    this.seekImage = this.seekTooltip.querySelector('img');
+    this.seekFrameIndex = -1;
+    this.seekFrameUrl = null;
+    this.previewFrames = null;
+    this.previewAbort = null;
+    this.skipControlsHeight = -1;
     this.sheet = root.querySelector('.player-sheet');
     this.status = root.querySelector('.player-status');
     this.buffering = root.querySelector('.player-buffering');
@@ -58,15 +67,19 @@ export class Player {
       if(!this.initialSeekPending) this.showBuffering(false);
       this.report('playing');
       this.track('start');
-      if (this.hideAfterSeek) {this.hideControls();return;}
+      if (this.hideAfterSeek) {this.hideAfterSeek = false; this.hideControls();return;}
+      // Decoder resume must not reopen chrome the user explicitly hid.
+      if (this.controls.classList.contains('hidden-controls')) return;
       this.reveal();
       // Video.load() and decoder buffering may move focus to <body>.
       // Restore the active transport control, but not over user choices.
       if (this.controls.contains(document.activeElement) || document.activeElement === this.skipButton) return;
       if (this.root.contains(document.activeElement) &&
           document.activeElement !== this.video && document.activeElement !== this.root) return;
-      if (!this.controls.classList.contains('hidden-controls'))
-        this.root.querySelector('[data-action="pause"]').focus();
+      const control = this.lastControlFocus;
+      if (control?.isConnected && !control.hidden && control.getClientRects().length)
+        control.focus();
+      else this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
       // Waiting/stalled can outlive a paused decoder (notably near EOF).
@@ -102,6 +115,22 @@ export class Player {
     root.addEventListener('pointerdown', () => this.cancelAutoSkipFromInteraction());
     this.seekBar = root.querySelector('[data-action="seek"]');
     this.scrubbing = false;
+    root.addEventListener('focusin', event => {
+      if (!this.controls.contains(event.target)) return;
+      if (event.target !== this.seekBar) {
+        // Moving from the timeline to a transport button commits the preview
+        // without leaving directional seeking armed on that button.
+        if (this.remoteSeeking) {
+          this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
+          this.hideSeekPreview();
+          if (this.seekWasPlaying) this.video.play().catch(() => this.failed());
+          this.seekWasPlaying = false;
+        }
+        this.lastControlFocus = event.target;
+      }
+      this.hideAfterSeek = false;
+      this.reveal();
+    });
     this.seekBar.addEventListener('input', () => {
       this.scrubbing = true;
       this.seeking = true;
@@ -111,6 +140,7 @@ export class Player {
       this.root.querySelector('.elapsed-remaining').textContent = '-' + time(Math.max(0, this.timelineDuration() - seconds));
       this.seekBar.setAttribute('aria-valuetext', time(seconds) + ' of ' + time(this.timelineDuration()));
       this.root.querySelector('.timeline-track progress').value = this.timelineDuration() ? seconds / this.timelineDuration() : 0;
+      this.renderSeekPreview(seconds);
       this.reveal();
     });
     this.seekBar.addEventListener('change', () => {
@@ -119,7 +149,21 @@ export class Player {
       if (!this.remoteSeeking) {
         this.seeking = false;
         this.seekTo(Number(this.seekBar.value));
+        this.hideSeekPreview();
       }
+    });
+    this.seekBar.addEventListener('pointermove', event => {
+      if (!this.session || !this.timelineDuration()) return;
+      const bounds = this.seekBar.getBoundingClientRect();
+      const fraction = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+      this.renderSeekPreview(fraction * this.timelineDuration());
+    });
+    this.seekBar.addEventListener('pointerleave', () => {
+      if (!this.scrubbing) this.hideSeekPreview();
+    });
+    if (typeof window !== 'undefined') window.addEventListener('resize', () => {
+      this.skipControlsHeight = -1;
+      if (this.active) this.renderSkipMarker();
     });
     root.querySelector('[data-chapter]').onchange = event => {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
@@ -232,6 +276,16 @@ export class Player {
     const visible = !!marker && (!this.skipDismissed || chromeVisible);
     this.skipButton.hidden = !visible;
     this.skipButton.classList.toggle('with-chrome', chromeVisible);
+    if (visible && chromeVisible && this.skipControlsHeight < 0) {
+      const height = this.controls.offsetHeight;
+      if (height > 0) {
+        this.skipControlsHeight = height;
+        this.skipButton.style.bottom = (height + 16) + 'px';
+      }
+    } else {
+      this.skipButton.style.bottom = '';
+      this.skipControlsHeight = -1;
+    }
     if (!visible && document.activeElement === this.skipButton)
       (chromeVisible ? this.root.querySelector('[data-action="pause"]') : this.video).focus();
     if (!marker) return;
@@ -440,6 +494,7 @@ export class Player {
     await cleanup;
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
+    this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
     this.root.hidden = false; this.status.textContent = '';
@@ -466,6 +521,7 @@ export class Player {
       session = await api.playback(item, {...options, skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
+      this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;
         session.markers = extras.markers;
@@ -625,6 +681,10 @@ export class Player {
   async release(ended = false, preserveTracking = false) {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
+    if (this.previewAbort) this.previewAbort.abort();
+    this.previewAbort = null;
+    this.previewFrames = null;
+    this.hideSeekPreview();
     const session = this.session, api = this.api;
     this.lastPosition = this.position() || this.lastPosition || 0;
     if (session) this.report('stopped');
@@ -716,11 +776,55 @@ export class Player {
     // Older LG Chromium versions are inconsistent about the :hidden rule.
     this.buffering.style.display = show ? 'flex' : 'none';
   }
+  async loadSeekFrames(session, generation) {
+    if (typeof this.api?.scrubPreview !== 'function') return;
+    const controller = new AbortController();
+    this.previewAbort = controller;
+    try {
+      const bytes = await this.api.scrubPreview(session, controller.signal);
+      if (generation !== this.generation || this.session !== session) return;
+      this.previewFrames = parseBif(bytes);
+      if (!this.seekTooltip.hidden) this.renderSeekPreview(this.seekPreview);
+    } catch (_) { /* Some Plex servers do not provide BIF indexes. */ }
+  }
+  renderSeekPreview(seconds) {
+    const duration = this.timelineDuration();
+    if (!this.session || duration <= 0 || !this.active) return;
+    const frame = bifFrameAt(this.previewFrames, seconds);
+    const hasImage = !!frame;
+    this.seekTooltip.classList.toggle('no-image', !hasImage);
+    this.seekImage.hidden = !hasImage;
+    if (frame && this.seekFrameIndex !== frame.index) {
+      this.releaseSeekFrameUrl();
+      this.seekFrameIndex = frame.index;
+      this.seekFrameUrl = URL.createObjectURL(new Blob([frame.bytes], {type:'image/jpeg'}));
+      this.seekImage.src = this.seekFrameUrl;
+    }
+    const track = this.seekBar.parentElement;
+    const width = hasImage ? 160 : 64;
+    this.seekTooltip.style.left = clamp(seconds / duration * track.clientWidth - width / 2,
+      0, Math.max(0, track.clientWidth - width)) + 'px';
+    this.seekTooltip.querySelector('span').textContent = time(seconds);
+    this.seekTooltip.hidden = false;
+    this.seekPreview = seconds;
+  }
+  releaseSeekFrameUrl() {
+    if (this.seekFrameUrl) URL.revokeObjectURL(this.seekFrameUrl);
+    this.seekFrameUrl = null;
+    this.seekFrameIndex = -1;
+  }
+  hideSeekPreview() {
+    if (!this.seekTooltip) return;
+    this.seekTooltip.hidden = true;
+    this.seekImage.removeAttribute('src');
+    this.releaseSeekFrameUrl();
+  }
   hideControls() {
     clearTimeout(this.hideTimer);
     this.controls.classList.add('hidden-controls');
     this.root.querySelector('.player-top').classList.add('hidden-controls');
     this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
+    this.hideSeekPreview();
     this.renderSkipMarker();
     if (document.activeElement !== this.skipButton || this.skipButton.hidden) this.video.focus();
   }
@@ -751,6 +855,7 @@ export class Player {
     this.root.querySelector('.elapsed-current').textContent = time(this.seekPreview);
     this.root.querySelector('.elapsed-remaining').textContent = '-' + time(total - this.seekPreview);
     this.root.querySelector('.timeline-track progress').value = this.seekPreview / total;
+    this.renderSeekPreview(this.seekPreview);
     this.reveal();
     this.seekBar.focus();
   }
@@ -759,6 +864,7 @@ export class Player {
     const point = this.seekPreview;
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
+    this.hideSeekPreview();
     this.seekTo(point);
     this.showBuffering(true);
     // OK confirms the preview and resumes playback from that frame.
@@ -777,6 +883,7 @@ export class Player {
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
+    if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
@@ -794,7 +901,9 @@ export class Player {
     clearTimeout(this.hideTimer);
     this.renderSkipMarker();
     this.hideTimer = setTimeout(() => {
-      if (this.session && this.sheet.hidden && !this.video.paused && document.activeElement !== this.seekBar && !['SELECT'].includes(document.activeElement.tagName)) {
+      if (this.session && this.sheet.hidden && !this.video.paused &&
+          !this.controls.contains(document.activeElement) &&
+          !['SELECT'].includes(document.activeElement.tagName)) {
         this.hideControls();
       }
     }, 5000);
@@ -836,12 +945,15 @@ export class Player {
       else this.close();
       return true;
     }
-    if ([37, 39].includes(code) && (this.controls.classList.contains('hidden-controls') ||
-        this.seeking || event.target === this.seekBar)) {
+    const onTransport = this.controls.contains(document.activeElement) &&
+      document.activeElement !== this.seekBar;
+    if ([37, 39].includes(code) && !onTransport &&
+        (this.controls.classList.contains('hidden-controls') ||
+         this.seeking || document.activeElement === this.seekBar)) {
       event.preventDefault();
       this.adjustSeek(code === 37 ? -10 : 10); return true;
     }
-    if (code === 13 && this.seeking) {
+    if (code === 13 && this.seeking && !onTransport) {
       event.preventDefault(); this.commitSeek(); return true;
     }
     // Older LG remotes expose Programme +/- as PageUp/PageDown (33/34).
