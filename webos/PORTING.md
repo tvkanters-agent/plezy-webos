@@ -309,6 +309,25 @@ on physical LG TVs remain hardware-verification tasks.
 Unit tests cover parser and fallback precedence and browser tests cover
 appearance, manual/automatic skip, preferences and remote cancellation.
 
+### Chapter navigation and skip-prompt focus
+
+`MediaChapter.indexAtPosition` and `seekTargetIndex` provide the current row
+and transport jump targets. The player now reproduces `ChapterSheet`'s focused
+current row, its two-line title/time labels and supplied Plex chapter thumbnails,
+as well as `BufferRangePainter`'s 4px timeline chapter divisions. LG's existing
+transport strip adds previous/next chapter discs when metadata is present;
+media rewind/forward keys choose chapters where available, retaining timed
+seeks without chapters. The native three-second previous-chapter restart
+threshold and start-of-title fallback are preserved.
+
+When a skip marker first becomes visible during active TV playback, focus goes
+to its floating action so one LG OK press skips it. If the first decoded frame
+arrives while playback is still paused, focus waits for `playing`; an open
+track/chapter sheet keeps its existing focus. webOS can dispatch remote OK
+without synthesizing a DOM click on a programmatically focused button, so the
+player handles that key explicitly. Browser tests simulate TV detection and
+keyboard focus; physical LG remote and decoder timing remain unverified.
+
 ### Viewport-bounded artwork and incremental catalog updates
 
 Native LibraryBrowseTab uses lazily built sliver rows. Since Chromium 53 does

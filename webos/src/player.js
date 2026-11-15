@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {clamp, nextFocus, time} from './core.js';
+import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
     this.preferences = preferences;
     this.onTrackChoice = onTrackChoice;
     this.skipButton = root.querySelector('[data-action="skip"]');
+    this.chapterBoundaryDuration = null;
     this.marker = null; this.hasFirstFrame = false;
     this.skipDismissed = false; this.skipTimer = null; this.skipDismissTimer = null;
+    this.skipFocusPending = false;
     this.autoSkipProgress = 0; this.skipCountdownStarted = 0;
     this.video = root.querySelector('video');
     this.controls = root.querySelector('.controls');
@@ -47,6 +50,7 @@ export class Player {
       this.startAfterInitialSeek();
       if (!this.initialSeekPending && this.video.readyState >= 2) this.hasFirstFrame = true;
       this.update();
+      this.focusSkipMarkerIfReady();
       if(!this.initialSeekPending) this.showBuffering(false);
       this.report('playing');
       this.track('start');
@@ -87,6 +91,8 @@ export class Player {
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
+    root.querySelector('[data-action="previous-chapter"]').onclick = () => this.seekChapter(false);
+    root.querySelector('[data-action="next-chapter"]').onclick = () => this.seekChapter(true);
     root.querySelector('[data-action="stop"]').onclick = () => this.close();
     this.skipButton.onclick = () => this.activateSkipMarker();
     root.addEventListener('pointerdown', () => this.cancelAutoSkipFromInteraction());
@@ -146,7 +152,7 @@ export class Player {
   }
   clearSkipMarker() {
     this.cancelSkipTimers();
-    this.marker = null; this.skipDismissed = false;
+    this.marker = null; this.skipDismissed = false; this.skipFocusPending = false;
     // Legacy LG-resume tests construct only the decoder portion of Player.
     if (!this.skipButton) return;
     if (typeof document !== 'undefined' && document.activeElement === this.skipButton)
@@ -193,17 +199,26 @@ export class Player {
       this.clearSkipMarker();
       this.marker = found || null;
       if (found) {
+        this.skipFocusPending = true;
         this.startAutoSkip(found);
         // The button must enter the visible tree BEFORE requesting focus.
         // Focusing its [hidden] state silently fails in Chromium.
         this.renderSkipMarker();
-        // Native Plezy assigns focus on TV only when no sheet or higher
-        // overlay owns the remote. Desktop preview retains current focus.
-        if (this.sheet.hidden && (typeof window.PalmSystem !== 'undefined' ||
-          /web0s|webos|netcast/i.test(navigator.userAgent))) this.skipButton.focus();
+        this.focusSkipMarkerIfReady();
       }
     }
     this.renderSkipMarker();
+  }
+  focusSkipMarkerIfReady() {
+    // A decoded first frame can precede the playing event. Defer the request
+    // until playback starts, then focus only the newly appeared prompt.
+    if (!this.skipFocusPending || this.video.paused || this.seeking ||
+        !this.hasFirstFrame || this.skipButton.hidden) return;
+    this.skipFocusPending = false;
+    // Plezy does not steal D-pad focus from a chapter/track sheet.
+    if (!this.sheet.hidden) return;
+    if (typeof window.PalmSystem !== 'undefined' ||
+        /web0s|webos|netcast/i.test(navigator.userAgent)) this.skipButton.focus();
   }
   renderSkipMarker() {
     const marker = this.marker;
@@ -239,6 +254,45 @@ export class Player {
     this.cancelSkipTimers();
     this.skipDismissed = true;
     this.renderSkipMarker();
+  }
+  seekChapter(forward) {
+    if (!this.session) return;
+    const chapters = this.session.chapters || [];
+    const target = chapterSeekTarget(this.position(), chapters, forward);
+    if (target === null) {
+      if (!chapters.length) this.seek(forward ? 30 : -10);
+      return;
+    }
+    this.seekTo(target);
+  }
+  currentChapterIndex() {
+    return chapterIndexAtPosition(this.position(), this.session?.chapters || []);
+  }
+  updateChapterSheet() {
+    if (this.sheet.hidden || this.openSheetAction !== 'chapter-options') return;
+    const current = this.currentChapterIndex();
+    this.sheet.querySelectorAll('[data-chapter-index]').forEach(button => {
+      const active = Number(button.dataset.chapterIndex) === current;
+      button.classList.toggle('is-current', active);
+      button.setAttribute('aria-current', active ? 'true' : 'false');
+      button.querySelector('.chapter-current-icon').hidden = !active;
+    });
+  }
+  renderChapterBoundaries() {
+    const duration = this.timelineDuration();
+    if (duration === this.chapterBoundaryDuration) return;
+    this.chapterBoundaryDuration = duration;
+    const layer = this.root.querySelector('.chapter-gaps');
+    layer.textContent = '';
+    const starts = new Set();
+    for (const chapter of this.session?.chapters || []) {
+      if (!(chapter.start > 0 && chapter.start < duration) || starts.has(chapter.start)) continue;
+      starts.add(chapter.start);
+      const gap = document.createElement('span');
+      gap.className = 'chapter-gap';
+      gap.style.left = (chapter.start / duration * 100) + '%';
+      layer.appendChild(gap);
+    }
   }
   openSheet(action, preferredTrack = null) {
     const kind = {options:'settings', 'tracks-options':'tracks',
@@ -301,25 +355,47 @@ export class Player {
         list.appendChild(wrapper);
       });
     } else {
-      const select = this.root.querySelector('[data-chapter]');
-      Array.from(select.options).forEach(option => {
-        if (option.value === '') return;
+      (this.session?.chapters || []).forEach((chapter, index) => {
         const control = document.createElement('button');
-        control.textContent = option.textContent;
+        control.className = 'player-chapter-option';
+        control.dataset.chapterIndex = String(index);
+        if (chapter.thumb && this.api?.server?.kind === 'plex' && chapter.thumb.startsWith('/')) {
+          const image = document.createElement('img');
+          image.className = 'chapter-thumbnail';
+          image.alt = '';
+          image.src = this.api.url(chapter.thumb);
+          image.onerror = () => image.remove();
+          control.appendChild(image);
+        }
+        const labels = document.createElement('span');
+        labels.className = 'chapter-labels';
+        const title = document.createElement('strong'); title.textContent = chapter.title;
+        const timestamp = document.createElement('small'); timestamp.textContent = time(chapter.start);
+        labels.append(title, timestamp);
+        control.appendChild(labels);
+        const currentIcon = document.createElement('span');
+        currentIcon.className = 'chapter-current-icon';
+        currentIcon.setAttribute('aria-hidden', 'true');
+        currentIcon.textContent = '▶';
+        currentIcon.hidden = true;
+        control.appendChild(currentIcon);
         control.onclick = () => {
-          this.closeSheet(); select.value = option.value;
-          select.dispatchEvent(new Event('change'));
+          this.seekTo(chapter.start);
+          this.closeSheet();
         };
         list.appendChild(control);
       });
     }
     if (!list.querySelector('button')) list.textContent = 'No tracks available.';
     this.sheet.hidden = false;
+    if (kind === 'chapter') this.updateChapterSheet();
     this.reveal();
     const restored = preferredTrack && Array.from(list.querySelectorAll('button')).find(button =>
       button.dataset.trackKind === preferredTrack.kind &&
       button.dataset.trackId === String(preferredTrack.id));
-    const first = restored || list.querySelector('button[aria-pressed="true"]') || list.querySelector('button');
+    const first = kind === 'chapter'
+      ? list.querySelector('[aria-current="true"]') || list.querySelector('button')
+      : restored || list.querySelector('button[aria-pressed="true"]') || list.querySelector('button');
     if (first) first.focus();
     else this.sheet.querySelector('[data-action="close-options"]').focus();
   }
@@ -347,6 +423,11 @@ export class Player {
     this.scrubbing = false;
     if (!trackSheetFocus) this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
+    this.root.querySelector('[data-action="previous-chapter"]').hidden = true;
+    this.root.querySelector('[data-action="next-chapter"]').hidden = true;
+    this.chapterBoundaryDuration = null;
+    const gaps = this.root?.querySelector('.chapter-gaps');
+    if (gaps) gaps.textContent = '';
     this.clearSkipMarker(); this.hasFirstFrame = false;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
@@ -389,7 +470,10 @@ export class Player {
         option.textContent = time(chapter.start) + ' · ' + chapter.title; chapters.append(option);
       });
       this.root.querySelector('[data-chapters]').hidden = !session.chapters?.length;
-    this.root.querySelector('[data-action="chapter-options"]').hidden = !session.chapters?.length;
+      this.root.querySelector('[data-action="chapter-options"]').hidden = !session.chapters?.length;
+      this.root.querySelector('[data-action="previous-chapter"]').hidden = !session.chapters?.length;
+      this.root.querySelector('[data-action="next-chapter"]').hidden = !session.chapters?.length;
+      this.renderChapterBoundaries();
       // Keep the opening frame invisible until the resume target has been
       // sought and decoded. Loading indicators remain independently visible.
       this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
@@ -476,6 +560,8 @@ export class Player {
   update() {
     const position=this.position();
     this.syncSkipMarker(position);
+    this.renderChapterBoundaries();
+    this.updateChapterSheet();
     const played = position;
     const total = this.timelineDuration();
     this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
@@ -521,6 +607,9 @@ export class Player {
     if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
     this.clearSkipMarker(); this.hasFirstFrame = false;
     this.session = null; this.pendingStart = 0;
+    this.chapterBoundaryDuration = null;
+    const gaps = this.root?.querySelector('.chapter-gaps');
+    if (gaps) gaps.textContent = '';
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
@@ -685,6 +774,13 @@ export class Player {
   key(event) {
     const code = event.keyCode;
     this.cancelAutoSkipFromInteraction();
+    // LG's OK key does not always synthesize a DOM click on a button whose
+    // focus was assigned while video decoding. Handle Select explicitly.
+    if (document.activeElement === this.skipButton && code === 13) {
+      event.preventDefault();
+      if (!event.repeat) this.activateSkipMarker();
+      return true;
+    }
     if (!this.sheet.hidden && [37,38,39,40].includes(code)) {
       event.preventDefault();
       const current = document.activeElement;
@@ -722,8 +818,8 @@ export class Player {
     }
     if ([415, 19, 10252, 32, 412, 417].includes(code)) {
       event.preventDefault();
-      if (code === 412) this.seek(-10);
-      else if (code === 417) this.seek(30);
+      if (code === 412) this.seekChapter(false);
+      else if (code === 417) this.seekChapter(true);
       else if (code === 415) this.video.play().catch(() => this.failed());
       else if (code === 19) this.video.pause();
       else this.toggle();

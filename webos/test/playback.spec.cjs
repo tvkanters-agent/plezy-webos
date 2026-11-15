@@ -126,6 +126,48 @@ test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async
  expect(calls.find(u=>u.pathname==='/library/metadata/movie').searchParams.get('includeMarkers')).toBe('1');
 });
 
+test('Plezy chapters show current row, timestamps, artwork and timeline gaps',async({page})=>{
+  await setup(page,{Chapter:[
+    {title:'Opening',startTimeOffset:0,thumb:'/library/metadata/movie/chapter.jpg'},
+    {title:'Scene 2',startTimeOffset:10000},
+    {title:'Scene 3',startTimeOffset:45000}
+  ]});
+  await page.route('http://plex.test/library/metadata/movie/chapter.jpg**',route=>route.fulfill({
+    contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLdtAAAAABJRU5ErkJggg==','base64')
+  }));
+  const gaps=page.locator('.chapter-gaps .chapter-gap');
+  await expect(gaps).toHaveCount(2);
+  await expect(gaps.first()).toHaveAttribute('style',/8\.333/);
+  await page.locator('video').evaluate(video=>{video.currentTime=12;video.dispatchEvent(new Event('timeupdate'));});
+  await page.getByRole('button',{name:'Chapters',exact:true}).click();
+  const rows=page.locator('.player-chapter-option');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toHaveAttribute('aria-current','true');
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(rows.nth(1).locator('small')).toHaveText('0:10');
+  await expect(rows.first().locator('img')).toHaveAttribute('src',/chapter\.jpg/);
+  await rows.nth(2).click();
+  await expect(page.locator('.player-sheet')).toBeHidden();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(45);
+});
+
+test('previous and next chapter controls use the same traversal as Plezy',async({page})=>{
+  await setup(page,{Chapter:[{title:'First',startTimeOffset:0},
+    {title:'Second',startTimeOffset:10000},{title:'Third',startTimeOffset:45000}]});
+  await page.locator('video').evaluate(video=>video.pause());
+  const prev=page.getByRole('button',{name:'Previous chapter'});
+  const next=page.getByRole('button',{name:'Next chapter'});
+  await expect(prev).toBeVisible();
+  await next.click();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
+  await page.locator('video').evaluate(video=>{video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
+  await prev.click();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(1);
+  await page.locator('video').evaluate(video=>{video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
+  await prev.click();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
+});
+
 test('selected Plex version survives compatible playback restart',async({page})=>{
  const {calls}=await setup(page,{Media:[
    {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'first',key:'/wrong.webm'}]},
@@ -144,7 +186,7 @@ test('player chrome has upstream-style compact transport controls and timeline',
   await setup(page);
   await expect(page.locator('.timeline-row progress')).toBeVisible();
   await expect(page.getByRole('slider',{name:'Seek playback'})).toBeVisible();
-  await expect(page.locator('.player-buttons .transport-icon')).toHaveCount(4);
+  await expect(page.locator('.player-buttons .transport-icon:visible')).toHaveCount(4);
   await expect(page.getByRole('button',{name:'−10 seconds',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();
@@ -198,7 +240,7 @@ test('compound playback SVGs use legible numerals and correctly scaled individua
 
 test('transport icons use vector graphics and expose accessible button labels',async({page})=>{
   await setup(page);
-  const buttons=page.locator('.player-buttons .transport-icon');
+  const buttons=page.locator('.player-buttons .transport-icon:visible');
   await expect(buttons).toHaveCount(4);
   expect(await buttons.locator('svg').count()).toBe(5);
   await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeVisible();
@@ -441,4 +483,36 @@ test('TV skip marker gains focus only once its floating button is visible', asyn
   await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('button',{name:'Pause',exact:true})).toBeFocused();
   await expect(page.locator('#player .controls')).toBeVisible();
+});
+
+test('LG OK skips the newly focused intro without opening player chrome',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.evaluate(()=>{
+    window.PalmSystem={};
+    const video=document.querySelector('#player video');
+    video.currentTime=5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  await expect(skip).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(15);
+  await expect(skip).toBeHidden();
+});
+
+test('an intro appearing behind the chapter sheet does not steal remote focus',async({page})=>{
+  await setup(page,{Chapter:[{title:'Opening',startTimeOffset:0}],
+    Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.getByRole('button',{name:'Chapters',exact:true}).click();
+  const chapter=page.locator('.player-chapter-option').first();
+  await expect(chapter).toBeFocused();
+  await page.evaluate(()=>{
+    window.PalmSystem={};
+    const video=document.querySelector('#player video');
+    video.currentTime=5;
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
+  await expect(chapter).toBeFocused();
 });
