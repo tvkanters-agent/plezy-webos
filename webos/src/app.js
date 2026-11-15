@@ -2024,9 +2024,9 @@ async function render(prepared = null) {
         actions.append(detailMoreOptions(extra));
       }
       info.append(actions);
-      // A show link appears first in episode details, but playback is the
-      // primary remote action. Start focus on Resume (or Play if unwatched).
-      if (isEpisode) preferredFocus = actions.querySelector('.detail-play');
+      // The parent-show link precedes season and episode actions. Start TV
+      // focus on Play/Resume, keeping the link available via D-pad navigation.
+      if (isSeason || isEpisode) preferredFocus = actions.querySelector('.detail-play');
       if (!item.background && !isEpisode) content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       content.append(info);
       if (isEpisode)
