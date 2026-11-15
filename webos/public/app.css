@@ -428,13 +428,16 @@ nav button.active:focus, .rail-library-items button.active:focus {
 .timeline-track input[type=range]::-webkit-slider-runnable-track { -webkit-appearance:none;
   height:6px; background:transparent; }
 .timeline-track input[type=range]::-webkit-slider-thumb { -webkit-appearance:none;
-  width:19px; height:19px; margin-top:-7px; border-radius:50%;
-  border:2px solid #f8f8fa; background:#fff; box-shadow:0 0 0 4px rgba(0,0,0,.4); }
-.timeline-track input[type=range]:focus { outline:0; box-shadow:0 0 0 2px #fff; border-radius:15px; }
-.timeline-track input[type=range]:focus::-webkit-slider-thumb { width:23px; height:23px; margin-top:-9px; }
-/* Plezy TimelineSlider's 160px BIF preview floats above the track. */
+  width:4px; height:20px; margin-top:-7px; border:0; border-radius:2px;
+  background:#fff; box-shadow:none; }
+/* Plezy's TimelineSlider focuses by replacing the thin handle with an 18px
+   white PlayerFocusKnob (shadowed disc), never a rectangular track outline. */
+.timeline-track input[type=range]:focus { outline:none; border:0; box-shadow:none; }
+.timeline-track input[type=range]:focus::-webkit-slider-thumb { width:18px; height:18px;
+  margin-top:-6px; border-radius:50%; box-shadow:0 4px 14px rgba(0,0,0,.35); }
+/* Enlarged Plezy BIF preview floats above the track while seeking. */
 .timeline-track .seek-preview { position:absolute; bottom:calc(100% + 2px);
-  width:160px; overflow:hidden; border-radius:6px; background:#000;
+  width:320px; overflow:hidden; border-radius:6px; background:#000;
   box-shadow:0 0 8px 1px rgba(0,0,0,.5); pointer-events:none; z-index:8; }
 .timeline-track .seek-preview[hidden] { display:none; }
 .timeline-track .seek-preview img { display:block; width:100%; height:auto; }

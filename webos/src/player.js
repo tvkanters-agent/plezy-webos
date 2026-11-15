@@ -281,11 +281,13 @@ export class Player {
     const visible = !!marker && (!this.skipDismissed || chromeVisible);
     this.skipButton.hidden = !visible;
     this.skipButton.classList.toggle('with-chrome', chromeVisible);
-    if (visible && chromeVisible && this.skipControlsHeight < 0) {
-      const height = this.controls.offsetHeight;
-      if (height > 0) {
-        this.skipControlsHeight = height;
-        this.skipButton.style.bottom = (height + 16) + 'px';
+    if (visible && chromeVisible) {
+      if (this.skipControlsHeight < 0) {
+        const height = this.controls.offsetHeight;
+        if (height > 0) {
+          this.skipControlsHeight = height;
+          this.skipButton.style.bottom = (height + 16) + 'px';
+        }
       }
     } else {
       this.skipButton.style.bottom = '';
@@ -806,7 +808,8 @@ export class Player {
       this.seekImage.src = this.seekFrameUrl;
     }
     const track = this.seekBar.parentElement;
-    const width = hasImage ? 160 : 64;
+    const width = Math.min(hasImage ? 320 : 64, track.clientWidth);
+    this.seekTooltip.style.width = width + 'px';
     this.seekTooltip.style.left = clamp(seconds / duration * track.clientWidth - width / 2,
       0, Math.max(0, track.clientWidth - width)) + 'px';
     this.seekTooltip.querySelector('span').textContent = time(seconds);
