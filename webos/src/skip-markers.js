@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Port of MediaMarker, PlaybackExtras.withChapterFallback and
 // jellyfinPlaybackExtrasFromRaw / jellyfinMediaSegmentsToMarkers.
-export const DEFAULT_INTRO_PATTERN = String.raw`(?:^|\b)(?:intro(?:duction)?|opening)(?:\b|$)|^op(?:\s?\d+)?$`;
+export const DEFAULT_INTRO_PATTERN = String.raw`(?:^|\b)(?:intro(?:duction)?|opening|logos?)(?:\b|$)|^op(?:\s?\d+)?$`;
 export const DEFAULT_CREDITS_PATTERN = String.raw`(?:^|\b)(?:outro|credits?|ending)(?:\b|$)|^ed(?:\s?\d+)?$`;
 
 function pattern(source, fallback) {

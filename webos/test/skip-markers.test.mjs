@@ -22,6 +22,30 @@ test('Plex chapters fill missing intro; native marker wins unless fallback force
   assert.deepEqual(plexPlaybackNavigation(raw,{forceSkipMarkerFallback:true}).markers, [
     {type:'intro',start:0,end:14},{type:'credits',start:100,end:120}]);
 });
+test('default intro pattern recognizes logo and logos chapter titles without matching unrelated words', () => {
+  const chapters=title=>({duration:120000,Chapter:[
+    {tag:title,startTimeOffset:0,endTimeOffset:12000},
+    {tag:'Feature',startTimeOffset:12000,endTimeOffset:120000}
+  ]});
+  for (const title of ['Logo','Logos','Studio Logo','Production logos']) {
+    assert.deepEqual(plexPlaybackNavigation(chapters(title)).markers,
+      [{type:'intro',start:0,end:12}],title);
+  }
+  for (const title of ['Logosophy','LogoType','Catalogos']) {
+    assert.deepEqual(plexPlaybackNavigation(chapters(title)).markers,[],title);
+  }
+  assert.deepEqual(plexPlaybackNavigation(chapters('Logo'),{introPattern:'^opening$'}).markers,[],
+    'an explicit custom pattern must still override the default');
+  assert.deepEqual(plexPlaybackNavigation({...chapters('Logo'),
+    Marker:[{type:'intro',startTimeOffset:2000,endTimeOffset:9000}]}).markers,
+    [{type:'intro',start:2,end:9}], 'native Plex marker still takes precedence');
+});
+test('the shared default also finds Jellyfin logo chapters', () => {
+  assert.deepEqual(jellyfinPlaybackNavigation({RunTimeTicks:1200000000,Chapters:[
+    {Name:'Studio Logos',StartPositionTicks:0},
+    {Name:'Main Feature',StartPositionTicks:120000000}
+  ]}).markers,[{type:'intro',start:0,end:12}]);
+});
 test('long opening chapter and early credits title are not false skip prompts', () => {
   const nav=plexPlaybackNavigation({duration:900000,
     Chapter:[{title:'Opening Credits',startTimeOffset:0,endTimeOffset:400000},
