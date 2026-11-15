@@ -313,6 +313,11 @@ become intro markers when a native intro marker is absent. Word boundaries,
 native marker precedence, the three-minute synthetic intro cap, and explicitly
 configured custom patterns are unchanged. The original Flutter default is
 left untouched; this is a webOS-specific requested matching rule.
+Also by user request, immediately adjacent chapter-derived intro markers
+(e.g. Logo followed by Opening) are joined into one range so one skip jumps
+past both chapters. The join permits up to 250ms of metadata rounding but not
+an intervening content chapter, and never exceeds the existing 180-second
+combined intro safety threshold. Native Plex intro ranges remain authoritative.
 
 `Player` translates `video_controls/parts/markers.dart` and
 `widgets/skip_marker_button.dart`: off/button/auto modes per marker kind,

@@ -3,6 +3,7 @@
 ## 1.8.4 — Recognize logo chapters as intros
 
 - Include `logo` and `logos` in the default intro-chapter regex, including labels such as "Studio Logos". This is a user-requested extension of upstream Plezy's default.
+- Coalesce immediately consecutive chapter-derived intro segments (such as Logos then Opening) so a single skip action passes both, without merging across scenes or exceeding the three-minute safeguard.
 - Preserve word boundaries, native marker precedence, the three-minute synthesized-intro limit, and custom intro patterns.
 - Cover Plex, Jellyfin and a playing video with chapters but no native intro marker.
 
