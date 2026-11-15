@@ -311,12 +311,26 @@ LG TV disk latency, decoder behavior or server CORS support.
 
 The webOS marker pipeline translates `MediaMarker` and
 `PlaybackExtras.withChapterFallback` from `lib/media/media_source_info.dart`,
-including the same intro/credits regex defaults, 180-second synthetic intro cap,
+including the upstream-shaped intro/credits defaults (with the user-requested
+logo extension below), 180-second synthetic intro cap,
 75%-of-chapter-timeline minimum for synthetic credits, Plex-marker precedence,
 and the chapter-fallback override. Jellyfin first attempts
 `/MediaSegments/{itemId}` as in `lib/services/jellyfin_client/parts/playback.dart`;
 Emby and older Jellyfin servers use chapter names instead. Segment failure
 does not stop video playback.
+
+**User-requested pattern extension:** The webOS default intro regex includes
+`logos?` alongside upstream's `intro`/`introduction`/`opening`/`op` matches.
+Plex/Jellyfin chapters named "Logo", "Logos", or "Studio Logos" can therefore
+become intro markers when a native intro marker is absent. Word boundaries,
+native marker precedence, the three-minute synthetic intro cap, and explicitly
+configured custom patterns are unchanged. The original Flutter default is
+left untouched; this is a webOS-specific requested matching rule.
+Also by user request, immediately adjacent chapter-derived intro markers
+(e.g. Logo followed by Opening) are joined into one range so one skip jumps
+past both chapters. The join permits up to 250ms of metadata rounding but not
+an intervening content chapter, and never exceeds the existing 180-second
+combined intro safety threshold. Native Plex intro ranges remain authoritative.
 
 `Player` translates `video_controls/parts/markers.dart` and
 `widgets/skip_marker_button.dart`: off/button/auto modes per marker kind,
