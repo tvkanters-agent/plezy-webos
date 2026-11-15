@@ -9,6 +9,7 @@ export class Player {
     this.skipButton = root.querySelector('[data-action="skip"]');
     this.chapterBoundaryDuration = null;
     this.marker = null; this.hasFirstFrame = false;
+    this.skippedMarker = null;
     this.skipDismissed = false; this.skipTimer = null; this.skipDismissTimer = null;
     this.skipFocusPending = false;
     this.autoSkipProgress = 0; this.skipCountdownStarted = 0;
@@ -195,9 +196,11 @@ export class Player {
     }, 200);
   }
   syncSkipMarker(position) {
+    const skipped = this.skippedMarker;
     const found = this.hasFirstFrame && this.session
       ? (this.session.markers || []).find(m => ['intro','credits'].includes(m.type) &&
-        this.skipMode(m) !== 'off' && position >= m.start && position < m.end) : null;
+        this.skipMode(m) !== 'off' && position >= m.start && position < m.end &&
+        !(skipped && m.type === skipped.type && m.start === skipped.start && m.end === skipped.end)) : null;
     if (found !== this.marker) {
       this.clearSkipMarker();
       this.marker = found || null;
@@ -243,6 +246,10 @@ export class Player {
   activateSkipMarker(auto = false) {
     if (!this.marker || !this.session || !this.hasFirstFrame) return;
     const marker = this.marker;
+    // LG can report the old time throughout the seek/buffer cycle. Prevent
+    // syncSkipMarker from recreating this exact prompt after we dismiss it;
+    // an explicit user seek restores eligibility if they revisit the intro.
+    this.skippedMarker = {type:marker.type, start:marker.start, end:marker.end};
     this.clearSkipMarker();
     const duration = this.timelineDuration();
     // Native Plezy hands end-of-video credits to the completion path rather
@@ -250,7 +257,7 @@ export class Player {
     // WebOS has no Play Next prompt yet, so complete the current title.
     if (marker.type === 'credits' && duration > 0 && duration - marker.end <= 1) {
       this.video.pause(); this.close(true);
-    } else this.seekTo(marker.end);
+    } else this.seekTo(marker.end, true);
   }
   dismissSkipMarker() {
     if (!this.marker) return;
@@ -450,6 +457,7 @@ export class Player {
     const gaps = this.root?.querySelector('.chapter-gaps');
     if (gaps) gaps.textContent = '';
     this.clearSkipMarker(); this.hasFirstFrame = false;
+    this.skippedMarker = null;
     this.root.querySelector('.player-title').textContent = item.title;
     this.reveal();
     if (!trackSheetFocus) this.root.querySelector('[data-action="pause"]').focus();
@@ -624,6 +632,7 @@ export class Player {
     // failed/replaced decoder must still finish the started Simkl viewing.
     if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
     this.clearSkipMarker(); this.hasFirstFrame = false;
+    this.skippedMarker = null;
     this.session = null; this.pendingStart = 0;
     this.chapterBoundaryDuration = null;
     const gaps = this.root?.querySelector('.chapter-gaps');
@@ -763,11 +772,12 @@ export class Player {
     return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
   }
   seek(delta) { this.seekTo(this.position() + delta); }
-  seekTo(position) {
+  seekTo(position, fromSkipMarker = false) {
     if (!this.session || !Number.isFinite(position)) return;
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
+    if (!fromSkipMarker) this.skippedMarker = null;
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
       try { this.video.currentTime = target; }

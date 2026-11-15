@@ -692,15 +692,21 @@ main.has-alpha-bar { padding-right:60px; }
 .alpha-window-spacer { width:100%; padding:0; margin:0; pointer-events:none; }
 
 /* Plezy SkipMarkerButton: floating tonal prompt, independently visible when
-   transport chrome hides; shared square radius and progress tint. */
+   transport chrome hides; rounded fill focus and progress tint. */
 #player .player-skip { position:absolute; z-index:7; right:24px; bottom:24px;
   display:flex; align-items:center; justify-content:center; gap:8px;
   padding:12px 16px; min-height:44px; border:0; border-radius:8px;
   font-size:16px; font-weight:600; color:#000; background:rgba(255,255,255,.9);
-  box-shadow:0 2px 8px rgba(0,0,0,.3); overflow:hidden; }
+  box-shadow:0 2px 8px rgba(0,0,0,.3); overflow:hidden;
+  -webkit-transition:background-color .15s, -webkit-transform .15s;
+  transition:background-color .15s, transform .15s; }
 #player .player-skip[hidden] { display:none; }
 #player .player-skip.with-chrome { bottom:115px; }
-#player .player-skip:focus { outline:3px solid #fff; outline-offset:3px; background:#fff; }
+/* Native FocusableWrapper uses background focus and a 1.02x paint scale,
+   not an outside outline (square on Chromium 53 despite border-radius). */
+#player .player-skip:focus { outline:none; background:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);
+  -webkit-transform:scale(1.02); transform:scale(1.02); }
 #player .player-skip .skip-progress { position:absolute; left:0; top:0; bottom:0;
   width:0; background:rgba(80,80,80,.16); pointer-events:none; }
 #player .player-skip .skip-label, #player .player-skip svg { position:relative; }
