@@ -34,9 +34,12 @@ export class Player {
       this.startAfterInitialSeek();
     });
     this.video.addEventListener('stalled', () => {
-      if (this.session && !this.seeking) this.showBuffering(true);
+      this.onPlaybackStarved();
     });
-    this.video.addEventListener('timeupdate', () => this.update());
+    this.video.addEventListener('timeupdate', () => {
+      if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
+      this.update();
+    });
     this.video.addEventListener('playing', () => {
       this.status.textContent = '';
       this.resume();
@@ -57,20 +60,26 @@ export class Player {
         this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
+      // Waiting/stalled can outlive a paused decoder (notably near EOF).
+      // Keep the first-frame and active seek-preview loading gates intact.
+      if (!this.initialSeekPending && !this.seeking && !this.video.seeking)
+        this.showBuffering(false);
       if (this.session && !this.closing && !this.remoteSeeking) {
         this.report('paused'); this.track('pause');
         if (!this.hideAfterSeek) this.reveal();
       }
     });
     this.video.addEventListener('waiting', () => {
-      if (this.session && !this.seeking) this.showBuffering(true);
+      this.onPlaybackStarved();
     });
     this.video.addEventListener('seeking', () => {
-      if (this.session) this.showBuffering(true);
+      if (this.session && !this.atMediaEnd()) this.showBuffering(true);
     });
     this.video.addEventListener('seeked', () => {
       this.startAfterInitialSeek();
-      if (this.video.readyState >= 2 && !this.initialSeekPending) this.showBuffering(false);
+      if (!this.initialSeekPending &&
+          (this.video.readyState >= 2 || this.video.paused || this.atMediaEnd()))
+        this.showBuffering(false);
     });
     this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
@@ -512,6 +521,19 @@ export class Player {
     if (!this.session) return;
     if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
     this.reveal();
+  }
+  atMediaEnd() {
+    const duration = this.video.duration;
+    return this.video.ended || (Number.isFinite(duration) && duration > 0 &&
+      this.video.currentTime >= duration - 0.15);
+  }
+  onPlaybackStarved() {
+    // HTMLMediaElement.stalled reports *network* inactivity, even when the
+    // decoder has enough buffered frames. Only show a spinner if playback
+    // actually needs more data to advance; mpv has a separate cache-pause flag.
+    if (this.session && !this.seeking && !this.initialSeekPending &&
+        !this.video.paused && !this.video.seeking && !this.atMediaEnd() &&
+        this.video.readyState < 3) this.showBuffering(true);
   }
   showBuffering(show) {
     if (!this.active) show = false;
