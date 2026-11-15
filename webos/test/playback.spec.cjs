@@ -92,6 +92,8 @@ test('failed audio restart still stops the existing Simkl viewing',async({page})
   await page.getByRole('button',{name:'Audio & Subtitles'}).click();
   await page.locator('.player-track-column').getByRole('button',{name:/English/}).click();
   await expect(page.locator('.player-status')).toContainText('HTTP 500');
+  // Track selection now keeps its sheet open even when the restart fails.
+  await page.keyboard.press('Escape');await expect(page.locator('.player-sheet')).toBeHidden();
   await page.keyboard.press('Escape');await expect(page.locator('.controls')).toBeHidden();
   await page.keyboard.press('Escape');
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
@@ -243,10 +245,19 @@ test('changing the player audio stream applies the selected Plex ID at the curre
     ]}]}]});
   await page.getByRole('button',{name:'Audio & Subtitles'}).click();
   await page.locator('.player-track-column').first().getByRole('button',{name:'French'}).click();
+  await expect(page.locator('.player-sheet')).toBeVisible();
+  await expect(page.locator('.player-track-column').first().getByRole('button',{name:'French'}))
+    .toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.player-track-column').first().getByRole('button',{name:'French'}))
+    .toBeFocused();
   await expect.poll(()=>calls.some(url=>url.pathname==='/library/parts/part' &&
     url.searchParams.get('audioStreamID')==='12' && url.searchParams.get('allParts')==='1')).toBe(true);
   await expect.poll(()=>calls.some(url=>url.pathname.endsWith('/start.m3u8') &&
     url.searchParams.get('mediaIndex')==='0')).toBe(true);
+  await page.locator('.player-track-column').last().getByRole('button',{name:'English'}).click();
+  await expect(page.locator('.player-sheet')).toBeVisible();
+  await expect(page.locator('.player-track-column').last().getByRole('button',{name:'English'}))
+    .toHaveAttribute('aria-pressed','true');
 });
 
 test('remote focus can scrub player timeline independently of playback controls',async({page})=>{

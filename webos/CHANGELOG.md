@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.7.1 — Icon-only episode menus and persistent track sheets
+
+- Show only the three-dot SVG on season episode overflow buttons, retaining the per-episode accessible name without rendering “More options” behind the row.
+- Keep episode audio/subtitle selection open after choosing either track; update the selected ticks in place so both can be chosen before closing.
+- Keep the player's TrackSheet visible through source switching and codec fallback/restarts, with the chosen track focused and the latest selection marked. Close still works through Back or the sheet's Close button.
+
 ## 1.7.0 — Carry audio and subtitle choices across a series
 
 - Carry explicit language/track choices from the player and episode menus to other episodes of the same show, including across seasons. Resolve against each episode's source stream IDs instead of reusing IDs from another file.

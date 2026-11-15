@@ -65,6 +65,16 @@ active account's memory, and applies it when playback starts. Plex stream
 selection uses the port's existing part PUT + HLS restart; this cannot provide
 MPV's seamless decoder-side switching or external subtitle search on webOS.
 Tests cover IDs including zero, menu focus, watched actions and request params.
+At the user's request, the webOS episode More options disc renders only
+`more_horiz` SVG circles, with its full per-episode name kept in `aria-label`.
+The pre-play track chooser stays open after a selection so audio and subtitles
+can be adjusted together without repeatedly opening the episode menu.
+
+Native `TrackSheet` closes on an MPV track tile tap. The user explicitly
+requested the opposite for this port: the player TrackSheet remains visible
+after a track selection, even when webOS must restart HLS to apply it. The
+restart retains the sheet and restores focus to the chosen track, including
+after a decoder fallback. Back and Close still dismiss the sheet.
 
 ### Cross-episode audio/subtitle preference carry
 
