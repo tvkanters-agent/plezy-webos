@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.5.8 — Fix false buffering spinner
+
+- Only show the playback-buffering indicator when the decoder actually needs additional data to advance, not merely because the network reports a stall.
+- Clear stale buffering on pause and at EOF, including while credits are playing; preserve startup buffering and paused seek-frame previews.
+- Cover buffered playback, pause, EOF and paused seeking with unit and browser regression tests.
+
 ## 1.5.7 — Keep fast library scrolling populated
 
 Load the visible sparse range directly in either direction, display scrolling cards independently of artwork decoding, and start adjacent metadata prefetch at least three rows ahead. Preserve the current scroll position when delayed requests complete.

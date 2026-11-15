@@ -30,6 +30,14 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   await expect.poll(()=>events.length).toBeGreaterThan(0);
   return {calls,events};
 }
+async function simulatePlaybackStarvation(page) {
+  await page.locator('video').evaluate(video => {
+    // A browser normally sends waiting with readyState < HAVE_FUTURE_DATA.
+    // Force that state when dispatching a synthetic event on the fixture.
+    Object.defineProperty(video, 'readyState', {configurable: true, value: 2});
+    video.dispatchEvent(new Event('waiting'));
+  });
+}
 test('closing playback preserves the detail screen and focused action without a blank repaint',async({page})=>{
   await setup(page);
   await page.evaluate(()=>{
@@ -273,7 +281,7 @@ test('remote seeks in hidden mode and center commits preview then dismisses cont
 test('buffering spinner takes over for waiting and clears on playback',async({page})=>{
   await setup(page);
   const spinner=page.locator('.player-buffering');
-  await page.locator('video').dispatchEvent('waiting');
+  await simulatePlaybackStarvation(page);
   await expect(spinner).toBeVisible();
   await expect(page.locator('.player-status')).toBeHidden();
   await page.locator('video').dispatchEvent('playing');
@@ -285,7 +293,7 @@ test('focus is restored to playback controls when buffering finishes',async({pag
  await setup(page);
  const pause=page.getByRole('button',{name:/^(Pause|Play)$/}).filter({has:page.locator('svg')}).first();
  await page.evaluate(()=>document.activeElement.blur());
- await page.locator('video').dispatchEvent('waiting');
+ await simulatePlaybackStarvation(page);
  await expect(page.locator('.player-buffering')).toBeVisible();
  await page.locator('video').dispatchEvent('playing');
  await expect(page.locator('.player-buffering')).toBeHidden();
@@ -298,9 +306,37 @@ test('spinner remains available after committing a remote seek with controls hid
  await page.keyboard.press('ArrowRight');
  await page.keyboard.press('Enter');
  await expect(page.locator('.controls')).toBeHidden();
- await page.locator('video').dispatchEvent('waiting');
+ await simulatePlaybackStarvation(page);
  await expect(page.locator('.player-buffering')).toBeVisible();
  await page.locator('video').dispatchEvent('playing');
+ await expect(page.locator('.player-buffering')).toBeHidden();
+});
+
+test('buffered network stalls and late EOF events do not show a false spinner',async({page})=>{
+ await setup(page);
+ const spinner=page.locator('.player-buffering');
+ await expect(spinner).toBeHidden();
+ await page.locator('video').dispatchEvent('stalled');
+ await page.locator('video').dispatchEvent('waiting');
+ await expect(spinner).toBeHidden();
+ await page.locator('video').evaluate(video => {
+   Object.defineProperty(video, 'readyState', {configurable:true, value:1});
+   Object.defineProperty(video, 'ended', {configurable:true, value:true});
+   video.dispatchEvent(new Event('stalled'));
+   video.dispatchEvent(new Event('waiting'));
+ });
+ await expect(spinner).toBeHidden();
+});
+
+test('pausing after a seek clears buffering even if the decoder stays starved',async({page})=>{
+ await setup(page);
+ await simulatePlaybackStarvation(page);
+ await expect(page.locator('.player-buffering')).toBeVisible();
+ await page.locator('[data-action="pause"]').click();
+ await expect(page.locator('video')).toHaveJSProperty('paused',true);
+ await expect(page.locator('.player-buffering')).toBeHidden();
+ await page.locator('video').dispatchEvent('waiting');
+ await page.locator('video').dispatchEvent('stalled');
  await expect(page.locator('.player-buffering')).toBeHidden();
 });
 
