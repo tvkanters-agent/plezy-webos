@@ -651,6 +651,24 @@ test('skip prompt sits above the complete transport chrome, clear of the seekbar
   expect(placement.skip).toBeLessThan(placement.timeline);
 });
 
+test('hidden-chrome skip prompt stays under the pointer through a single click',async({page})=>{
+  await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
+  await page.locator('video').evaluate(video=>{
+    video.currentTime=5;video.dispatchEvent(new Event('timeupdate'));
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#player .controls')).toBeHidden();
+  const bounds=await skip.boundingBox();
+  await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+  await expect(page.locator('#player .controls')).toBeHidden();
+  await expect(skip).toBeVisible();
+  await skip.click();
+  await expect(skip).toBeHidden();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(15);
+});
+
 test('controls keep Stop focused through intro-skip buffering and arrow navigation',async({page})=>{
   await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
   await page.locator('video').evaluate(video=>{

@@ -5,6 +5,7 @@
 - Keep the last focused transport button selected through intro-skip buffering and decoder focus loss; stop the inactivity timer from hiding actively focused controls.
 - Leave Left/Right to normal transport focus navigation, including after a timeline seek. Only the timeline or hidden video surface may initiate directional seeking.
 - Place the Skip Intro/Credits prompt above the measured controls height, clear of the seekbar on different TV layouts.
+- Keep a visible skip prompt at its current anchor during pointer interaction so revealing controls cannot move it away before the click is registered.
 - Port Plezy's Plex BIF scrub-frame reader and timeline preview tooltip, with time labels, a 50 MiB TV download limit, cancellation and frame cleanup when changing videos.
 - Regress focus restoration, navigation, skip placement, BIF parsing and rendered preview, without changing chapter or skip matching.
 
