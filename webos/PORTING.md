@@ -39,6 +39,14 @@ portrait clipping is retained.
 
 These are pointers, not claims of completed porting. The current HTML frontend still has parity gaps and must not be described as faithful merely because a similarly named feature exists.
 
+### Season initial focus
+
+On LG TV, opening a season starts remote focus on its Play button (as episode
+details already do), even though the parent-series link precedes the actions in
+the DOM. This is a user-requested focus preference; native
+`MediaDetailScreen._scheduleTvDetailReveal` currently selects primary-action
+focus for movies only. The series link stays reachable by directional input.
+
 ## Simkl-specific parity decision
 
 Upstream `SimklTracker._scrobbleBody` sends:

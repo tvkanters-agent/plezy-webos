@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.5.10 — Focus Play on season details
+
+- Default remote focus to Play when opening a season, as already done for episode details.
+- Preserve the series link and its normal directional navigation.
+- Add a browser regression for entering a season from its parent show.
+
 ## 1.5.9 — Restore horizontal shelf position on Back
 
 - Preserve the individual Home and recommended shelf scroll positions when opening and returning from a detail page, along with the existing poster focus and vertical position.
