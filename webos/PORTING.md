@@ -404,7 +404,9 @@ from track/chapter sheets. It keeps chrome visible while the user is focused
 in that strip, and Left/Right can seek only from the slider or video surface.
 Moving focus off the remote timeline finalizes its preview state. The floating
 skip prompt is positioned above the *measured* transport chrome instead of
-using a fixed bottom offset that overlaps the seekbar on different TVs.
+using a fixed bottom offset that overlaps the seekbar on different TVs. Moving
+a mouse over the floating prompt must not reveal the controls underneath it:
+that changes the prompt's anchor and can make a single click miss entirely.
 
 ### Viewport-bounded artwork and incremental catalog updates
 

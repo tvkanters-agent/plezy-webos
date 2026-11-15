@@ -184,7 +184,12 @@ export class Player {
           !this.sheet.hidden && this.openSheetAction === 'tracks-options' ? {kind, id} : null);
       };
     }
-    root.addEventListener('mousemove', () => this.reveal());
+    // A floating Skip button must not jump away from an approaching pointer:
+    // reveal() changes its anchor when chrome was hidden, between hit-test
+    // and click on slower TVs. Pointer activity on the prompt leaves it put.
+    root.addEventListener('mousemove', event => {
+      if (!this.skipButton.contains(event.target)) this.reveal();
+    });
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
   }
   get active() { return !this.root.hidden; }
