@@ -34,6 +34,8 @@ async function seasonServer(page) {
     if(url.pathname==='/library/metadata/ep1')rows=[detailed];
     if(url.pathname==='/library/parts/part' || url.pathname==='/video/:/transcode/universal/stop' ||
        url.pathname==='/style' || url.pathname==='/scrobble')return route.fulfill({json:{}});
+    if(url.pathname==='/:/scrobble' || url.pathname==='/:/unscrobble')
+      return route.fulfill({contentType:'application/xml',body:'<MediaContainer size="0"/>'});
     if(url.pathname.startsWith('/:/') || url.pathname.endsWith('/start.m3u8'))return route.fulfill({json:{}});
     return route.fulfill({json:{MediaContainer:{Metadata:rows,totalSize:rows.length}}});
   });

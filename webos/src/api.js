@@ -395,7 +395,18 @@ export class Plex {
     for(const list of lists)for(const item of list)items.set(item.id,item);
     return [...items.values()];
   }
-  async watched(item, played) { await this.get(played ? '/:/scrobble' : '/:/unscrobble', {key: item.id, identifier: 'com.plexapp.plugins.library'}); }
+  async watched(item, played) {
+    // Plex (like /:/rate and /:/timeline) can return XML or an empty 200.
+    // Upstream markAsWatched/markAsUnwatched only require HTTP success;
+    // parsing these responses as JSON falsely reports a failed watch action.
+    const path = played ? '/:/scrobble' : '/:/unscrobble';
+    const response = await fetch(this.url(path, {key:item.id,
+      identifier:'com.plexapp.plugins.library'}));
+    if (!response.ok) {
+      const error = new Error('Plex watched state returned HTTP ' + response.status + '.');
+      error.status = response.status; throw error;
+    }
+  }
   async rate(item, value) {
     if (!Number.isFinite(value) || (value !== -1 && (value < 0 || value > 10)))
       throw new Error('Invalid Plex rating.');
