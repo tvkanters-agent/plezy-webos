@@ -316,6 +316,16 @@ credits trigger title completion rather than seeking to EOF; the original
 episode queue yet. Remote/decoder timing and native media-segment transport
 on physical LG TVs remain hardware-verification tasks.
 
+Plex playback additionally fetches `/library/metadata/{ratingKey}` with
+`includeChapters=1&includeMarkers=1` independently at startup, matching
+`PlexClient.getPlaybackExtras`. Cached Home/detail metadata may not include
+`Marker` or `Chapter`, and must not be the sole source for the prompt. The
+playing session accepts the returned extras without restarting video; an
+unavailable server leaves its cached extras intact. Chapter names prefer
+Plex's `Chapter.tag` as in `plexChaptersFromCacheJson`. LG's `playing` event
+also establishes decoder playback when webOS reports a stale `readyState`;
+this is required for the first-frame gate that controls skip-prompt display.
+
 Unit tests cover parser and fallback precedence and browser tests cover
 appearance, manual/automatic skip, preferences and remote cancellation.
 
@@ -324,7 +334,10 @@ appearance, manual/automatic skip, preferences and remote cancellation.
 `MediaChapter.indexAtPosition` and `seekTargetIndex` provide the current row
 and transport jump targets. The player now reproduces `ChapterSheet`'s focused
 current row, its two-line title/time labels and supplied Plex chapter thumbnails,
-as well as `BufferRangePainter`'s 4px timeline chapter divisions. LG's existing
+as well as `BufferRangePainter`'s 4px timeline chapter divisions. Ensure the
+timestamp's minimum-width CSS only targets direct `.timeline-row` children:
+applying it to nested `.chapter-gap` spans makes each separator 52px wide
+despite an explicit 4px width. LG's existing
 transport strip adds previous/next chapter discs when metadata is present;
 media rewind/forward keys choose chapters where available, retaining timed
 seeks without chapters. The native three-second previous-chapter restart

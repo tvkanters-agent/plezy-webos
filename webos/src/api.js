@@ -447,10 +447,30 @@ export class Plex {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
         subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1}, {method: 'PUT'});
     }
+    // Native PlexClient.getPlaybackExtras reads the current metadata with
+    // includeChapters/includeMarkers. Home shelves and cached detail pages can
+    // contain only a thin item, so their embedded Marker/Chapter arrays are
+    // not sufficient to decide whether an intro is skippable. Load extras
+    // independently without delaying decoder startup; keep cached data if the
+    // request fails (as Plezy's cache fallback does).
+    const extrasPromise = this.get('/library/metadata/' + enc(item.id),
+      {includeChapters: 1, includeMarkers: 1}).then(data => {
+      const metadata = data?.MediaContainer?.Metadata;
+      if (!Array.isArray(metadata) || !metadata[0]) return null;
+      // A server may return a partial row even for the extras query. An
+      // omitted field is not the same as a supplied empty array: preserve
+      // already-known markers/chapters in that case.
+      const raw = metadata[0];
+      return plexNavigation({...raw,
+        Marker: Array.isArray(raw.Marker) ? raw.Marker : item.raw.Marker,
+        Chapter: Array.isArray(raw.Chapter) ? raw.Chapter : item.raw.Chapter},
+      options.skipSettings);
+    }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, item,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
+      extrasPromise,
       ...mediaSourceTracks(item, mediaIndex),
       options};
   }

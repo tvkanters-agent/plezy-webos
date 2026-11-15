@@ -1,9 +1,10 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
+  let metadataRequests = 0;
   await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({...skipSettings,deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
     simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),{pendingStops,skipSettings});
@@ -13,13 +14,17 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
     events.push({path:new URL(route.request().url()).pathname,body:route.request().postDataJSON()});
     return route.fulfill({json:{}});
   });
-  await page.route('http://plex.test/**',route=>{
+  await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
     if(url.pathname==='/video.webm' || url.pathname.endsWith('/start.m3u8')) {
       const match=/bytes=(\d+)-(\d*)/.exec(route.request().headers().range||'');
       if(match) {const start=+match[1],end=match[2]?+match[2]:video.length-1;
         return route.fulfill({status:206,contentType:'video/webm',headers:{'Content-Range':`bytes ${start}-${end}/${video.length}`,'Accept-Ranges':'bytes'},body:video.subarray(start,end+1)});}
       return route.fulfill({contentType:'video/webm',body:video});
+    }
+    if (url.pathname==='/library/metadata/movie' && metadataForRequest) {
+      const metadata=await metadataForRequest(++metadataRequests,item);
+      return route.fulfill({json:{MediaContainer:{Metadata:[metadata]}}});
     }
     return route.fulfill({json:url.pathname==='/hubs'?{MediaContainer:{Hub:[{title:'Movies',Metadata:[item]}]}}:{MediaContainer:{Metadata:[item]}}});
   });
@@ -124,6 +129,33 @@ test('Plex intro skip and chapter jump seek without extra Simkl scrobbles',async
  await expect(page.getByRole('button',{name:'Skip intro',exact:true})).toBeHidden();
  expect(events.filter(e=>e.path==='/scrobble/start')).toHaveLength(1);
  expect(calls.find(u=>u.pathname==='/library/metadata/movie').searchParams.get('includeMarkers')).toBe('1');
+});
+
+test('intro markers and tagged chapters load from playback metadata, not a thin cached detail',async({page})=>{
+  let releaseExtras;
+  const delayedExtras = new Promise(resolve=>{releaseExtras=resolve;});
+  const {calls}=await setup(page,{},undefined,[],{},async (number,item)=>{
+    if (number===1) return item; // Real detail pages often have no Marker or Chapter arrays.
+    await delayedExtras; // Playback must already be running while extras load.
+    return {...item,Marker:[{type:'intro',startTimeOffset:0,endTimeOffset:15000}],
+      Chapter:[{tag:'Opening',startTimeOffset:0,endTimeOffset:15000},
+        {tag:'Main feature',startTimeOffset:15000,endTimeOffset:120000}]};
+  });
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeHidden();
+  await expect(page.locator('video')).toBeVisible();
+  await page.evaluate(()=>{window.PalmSystem={};}); // Simulate LG focus handling before extras resolve.
+  releaseExtras();
+  await expect(skip).toBeVisible();
+  await expect(skip).toBeFocused();
+  await expect(page.getByRole('button',{name:'Chapters',exact:true})).toBeVisible();
+  const gap=page.locator('.chapter-gap');
+  await expect(gap).toHaveCount(1);
+  await expect(gap).toHaveCSS('width','4px');
+  expect(calls.filter(url=>url.pathname==='/library/metadata/movie' &&
+    url.searchParams.get('includeMarkers')==='1' && url.searchParams.get('includeChapters')==='1').length).toBeGreaterThanOrEqual(2);
+  await page.keyboard.press('Enter'); // A single TV OK press after auto-focus.
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(15);
 });
 
 test('Plezy chapters show current row, timestamps, artwork and timeline gaps',async({page})=>{

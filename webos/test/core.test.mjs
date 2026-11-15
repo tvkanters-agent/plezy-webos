@@ -74,8 +74,23 @@ test('Plex rejects unsupported direct play and selects HLS for HEVC/MKV',async()
   assert.equal((await new Plex(server,'device').playback(item)).transcode,true);
 });
 test('Plex subtitle off is stream id zero, not minus one',async()=>{
-  let received;const restore=mock(async(url,options)=>{received={url,options};return new Response(null,{status:204});});
+  let received;const restore=mock(async(url,options)=>{
+    if (options?.method === 'PUT') received={url,options};
+    return new Response(null,{status:204});
+  });
   try{await new Plex(server,'device').playback(plexItem,{subtitle:-1});assert.equal(new URL(received.url).searchParams.get('subtitleStreamID'),'0');assert.equal(received.options.method,'PUT');}finally{restore();}
+});
+test('Plex playback extras preserve cached markers when Plex omits that field',async()=>{
+  const item={...plexItem,raw:{...plexItem.raw,
+    Marker:[{type:'intro',startTimeOffset:1000,endTimeOffset:13000}]}};
+  const restore=mock(async()=>json({MediaContainer:{Metadata:[{ratingKey:'1'}]}}));
+  try {
+    const session=await new Plex(server,'device').playback(item);
+    const extras=await session.extrasPromise;
+    assert.equal(extras.markers.length,1);
+    assert.equal(extras.markers[0].start,1);
+    assert.equal(extras.markers[0].end,13);
+  } finally {restore();}
 });
 test('Plex TV linking requests a weak pin',async()=>{
   let received;const restore=mock(async(url)=>{received=new URL(url);return json({id:1,code:'ABCD'});});
@@ -297,7 +312,10 @@ test('Plex chosen version controls direct URL, HLS media index and track mutatio
     assert.equal(direct.audio[0].id,42);
     const converted=await api.playback(item,{mediaIndex:1,audio:42,transcode:true});
     assert.equal(new URL(converted.url).searchParams.get('mediaIndex'),'1');
-    assert.equal(calls[0].url.pathname,'/prefix/library/parts/second');
+    assert.equal(calls.some(call=>call.url.pathname==='/prefix/library/parts/second'),true);
+    assert.equal(calls.some(call=>call.url.pathname==='/prefix/library/metadata/movie' &&
+      call.url.searchParams.get('includeMarkers')==='1' &&
+      call.url.searchParams.get('includeChapters')==='1'),true);
     for(const mediaIndex of [-1,1.5,9]) await assert.rejects(api.playback(item,{mediaIndex}));
     item.raw.Media[1].Part.push({id:'third',key:'/third.mp4'});
     await assert.rejects(api.playback(item,{mediaIndex:1}),/Multi-part/);
