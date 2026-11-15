@@ -36,3 +36,12 @@ test('Plex preserves chapter title, thumbnail and explicit end for its native sh
   ]);
   assert.deepEqual(nav.markers,[{type:'intro',start:0,end:14}]);
 });
+
+test('Plex uses Chapter.tag, like the upstream playback extras mapper', () => {
+  const nav = plexPlaybackNavigation({duration:120000,Chapter:[
+    {tag:'Opening',startTimeOffset:0,endTimeOffset:16000},
+    {tag:'The story',startTimeOffset:16000}
+  ]});
+  assert.equal(nav.chapters[0].title,'Opening');
+  assert.deepEqual(nav.markers,[{type:'intro',start:0,end:16}]);
+});

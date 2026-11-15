@@ -51,7 +51,8 @@ export function plexPlaybackNavigation(raw, settings = {}) {
     .filter(c => c && valid(c.startTimeOffset))
     .map((c, i) => ({start: Number(c.startTimeOffset) / 1000,
       end: valid(c.endTimeOffset) ? Number(c.endTimeOffset) / 1000 : null,
-      title: c.title || 'Chapter ' + (i + 1), thumb: c.thumb || null}))
+      // Plex's chapter label is `tag`; `title` is used by some older servers.
+      title: c.tag || c.title || 'Chapter ' + (i + 1), thumb: c.thumb || null}))
     .filter(c => !duration || c.start < duration).sort((a, b) => a.start - b.start);
   const markers = (Array.isArray(raw.Marker) ? raw.Marker : [])
     .filter(m => m && valid(m.startTimeOffset) && valid(m.endTimeOffset))

@@ -47,8 +47,11 @@ export class Player {
     this.video.addEventListener('playing', () => {
       this.status.textContent = '';
       this.resume();
-      this.startAfterInitialSeek();
-      if (!this.initialSeekPending && this.video.readyState >= 2) this.hasFirstFrame = true;
+      // HTMLMediaElement.playing guarantees decoder playback; webOS 4.4 can
+      // report readyState 1 during real frames. Do not hide a real intro prompt
+      // behind an unreliable HAVE_CURRENT_DATA gate.
+      this.startAfterInitialSeek(true);
+      if (!this.initialSeekPending) this.hasFirstFrame = true;
       this.update();
       this.focusSkipMarkerIfReady();
       if(!this.initialSeekPending) this.showBuffering(false);
@@ -294,6 +297,24 @@ export class Player {
       layer.appendChild(gap);
     }
   }
+  populateChapterControls(session) {
+    const chapters = this.root.querySelector('[data-chapter]');
+    chapters.textContent = '';
+    const heading = document.createElement('option');
+    heading.value = ''; heading.textContent = 'Jump to chapter'; chapters.append(heading);
+    (session.chapters || []).forEach(chapter => {
+      const option = document.createElement('option'); option.value = chapter.start;
+      option.textContent = time(chapter.start) + ' · ' + chapter.title; chapters.append(option);
+    });
+    const available = !!session.chapters?.length;
+    this.root.querySelector('[data-chapters]').hidden = !available;
+    for (const action of ['chapter-options', 'previous-chapter', 'next-chapter'])
+      this.root.querySelector('[data-action="' + action + '"]').hidden = !available;
+    this.chapterBoundaryDuration = null;
+    this.renderChapterBoundaries();
+    if (!this.sheet.hidden && this.openSheetAction === 'chapter-options')
+      this.openSheet('chapter-options'); // Refresh a chapter sheet opened before extras arrived.
+  }
   openSheet(action, preferredTrack = null) {
     const kind = {options:'settings', 'tracks-options':'tracks',
       'chapter-options':'chapter'}[action];
@@ -437,6 +458,13 @@ export class Player {
       session = await api.playback(item, {...options, skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
+      if (session.extrasPromise) session.extrasPromise.then(extras => {
+        if (generation !== this.generation || this.session !== session || !extras) return;
+        session.markers = extras.markers;
+        session.chapters = extras.chapters;
+        this.populateChapterControls(session);
+        this.update();
+      });
       if (session.markerPromise) session.markerPromise.then(markers => {
         if (generation !== this.generation || this.session !== session || !markers) return;
         session.markers = markers;
@@ -463,17 +491,7 @@ export class Player {
       this.root.querySelector('[data-action="tracks-options"]').hidden =
         session.audio.length <= 1 && session.subtitles.length === 0;
       if (trackSheetFocus) this.openSheet('tracks-options', trackSheetFocus);
-      const chapters = this.root.querySelector('[data-chapter]'); chapters.textContent = '';
-      const heading = document.createElement('option'); heading.value = ''; heading.textContent = 'Jump to chapter'; chapters.append(heading);
-      (session.chapters || []).forEach(chapter => {
-        const option = document.createElement('option'); option.value = chapter.start;
-        option.textContent = time(chapter.start) + ' · ' + chapter.title; chapters.append(option);
-      });
-      this.root.querySelector('[data-chapters]').hidden = !session.chapters?.length;
-      this.root.querySelector('[data-action="chapter-options"]').hidden = !session.chapters?.length;
-      this.root.querySelector('[data-action="previous-chapter"]').hidden = !session.chapters?.length;
-      this.root.querySelector('[data-action="next-chapter"]').hidden = !session.chapters?.length;
-      this.renderChapterBoundaries();
+      this.populateChapterControls(session);
       // Keep the opening frame invisible until the resume target has been
       // sought and decoded. Loading indicators remain independently visible.
       this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
@@ -543,12 +561,12 @@ export class Player {
     if (!this.pendingStart && !this.initialSeekPending)
       clearTimeout(this.startTimeout);
   }
-  startAfterInitialSeek() {
+  startAfterInitialSeek(playing = false) {
     if(!this.initialSeekPending || this.pendingStart || !this.session)return;
-    if(this.video.seeking || this.video.readyState<2 ||
+    if(this.video.seeking || (!playing && this.video.readyState<2) ||
        Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
     this.initialSeekPending=false;
-    this.hasFirstFrame = this.video.readyState >= 2;
+    this.hasFirstFrame = playing || this.video.readyState >= 2;
     this.video.style.visibility='visible';
     if (this.skipButton) this.update();
     clearTimeout(this.startTimeout);

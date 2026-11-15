@@ -60,3 +60,17 @@ test('release removes native sources before load, so reopening cannot select an 
   await player.release();
   assert.deepEqual(operations,['pause','remove src','remove source','load']);
 });
+
+test('LG playing event releases the first-frame gate despite stale readyState', () => {
+  const player=Object.assign(Object.create(Player.prototype),{
+    video:{readyState:1,seeking:false,currentTime:45,style:{}},
+    session:{start:45},pendingStart:0,initialSeekPending:true,
+    initialSeekTarget:45,skipButton:null,hasFirstFrame:false,showBuffering(){}
+  });
+  player.startAfterInitialSeek();
+  assert.equal(player.initialSeekPending,true);
+  player.startAfterInitialSeek(true);
+  assert.equal(player.initialSeekPending,false);
+  assert.equal(player.hasFirstFrame,true);
+  assert.equal(player.video.style.visibility,'visible');
+});
