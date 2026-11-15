@@ -225,6 +225,42 @@ test('previous and next chapter controls use the same traversal as Plezy',async(
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
 });
 
+test('Programme up/down navigate chapters with Plezy’s three-second restart rule',async({page})=>{
+  await setup(page,{Chapter:[{title:'First',startTimeOffset:0},
+    {title:'Second',startTimeOffset:10000},{title:'Third',startTimeOffset:45000}]});
+  await page.locator('video').evaluate(video=>video.pause());
+  const position=()=>page.locator('video').evaluate(video=>video.currentTime);
+
+  // LG's legacy Programme +/- events are PageUp / PageDown (33 / 34).
+  await page.keyboard.press('PageUp');
+  await expect.poll(position).toBeGreaterThanOrEqual(10);
+  await page.keyboard.press('PageUp');
+  await expect.poll(position).toBeGreaterThanOrEqual(45);
+  await page.keyboard.press('PageUp'); // No wraparound at the last chapter.
+  await expect.poll(position).toBeGreaterThanOrEqual(45);
+
+  await page.locator('video').evaluate(video=>{video.currentTime=14;});
+  await page.keyboard.press('PageDown'); // >3 s into chapter: restart it.
+  await expect.poll(position).toBeGreaterThanOrEqual(10);
+  await expect.poll(position).toBeLessThan(11);
+  await page.keyboard.press('PageDown'); // At its start: previous chapter.
+  await expect.poll(position).toBeLessThan(1);
+  await page.keyboard.press('PageDown'); // No wraparound at title start.
+  await expect.poll(position).toBeLessThan(1);
+});
+
+test('Programme chapter keys preserve an open player sheet',async({page})=>{
+  await setup(page,{Chapter:[{title:'First',startTimeOffset:0},
+    {title:'Second',startTimeOffset:10000}]});
+  await page.getByRole('button',{name:'Chapters',exact:true}).click();
+  const focused=page.locator('.player-chapter-option:focus');
+  await expect(focused).toHaveCount(1);
+  await page.keyboard.press('PageUp');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
+  await expect(page.locator('.player-sheet')).toBeVisible();
+  await expect(focused).toHaveCount(1);
+});
+
 test('selected Plex version survives compatible playback restart',async({page})=>{
  const {calls}=await setup(page,{Media:[
    {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'first',key:'/wrong.webm'}]},

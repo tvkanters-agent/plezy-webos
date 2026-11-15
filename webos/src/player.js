@@ -844,10 +844,13 @@ export class Player {
     if (code === 13 && this.seeking) {
       event.preventDefault(); this.commitSeek(); return true;
     }
-    if ([415, 19, 10252, 32, 412, 417].includes(code)) {
+    // Older LG remotes expose Programme +/- as PageUp/PageDown (33/34).
+    // Newer webOS versions reserve Channel +/- for the TV itself, so these
+    // mappings apply only when the platform actually delivers the key event.
+    if ([415, 19, 10252, 32, 412, 417, 33, 34].includes(code)) {
       event.preventDefault();
-      if (code === 412) this.seekChapter(false);
-      else if (code === 417) this.seekChapter(true);
+      if (code === 412 || code === 34) this.seekChapter(false);
+      else if (code === 417 || code === 33) this.seekChapter(true);
       else if (code === 415) this.video.play().catch(() => this.failed());
       else if (code === 19) this.video.pause();
       else this.toggle();

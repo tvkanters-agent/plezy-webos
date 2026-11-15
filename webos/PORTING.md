@@ -370,6 +370,18 @@ media rewind/forward keys choose chapters where available, retaining timed
 seeks without chapters. The native three-second previous-chapter restart
 threshold and start-of-title fallback are preserved.
 
+Programme Up/Down (legacy PageUp/PageDown keycodes 33/34) now use this same
+next/previous chapter traversal and the existing timed seek fallback when no
+chapters exist. These buttons are **not guaranteed to work on LG hardware**:
+the older NetCast remote API mapped Programme +/- to Page Up/Down, but LG's
+current webOS TV Magic Remote documentation reserves Channel +/- as system
+buttons and says web apps cannot receive them. The handler only works if a
+specific TV/remote sends those legacy events (or a keyboard sends PageUp/Down).
+No privileged key interception is attempted. Physical LG C8 verification is
+still required. References:
+https://webostv.developer.lge.com/develop/guides/magic-remote
+https://forum.webostv.developer.lge.com/t/cannot-press-channel-up-down-to-trigger-an-event/18008
+
 When a skip marker first becomes visible during active TV playback, focus goes
 to its floating action so one LG OK press skips it. If the first decoded frame
 arrives while playback is still paused, focus waits for `playing`; an open
