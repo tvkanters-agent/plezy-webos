@@ -143,6 +143,19 @@ test('Plex chapter named Studio Logos offers Skip intro without a native marker'
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(12);
 });
 
+test('one Skip Intro click bypasses adjacent Logo and Opening chapters',async({page})=>{
+  await setup(page,{Chapter:[
+    {tag:'Studio Logos',startTimeOffset:0,endTimeOffset:8000},
+    {tag:'Opening',startTimeOffset:8000,endTimeOffset:25000},
+    {tag:'Main Feature',startTimeOffset:25000,endTimeOffset:120000}
+  ]});
+  const skip=page.getByRole('button',{name:'Skip intro'});
+  await expect(skip).toBeVisible();
+  await skip.click();
+  await expect(skip).toBeHidden();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(25);
+});
+
 test('intro markers and tagged chapters load from playback metadata, not a thin cached detail',async({page})=>{
   let releaseExtras;
   const delayedExtras = new Promise(resolve=>{releaseExtras=resolve;});
