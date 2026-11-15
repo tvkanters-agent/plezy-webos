@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.5.11 — Larger alphabet index characters
+
+- Enlarge the library alphabet rail letters from 10px to 14px on normal TV viewports, with 22px circular markers and a 24px-wide rail.
+- Keep the full A-Z index visible on shorter displays, scaling the letters and markers down when needed and updating their sizes on resize.
+- Preserve the rail's right-side overscan, card focus clearance and keyboard navigation; add browser regression coverage.
+
 ## 1.5.10 — Focus Play on season details
 
 - Default remote focus to Play when opening a season, as already done for episode details.
