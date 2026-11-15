@@ -255,6 +255,16 @@ both entering the first card and leaving the pane while data is pending.
 
 On webOS, Left from the leftmost content item transfers focus to the vertically nearest visible sidebar destination instead of the selected destination. CastMemberStrip retains internal Left/Right movement, but Left from its first member exits instead of saturating (a user-requested departure from Flutter). Right from the sidebar restores the previously focused content item. Browser tests cover this behavior.
 
+### Locked-focus horizontal hub boundaries
+
+Native `HubSection._handleKeyEvent` consumes Right even at its final card, so
+another hub can only receive focus through vertical navigation. The webOS
+`main .cards` rows use native button focus instead of one Flutter `FocusNode`;
+Right therefore searches only the current carousel. Reaching the last card
+leaves focus and the other carousels' scroll positions unchanged. Left from
+the first card continues to exit to the sidebar as explicitly requested.
+Multi-carousel browser tests cover the right boundary and normal movement.
+
 ### Cached navigation and artwork under memory pressure
 
 The source `OptimizedMediaImage`, `PlexImageCacheManager` and library prefetch

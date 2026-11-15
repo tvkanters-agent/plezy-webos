@@ -379,6 +379,46 @@ test('Back restores the horizontal position of the Home shelf, not only its focu
   expect(await shelf.evaluate(row=>row.scrollLeft)).toBe(before);
 });
 
+test('Right stays in its Home carousel and stops at the last card',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'device',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]
+  })));
+  const short=Array.from({length:3},(_,i)=>({ratingKey:'short'+i,title:'Short '+i,type:'movie'}));
+  const long=Array.from({length:15},(_,i)=>({ratingKey:'long'+i,title:'Long '+i,type:'movie'}));
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    return route.fulfill({json:path==='/hubs'
+      ? {MediaContainer:{Hub:[{title:'Short row',Metadata:short},{title:'Long row',Metadata:long}]}}
+      : {MediaContainer:{Metadata:[]}}});
+  });
+  await page.goto('/');
+  const shelves=page.locator('main .shelf .cards');
+  await expect(shelves).toHaveCount(2);
+  const first=shelves.nth(0).locator('.card'),second=shelves.nth(1).locator('.card');
+  await first.first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(first.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(first.last()).toBeFocused();
+  const secondScroll=await shelves.nth(1).evaluate(row=>row.scrollLeft);
+  for(let i=0;i<4;i++)await page.keyboard.press('ArrowRight');
+  await expect(first.last()).toBeFocused();
+  expect(await shelves.nth(1).evaluate(row=>row.scrollLeft)).toBe(secondScroll);
+
+  await page.keyboard.press('ArrowDown');
+  await expect(shelves.nth(1).locator('.card:focus')).toHaveCount(1);
+
+  // Each row still moves independently; reaching the end of the longer row
+  // also consumes Right, without selecting an unrelated control.
+  await second.first().focus();
+  for(let i=0;i<long.length-1;i++)await page.keyboard.press('ArrowRight');
+  await expect(second.last()).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(second.last()).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(second.nth(long.length-2)).toBeFocused();
+});
+
 test('Plex PIN login offers a choice when multiple servers are reachable',async({page})=>{
   await page.route('https://plex.tv/**',route=>{
     const pathname=new URL(route.request().url()).pathname;

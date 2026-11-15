@@ -1,5 +1,10 @@
 # webOS changelog
 
+## 1.8.1 — Keep Right navigation within each carousel
+
+- Match Plezy's locked-focus hub rows: Right moves to the next card in the same carousel, but does nothing at its final card instead of moving into another carousel.
+- Preserve independent horizontal scrolling, Left-to-sidebar navigation and vertical movement between Home rows. Add a multi-carousel browser regression.
+
 ## 1.8.0 — Chapter controls and one-press intro skipping
 
 - Follow Plezy's chapter sheet: mark and initially focus the chapter currently playing, show title and timestamp on separate lines, and display chapter thumbnails supplied by Plex.

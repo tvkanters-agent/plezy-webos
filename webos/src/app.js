@@ -2692,6 +2692,14 @@ window.addEventListener('keydown', event => {
       if(previous){focusWithoutJump(previous);return;}
     }
     const source = inRail ? nav : main;
+    // HubSection consumes Right inside its locked-focus carousel, including
+    // at the last card. Searching the whole pane here can jump into a lower
+    // shelf whose cards happen to extend farther to the right.
+    if (inMain && direction === 'right' && current.matches('.cards .card')) {
+      const next = choose(validControls(current.closest('.cards')), 'right');
+      if (next) focusWithoutJump(next);
+      return;
+    }
     // Spatial search must not send Left from the first artwork column to
     // a filter button somewhere up the screen. Flutter's D-pad focus boundary
     // returns to the last focused rail destination when the current row ends.
