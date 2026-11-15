@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.6.0 — Episode menus and combined audio/subtitle selection
+
+- Open a combined audio/subtitle track picker from the player, with labeled source streams, Off for subtitles and current-selection indicators, following Plezy's TrackSheet.
+- Add episode-specific More options to episode details and season-list rows; watched/unwatched actions respect partially watched state.
+- Allow choosing source audio/subtitle tracks per episode before playback, fetching complete stream metadata when season lists omit it. Pass selections to Plex/Jellyfin playback instead of changing all episodes.
+- Preserve remote focus through menus, track selection and Back; add source-ID and browser regression coverage.
+
 ## 1.5.11 — Larger alphabet index characters
 
 - Enlarge the library alphabet rail letters from 10px to 14px on normal TV viewports, with 22px circular markers and a 24px-wide rail.

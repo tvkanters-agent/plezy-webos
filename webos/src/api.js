@@ -73,6 +73,33 @@ export function plexTrackLabel(stream, kind, index = 0) {
   return {primary, secondary: descriptions.join(' · '),
     label: primary + (descriptions.length ? ' · ' + descriptions.join(' · ') : '')};
 }
+// The same source stream catalog backs the pre-play episode picker and the
+// video player's TrackSheet equivalent. A season listing can omit Part.Stream;
+// callers must fetch full episode metadata before deciding no tracks exist.
+export function mediaSourceTracks(item, mediaIndex = 0) {
+  const raw = item?.raw || {};
+  const plexMedia = (raw.Media || [])[mediaIndex];
+  const plexPart = plexMedia && (plexMedia.Part || [])[0];
+  if (plexPart) {
+    const streams = plexPart.Stream || [];
+    return {
+      audio: streams.filter(s => Number(s.streamType) === 2).map((s, i) =>
+        ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
+          ...plexTrackLabel(s, 'audio', i)})),
+      subtitles: streams.filter(s => Number(s.streamType) === 3).map((s, i) =>
+        ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
+          ...plexTrackLabel(s, 'subtitle', i)}))
+    };
+  }
+  const source = (raw.MediaSources || [])[mediaIndex];
+  const streams = source?.MediaStreams || raw.MediaStreams || [];
+  const make = (s, i) => ({id:s.Index, selected:!!s.IsDefault || !!s.IsSelected,
+    ...plexTrackLabel({language:s.Language, title:s.Title,
+      displayTitle:s.DisplayTitle, codec:s.Codec, channels:s.Channels,
+      forced:s.IsForced}, s.Type === 'Audio' ? 'audio' : 'subtitle', i)});
+  return {audio:streams.filter(s => s.Type === 'Audio').map(make),
+    subtitles:streams.filter(s => s.Type === 'Subtitle').map(make)};
+}
 function jellyItem(raw) {
   return {id: raw.Id, title: raw.Name || 'Untitled', type: raw.Type,
     subtitle: raw.SeriesName || String(raw.ProductionYear || ''),
@@ -406,10 +433,7 @@ export class Plex {
       sessionId, sourceId: String(part.id), transcode, item,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
-      audio: (part.Stream || []).filter(s => s.streamType === 2)
-        .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'audio', index)})),
-      subtitles: (part.Stream || []).filter(s => s.streamType === 3)
-        .map((s, index) => ({id:s.id, ...plexTrackLabel(s, 'subtitle', index)})),
+      ...mediaSourceTracks(item, mediaIndex),
       options};
   }
   async report(session, state, position, duration) {
@@ -545,8 +569,7 @@ export class Jellyfin {
       DeviceId: this.deviceId, PlaySessionId: data.PlaySessionId}) : this.url(streamPath),
       sessionId: data.PlaySessionId, sourceId: source.Id, transcode: !direct, item, start: options.start || 0, options,
       ...navigation, markerPromise,
-      audio: (source.MediaStreams || []).filter(s => s.Type === 'Audio').map(s => ({id: s.Index, label: s.DisplayTitle || s.Language || s.Codec})),
-      subtitles: (source.MediaStreams || []).filter(s => s.Type === 'Subtitle').map(s => ({id: s.Index, label: s.DisplayTitle || s.Language || s.Codec}))};
+      ...mediaSourceTracks({raw:{MediaSources:[source]}})};
   }
   async report(session, state, position) {
     const path = state === 'start' ? '/Sessions/Playing' : state === 'stopped' ? '/Sessions/Playing/Stopped' : '/Sessions/Playing/Progress';

@@ -47,6 +47,25 @@ the DOM. This is a user-requested focus preference; native
 `MediaDetailScreen._scheduleTvDetailReveal` currently selects primary-action
 focus for movies only. The series link stays reachable by directional input.
 
+### Episode source-track menus
+
+Native `EpisodeCard` opens `MediaContextMenu` on long press or secondary tap;
+`_buildItemMenuActions` offers watched/unwatched according to the episode's
+current and partial progress. The webOS season row provides a visible More
+options disc because LG TV remotes have no reliable right-click/long-press
+equivalent. Episode detail More options uses the same actions.
+
+Native `TrackChapterControls` opens a single `TrackSheet` with source audio and
+subtitle columns and selected-track ticks. The player now uses that combined
+structure, selecting source IDs from `Part.Stream` / MediaBrowser `MediaStreams`.
+The original sheet controls an existing MPV player. The requested pre-play
+episode selector is a webOS-only adaptation: it reads complete episode metadata
+if the season listing omitted streams, stores the choice for that episode in the
+active account's memory, and applies it when playback starts. Plex stream
+selection uses the port's existing part PUT + HLS restart; this cannot provide
+MPV's seamless decoder-side switching or external subtitle search on webOS.
+Tests cover IDs including zero, menu focus, watched actions and request params.
+
 ## Simkl-specific parity decision
 
 Upstream `SimklTracker._scrobbleBody` sends:

@@ -85,13 +85,12 @@ test('Back during delayed stream cleanup cannot resurrect playback',async({page}
   await expect(page.getByRole('heading',{name:'Test Movie'})).toBeVisible();
 });
 test('failed audio restart still stops the existing Simkl viewing',async({page})=>{
-  const {events}=await setup(page);
+  const {events}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:21,languageCode:'eng'}]}]}]});
   // Add a real server audio option to the next metadata-independent restart.
   await page.route('http://plex.test/library/parts/part**',route=>route.fulfill({status:500}));
-  // The default selector is enough to exercise the track PUT before opening HLS.
-  await page.getByRole('button',{name:'Playback settings'}).click();
-  await page.getByRole('button',{name:'Subtitles',exact:true}).click();
-  await page.getByRole('button',{name:'Subtitles off',exact:true}).click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').getByRole('button',{name:/English/}).click();
   await expect(page.locator('.player-status')).toContainText('HTTP 500');
   await page.keyboard.press('Escape');await expect(page.locator('.controls')).toBeHidden();
   await page.keyboard.press('Escape');
@@ -186,9 +185,9 @@ test('compound playback SVGs use legible numerals and correctly scaled individua
     expect(dimensions.width).toBeGreaterThan(8);
     expect(dimensions.width).toBeLessThan(dimensions.canvasWidth);
   }
-  const audio=page.getByRole('button',{name:'Audio tracks'}).locator('svg');
-  await expect(audio.locator('path[fill="currentColor"]')).toHaveCount(1);
-  await expect(audio.locator('path[fill="none"][stroke="currentColor"]')).toHaveCount(1);
+  const tracks=page.locator('#player [data-action="tracks-options"] svg');
+  await expect(tracks.locator('rect')).toHaveCount(1);
+  await expect(tracks.locator('path')).toHaveCount(1);
   const settings=page.getByRole('button',{name:'Playback settings'}).locator('svg');
   await expect(settings.locator('circle')).toHaveCount(3);
   const bounds=await settings.locator('circle').evaluateAll(nodes=>nodes.map(n=>n.getBBox().width));
@@ -215,14 +214,39 @@ test('video settings use a Plezy-style side sheet rather than browser dropdown t
   await expect(page.locator('#player')).toBeVisible();
 });
 
-test('audio, subtitle and chapter buttons open focused choice sheets',async({page})=>{
-  await setup(page,{Chapter:[{title:'Beginning',startTimeOffset:0},{title:'Later',startTimeOffset:45000}]});
-  await page.getByRole('button',{name:'Audio tracks'}).click();
-  await expect(page.locator('[data-sheet-title]')).toHaveText('Audio tracks');
-  await expect(page.getByRole('button',{name:'Default audio'})).toBeVisible();
+test('Plezy combined audio/subtitle track sheet shows both columns and selected streams',async({page})=>{
+  await setup(page,{Chapter:[{title:'Beginning',startTimeOffset:0},{title:'Later',startTimeOffset:45000}],
+    Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
+      {streamType:2,id:12,languageCode:'fra',codec:'ac3'},
+      {streamType:3,id:21,languageCode:'eng',codec:'srt'}
+    ]}]}]});
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await expect(page.locator('[data-sheet-title]')).toHaveText('Audio & Subtitles');
+  await expect(page.locator('.player-track-column')).toHaveCount(2);
+  await expect(page.locator('.player-track-column').first().getByRole('heading',{name:'Audio'})).toBeVisible();
+  await expect(page.locator('.player-track-column').last().getByRole('heading',{name:'Subtitles'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/English.*AAC/})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:'Off'})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:/English.*AAC/})).toBeFocused();
   await page.getByRole('button',{name:'Close playback settings'}).click();
   await page.getByRole('button',{name:'Chapters',exact:true}).click();
   await expect(page.getByRole('button',{name:/Later/})).toBeVisible();
+});
+
+test('changing the player audio stream applies the selected Plex ID at the current position',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1},
+      {streamType:2,id:12,languageCode:'fra',codec:'ac3'},
+      {streamType:3,id:21,languageCode:'eng'}
+    ]}]}]});
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').first().getByRole('button',{name:'French'}).click();
+  await expect.poll(()=>calls.some(url=>url.pathname==='/library/parts/part' &&
+    url.searchParams.get('audioStreamID')==='12' && url.searchParams.get('allParts')==='1')).toBe(true);
+  await expect.poll(()=>calls.some(url=>url.pathname.endsWith('/start.m3u8') &&
+    url.searchParams.get('mediaIndex')==='0')).toBe(true);
 });
 
 test('remote focus can scrub player timeline independently of playback controls',async({page})=>{
@@ -344,7 +368,7 @@ test('subtitle descriptions occupy a distinct line under primary track labels',a
  await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
    Part:[{id:'part',key:'/video.webm',Stream:[
      {id:31,streamType:3,languageCode:'eng',title:'English SDH',displayTitle:'English (SDH)'}]}]}]});
- await page.getByRole('button',{name:'Subtitles'}).click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
  const row=page.locator('.player-options-list button').filter({hasText:'SDH'}).first();
  await expect(row.locator('strong')).toBeVisible();
  await expect(row.locator('small')).toBeVisible();

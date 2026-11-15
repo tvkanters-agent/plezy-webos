@@ -1,7 +1,7 @@
 import './compat.js';
 // SPDX-License-Identifier: GPL-3.0-only
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
-import {client, Jellyfin, Plex, plexPin, pollPlexPin, plexServers} from './api.js';
+import {client, Jellyfin, Plex, mediaSourceTracks, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
@@ -35,6 +35,10 @@ let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], r
 // Bounded detached DOM snapshots keep returning to a library instantaneous.
 const rootSnapshots = new Map();
 let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
+let episodeTrackReturnFocus = null;
+let episodeTrackGeneration = 0;
+const episodeTrackChoices = new Map();
+function episodeTrackKey(item, index) { return item.id + ':' + index; }
 let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
@@ -130,6 +134,7 @@ let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
 function setClient() {
   // Never reuse catalog metadata across accounts or server connections.
   catalogCache.clear();
+  episodeTrackChoices.clear();
   collectionIndex.clear();
   clearNavigationHistory();
   const server = activeServer();
@@ -410,6 +415,12 @@ function detailMoreOptions(options) {
   const trigger = detailButton('More options', () => {
     if (!menu.hidden) { closeDetailMenu(); return; }
     closeDetailMenu();
+    menu.textContent = '';
+    const entries = typeof options === 'function' ? options() : options;
+    entries.forEach(option => menu.append(button(option.label, () => {
+      closeDetailMenu();
+      return option.action();
+    }, 'detail-more-option')));
     menu.hidden = false;
     trigger.setAttribute('aria-expanded', 'true');
     detailMenu = {menu, trigger};
@@ -417,12 +428,105 @@ function detailMoreOptions(options) {
   }, 'more', 'detail-icon');
   trigger.setAttribute('aria-haspopup', 'true');
   trigger.setAttribute('aria-expanded', 'false');
-  options.forEach(option => menu.append(button(option.label, () => {
-    closeDetailMenu();
-    option.action();
-  }, 'detail-more-option')));
   group.append(trigger, menu);
   return group;
+}
+// EpisodeCard's context menu offers the watched actions for the fresh item
+// state, including BOTH actions for partially watched episodes (upstream
+// MediaContextMenu._buildItemMenuActions). Source track choices are available
+// before playback as a TV-specific entry to the original TrackSheet controls.
+function episodeMenuActions(item, onChanged = () => {}) {
+  const progress = item.resume > 0;
+  const entries = [];
+  async function mark(watched) {
+    const sourceApi = api;
+    await sourceApi.watched(item, watched);
+    if (sourceApi !== api) return;
+    item.watched = watched;
+    item.resume = 0;
+    if (item.raw) { item.raw.viewCount = watched ? 1 : 0; item.raw.viewOffset = 0; }
+    catalogCache.clear();
+    if (sourceApi instanceof Plex) simklTracker.markWatched(sourceApi, item, watched);
+    onChanged();
+    notify(watched ? 'Marked as watched' : 'Marked as unwatched');
+  }
+  if (!item.watched || progress) entries.push({label:'Mark as Watched',action:() => mark(true)});
+  if (item.watched || progress) entries.push({label:'Mark as Unwatched',action:() => mark(false)});
+  entries.push({label:'Audio & Subtitles', action:() => showEpisodeTrackSheet(item)});
+  return entries;
+}
+function closeEpisodeTrackSheet() {
+  ++episodeTrackGeneration;
+  dialog.hidden = true;
+  dialog.classList.remove('episode-track-dialog');
+  const target = episodeTrackReturnFocus;
+  episodeTrackReturnFocus = null;
+  if (target?.isConnected) focusWithoutJump(target, false);
+  else focusFirst();
+}
+// Pre-play track selection is a narrow webOS adaptation. The desktop
+// TrackSheet changes an already running MPV stream; the TV stores the same
+// source stream IDs on this episode and passes them to playback negotiation.
+async function showEpisodeTrackSheet(item) {
+  const sourceApi = api, openedAt = revision, generation = ++episodeTrackGeneration;
+  const mediaIndex = route.type === 'detail' ? route.mediaIndex || 0 : 0;
+  const preferenceKey = episodeTrackKey(item, mediaIndex);
+  episodeTrackReturnFocus = document.activeElement;
+  dialog.textContent = '';
+  dialog.classList.add('episode-track-dialog');
+  const heading = el('h2', 'Audio & Subtitles · ' + item.title);
+  const close = button('Close', closeEpisodeTrackSheet, 'episode-track-close');
+  const status = el('p', 'Loading tracks…', 'muted');
+  const columns = el('div', undefined, 'episode-track-columns');
+  dialog.append(heading, columns, status, close);
+  dialog.hidden = false;
+  focusWithoutJump(close, false);
+  try {
+    const isComplete = source => source.raw?.Media?.[mediaIndex]?.Part?.[0]?.Stream ||
+      source.raw?.MediaSources?.[mediaIndex]?.MediaStreams || source.raw?.MediaStreams;
+    // Plex listing rows commonly omit Stream. Never infer "no tracks" from
+    // a season's lightweight children response.
+    const detailed = isComplete(item) ? item : await sourceApi.detail(item.id, 'episode');
+    if (api !== sourceApi || revision !== openedAt || generation !== episodeTrackGeneration || dialog.hidden ||
+        !episodeTrackReturnFocus) return;
+    if (detailed !== item) Object.assign(item, detailed);
+    const tracks = mediaSourceTracks(detailed, mediaIndex);
+    const prior = episodeTrackChoices.get(preferenceKey) || {};
+    columns.textContent = '';
+    const selected = {
+      audio: prior.audio !== undefined ? prior.audio :
+        (tracks.audio.find(track => track.selected) || tracks.audio[0])?.id,
+      subtitle: prior.subtitle !== undefined ? prior.subtitle :
+        (tracks.subtitles.find(track => track.selected) || {id:-1}).id
+    };
+    const makeColumn = (kind, name, tracksForKind) => {
+      const column = el('div', undefined, 'episode-track-column');
+      column.append(el('h3', name));
+      tracksForKind.forEach(track => {
+        const label = track.primary || track.label;
+        const choice = button('', () => {
+          episodeTrackChoices.set(preferenceKey,
+            {...episodeTrackChoices.get(preferenceKey),[kind]:Number(track.id)});
+          closeEpisodeTrackSheet();
+        }, 'episode-track-option');
+        choice.setAttribute('aria-label', label);
+        choice.setAttribute('aria-pressed', String(String(selected[kind]) === String(track.id)));
+        choice.append(el('strong',label));
+        if(track.secondary)choice.append(el('small',track.secondary));
+        if(String(selected[kind])===String(track.id))choice.append(el('span','✓','track-check'));
+        column.append(choice);
+      });
+      columns.append(column);
+    };
+    if(tracks.audio.length)makeColumn('audio','Audio',tracks.audio);
+    makeColumn('subtitle','Subtitles', [{id:-1,primary:'Off'}].concat(tracks.subtitles));
+    status.remove();
+    const focus = columns.querySelector('button[aria-pressed="true"]') || columns.querySelector('button');
+    if (focus) focusWithoutJump(focus, false);
+  } catch(error) {
+    if (!dialog.hidden && generation === episodeTrackGeneration && episodeTrackReturnFocus && api === sourceApi)
+      status.textContent = 'Could not load tracks: ' + error.message;
+  }
 }
 function resolutionLabel(value) {
   if (value == null || value === '') return '';
@@ -788,6 +892,7 @@ function back() {
   ++navigationIntent;
   if (detailMenu) { closeDetailMenu(); return; }
   if (!dialog.hidden) {
+    if(episodeTrackReturnFocus){closeEpisodeTrackSheet();return;}
     if(ratingDialogReturnFocus){closeRatingSheet();return;}
     if (dialog.classList.contains('exit-dialog')) { dismissExitDialog(); return; }
     dialog.hidden = true; focusFirst(); return;
@@ -1123,6 +1228,7 @@ function cards(items, grid = false) {
 // index/title, 3-line synopsis and duration/air-date/quality metadata.
 function episodeCard(item) {
   const label = (item.raw?.index != null ? item.raw.index + '. ' : '') + item.title;
+  const entry = el('div', undefined, 'episode-entry');
   const node = button('', () => play(item, item.resume), 'episode-row');
   node.dataset.focus = item.id;
   node.setAttribute('aria-label', label);
@@ -1143,7 +1249,20 @@ function episodeCard(item) {
     resolutionLabel(item.raw?.Media?.[0]?.videoResolution)].filter(Boolean);
   if (metadata.length) details.append(el('small', metadata.join('  •  '), 'episode-row-meta'));
   node.append(image, details);
-  return node;
+  const more = detailMoreOptions(() => episodeMenuActions(item, () => {
+    Array.from(image.querySelectorAll('.badge,.episode-progress')).forEach(control => control.remove());
+    if(item.watched)image.append(el('span','✓','badge'));
+    if(item.resume>0 && item.duration>0){
+      const progress=el('progress',undefined,'episode-progress');
+      progress.max=item.duration;progress.value=item.resume;image.append(progress);
+    }
+    entry._catalogSignature=JSON.stringify(item);
+  }));
+  more.classList.add('episode-row-more');
+  more.querySelector('.detail-icon').setAttribute('aria-label','More options for '+label);
+  more.querySelector('.detail-icon').setAttribute('title','More options for '+label);
+  entry.append(node, more);
+  return entry;
 }
 async function paginated(loader, currentRevision, options = {}) {
   let mountedRevision = currentRevision;
@@ -2021,7 +2140,14 @@ async function render(prepared = null) {
           go({type:'detail',id:parentShow.id,kind:'show'})});
         if (isEpisode && raw.parentRatingKey) extra.push({label:'View season', action:() =>
           go({type:'detail',id:raw.parentRatingKey,kind:'season'})});
-        actions.append(detailMoreOptions(extra));
+        actions.append(detailMoreOptions(() => isEpisode ? episodeMenuActions(item, () => {
+          refreshDetailAction(actions.querySelector('.detail-watched'),
+            item.watched ? 'Mark unwatched' : 'Mark watched', item.watched ? 'unwatched' : 'watched');
+          refreshDetailAction(actions.querySelector('.detail-play'),
+            item.resume > 0 ? 'Resume · ' + time(item.resume) : 'Play', 'play');
+          const restart = actions.querySelector('.detail-restart');
+          if(restart)restart.hidden = !(item.resume > 0);
+        }).concat(extra) : extra));
       }
       info.append(actions);
       // The parent-show link precedes season and episode actions. Start TV
@@ -2141,7 +2267,9 @@ function play(item, start, transcode = false) {
     focus: main.contains(document.activeElement) ? document.activeElement : null
   };
   return player.open(api, item, {start, mediaIndex: route.mediaIndex || 0,
-    transcode: transcode || state.quality === 'transcode'});
+    transcode: transcode || state.quality === 'transcode',
+    ...(item.type === 'episode' || item.type === 'Episode'
+      ? episodeTrackChoices.get(episodeTrackKey(item, route.mediaIndex || 0)) || {} : {})});
 }
 function settings() {
   title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');

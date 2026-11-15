@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import {clamp, time} from './core.js';
+import {clamp, nextFocus, time} from './core.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({})) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -114,7 +114,7 @@ export class Player {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
     };
     root.querySelector('[data-action="transcode"]').onclick = () => this.reopen({transcode: true});
-    for (const action of ['options','audio-options','subtitle-options','chapter-options']) {
+    for (const action of ['options','tracks-options','chapter-options']) {
       root.querySelector('[data-action="' + action + '"]').onclick = () => this.openSheet(action);
     }
     root.querySelector('[data-action="close-options"]').onclick = () => this.closeSheet();
@@ -232,14 +232,15 @@ export class Player {
     this.renderSkipMarker();
   }
   openSheet(action) {
-    const kind = {options:'settings', 'audio-options':'audio',
-      'subtitle-options':'subtitle', 'chapter-options':'chapter'}[action];
+    const kind = {options:'settings', 'tracks-options':'tracks',
+      'chapter-options':'chapter'}[action];
     this.openSheetAction = action;
     this.sheet.querySelector('[data-sheet-title]').textContent = {
-      settings:'Playback settings', audio:'Audio tracks',
-      subtitle:'Subtitles', chapter:'Chapters'}[kind];
+      settings:'Playback settings', tracks:'Audio & Subtitles', chapter:'Chapters'}[kind];
     const list = this.sheet.querySelector('.player-options-list');
     list.textContent = '';
+    list.classList.toggle('player-track-columns', kind === 'tracks');
+    this.sheet.classList.toggle('sheet-tracks', kind === 'tracks');
     if (kind === 'settings') {
       const quality = this.root.querySelector('[data-action="transcode"]');
       const button = document.createElement('button');
@@ -249,33 +250,61 @@ export class Player {
         quality.click();
       };
       list.appendChild(button);
+    } else if (kind === 'tracks') {
+      const audio = this.session?.audio || [];
+      const subtitles = this.session?.subtitles || [];
+      const columns = [
+        {kind:'audio', title:'Audio', entries:audio.length > 1 ? audio : [], off:false},
+        {kind:'subtitle', title:'Subtitles', entries:subtitles, off:true}
+      ];
+      columns.forEach(column => {
+        if (!column.entries.length) return;
+        const select = this.root.querySelector('[data-track="' + column.kind + '"]');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'player-track-column';
+        if (columns.every(value => value.entries.length)) {
+          const heading = document.createElement('h4'); heading.textContent = column.title;
+          wrapper.appendChild(heading);
+        }
+        const entries = column.off ? [{id:-1, primary:'Off'}].concat(column.entries) : column.entries;
+        entries.forEach(track => {
+          const control = document.createElement('button');
+          control.setAttribute('aria-label', track.label || track.primary);
+          control.setAttribute('aria-pressed', String(select.value === String(track.id)));
+          const primary = document.createElement('strong');
+          primary.textContent = track.primary || track.label;
+          control.appendChild(primary);
+          if (track.secondary) {
+            const secondary = document.createElement('small'); secondary.textContent = track.secondary;
+            control.appendChild(secondary);
+          }
+          control.onclick = () => {
+            this.closeSheet();
+            if (select.value === String(track.id)) return;
+            select.value = String(track.id);
+            select.dispatchEvent(new Event('change'));
+          };
+          wrapper.appendChild(control);
+        });
+        list.appendChild(wrapper);
+      });
     } else {
-      const select = this.root.querySelector(kind === 'chapter'
-        ? '[data-chapter]' : '[data-track="' + kind + '"]');
+      const select = this.root.querySelector('[data-chapter]');
       Array.from(select.options).forEach(option => {
-        if (option.value === '' && kind === 'chapter') return;
-        const button = document.createElement('button');
-        button.setAttribute('aria-label', option.textContent);
-        const track = this.session && this.session[kind === 'audio' ? 'audio' : 'subtitles']?.find(
-          entry => String(entry.id) === option.value);
-        if (track && track.secondary) {
-          const primary = document.createElement('strong'); primary.textContent = track.primary;
-          const secondary = document.createElement('small'); secondary.textContent = track.secondary;
-          button.append(primary, secondary);
-        } else button.textContent = option.textContent;
-        button.setAttribute('aria-pressed', String(select.value === option.value));
-        button.onclick = () => {
-          this.closeSheet();
-          select.value = option.value;
+        if (option.value === '') return;
+        const control = document.createElement('button');
+        control.textContent = option.textContent;
+        control.onclick = () => {
+          this.closeSheet(); select.value = option.value;
           select.dispatchEvent(new Event('change'));
         };
-        list.appendChild(button);
+        list.appendChild(control);
       });
-      if (!list.children.length) list.textContent = 'No tracks available.';
     }
+    if (!list.querySelector('button')) list.textContent = 'No tracks available.';
     this.sheet.hidden = false;
     this.reveal();
-    const first = list.querySelector('button');
+    const first = list.querySelector('button[aria-pressed="true"]') || list.querySelector('button');
     if (first) first.focus();
     else this.sheet.querySelector('[data-action="close-options"]').focus();
   }
@@ -331,8 +360,12 @@ export class Player {
         session[kind === 'audio' ? 'audio' : 'subtitles'].forEach(track => {
           const option = document.createElement('option'); option.value = track.id; option.textContent = track.label; select.appendChild(option);
         });
-        select.value = options[kind] === undefined ? defaultOption.value : String(options[kind]);
+        const chosen = session[kind === 'audio' ? 'audio' : 'subtitles'].find(track => track.selected);
+        select.value = options[kind] === undefined ? (chosen ? String(chosen.id) : defaultOption.value)
+          : String(options[kind]);
       }
+      this.root.querySelector('[data-action="tracks-options"]').hidden =
+        session.audio.length <= 1 && session.subtitles.length === 0;
       const chapters = this.root.querySelector('[data-chapter]'); chapters.textContent = '';
       const heading = document.createElement('option'); heading.value = ''; heading.textContent = 'Jump to chapter'; chapters.append(heading);
       (session.chapters || []).forEach(chapter => {
@@ -627,6 +660,17 @@ export class Player {
   key(event) {
     const code = event.keyCode;
     this.cancelAutoSkipFromInteraction();
+    if (!this.sheet.hidden && [37,38,39,40].includes(code)) {
+      event.preventDefault();
+      const current = document.activeElement;
+      const candidates = Array.from(this.sheet.querySelectorAll('button')).filter(node =>
+        node !== current && node.getClientRects().length && !node.hidden);
+      const direction = {37:'left',38:'up',39:'right',40:'down'}[code];
+      const next = nextFocus(current.getBoundingClientRect(),
+        candidates.map(value => ({value,rect:value.getBoundingClientRect()})), direction);
+      if (next) next.focus();
+      return true;
+    }
     if (document.activeElement === this.skipButton && code === 40) {
       event.preventDefault(); this.reveal();
       this.root.querySelector('[data-action="pause"]').focus(); return true;

@@ -1,0 +1,33 @@
+import {test} from 'node:test';
+import {deepStrictEqual, equal} from 'node:assert/strict';
+import {mediaSourceTracks} from '../src/api.js';
+
+test('uses stream IDs and selected flags from the requested Plex media version', () => {
+  const item={raw:{Media:[
+    {Part:[{Stream:[{streamType:2,id:3,languageCode:'eng',selected:1}]}]},
+    {Part:[{Stream:[
+      {streamType:2,id:0,languageCode:'fra',selected:1,codec:'eac3',channels:6},
+      {streamType:2,id:5,languageCode:'eng',selected:0},
+      {streamType:3,id:0,languageCode:'eng',selected:1,forced:1},
+      {streamType:3,id:6,languageCode:'spa',selected:0}
+    ]}]}
+  ]}};
+  const tracks=mediaSourceTracks(item,1);
+  deepStrictEqual(tracks.audio.map(t=>t.id),[0,5]);
+  deepStrictEqual(tracks.subtitles.map(t=>t.id),[0,6]);
+  equal(tracks.audio[0].selected,true);
+  equal(tracks.audio[1].selected,false);
+  equal(tracks.subtitles[0].selected,true);
+  equal(tracks.subtitles[0].primary,'English (Forced)');
+  equal(mediaSourceTracks(item,0).audio[0].id,3);
+});
+
+test('uses Jellyfin media stream indices without conflating stream zero with Off', () => {
+  const tracks=mediaSourceTracks({raw:{MediaSources:[{MediaStreams:[
+    {Type:'Audio',Index:0,Language:'eng',Codec:'aac',IsDefault:true},
+    {Type:'Subtitle',Index:0,Language:'fra',Codec:'srt',IsDefault:true}
+  ]}]}});
+  equal(tracks.audio[0].id,0);
+  equal(tracks.subtitles[0].id,0);
+  equal(tracks.subtitles[0].selected,true);
+});

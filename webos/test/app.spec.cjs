@@ -886,7 +886,7 @@ test('Plezy season header includes series information and functional actions',as
  await expect(page.getByText('The series overview.')).toBeVisible();
  await expect(page.getByRole('button',{name:'Shuffle'})).toBeVisible();
  await expect(page.getByRole('button',{name:'Mark watched'})).toBeVisible();
- await page.getByRole('button',{name:'More options'}).click();
+  await page.getByRole('button',{name:'More options',exact:true}).click();
  await expect(page.getByRole('button',{name:'View series'})).toBeVisible();
  await page.keyboard.press('Escape');
  await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
