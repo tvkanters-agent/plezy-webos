@@ -1,5 +1,19 @@
 # webOS changelog
 
+## 1.8.7 — Restore player focus and seek previews
+
+- Keep the last focused transport button selected through intro-skip buffering and decoder focus loss; stop the inactivity timer from hiding actively focused controls.
+- Leave Left/Right to normal transport focus navigation, including after a timeline seek. Only the timeline or hidden video surface may initiate directional seeking.
+- Place the Skip Intro/Credits prompt above the measured controls height, clear of the seekbar on different TV layouts.
+- Keep a visible skip prompt at its current anchor during pointer interaction so revealing controls cannot move it away before the click is registered.
+- Port Plezy's Plex BIF scrub-frame reader and timeline preview tooltip, with time labels, a 50 MiB TV download limit, cancellation and frame cleanup when changing videos.
+- Regress focus restoration, navigation, skip placement, BIF parsing and rendered preview, without changing chapter or skip matching.
+
+## 1.8.6 — Programme chapter key navigation
+
+- Map Programme Up/Down (legacy LG Page Up/Down events) to Plezy's next/previous chapter navigation, with elapsed-time rewind handling and no wrapping.
+- Preserve chapter sheet and track-menu focus while using chapter keys. Physical LG key delivery remains device-dependent.
+
 ## 1.8.5 — Recognize and combine logo/intro chapters
 
 - Include `logo` and `logos` in the default intro-chapter regex, including labels such as "Studio Logos". This is a user-requested extension of upstream Plezy's default.
