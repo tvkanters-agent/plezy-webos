@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.8.8 — Stable skip prompt and Plezy timeline focus
+
+- Stop resetting the skip prompt's measured bottom offset on each playback update. Its position now remains stable while the same chrome state is visible, including repeated marker and playback events.
+- Enlarge Plex BIF seek-preview frames from 160px to 320px, clamping the tooltip to narrow timeline widths.
+- Follow Plezy's focused timeline design: replace the rectangular focus border with an 18px shadowed white knob, retaining a slim handle when unfocused.
+- Add browser regressions for stable skip placement, large preview frames and focus styling.
+
 ## 1.8.7 — Restore player focus and seek previews
 
 - Keep the last focused transport button selected through intro-skip buffering and decoder focus loss; stop the inactivity timer from hiding actively focused controls.
