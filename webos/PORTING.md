@@ -66,6 +66,29 @@ selection uses the port's existing part PUT + HLS restart; this cannot provide
 MPV's seamless decoder-side switching or external subtitle search on webOS.
 Tests cover IDs including zero, menu focus, watched actions and request params.
 
+### Cross-episode audio/subtitle preference carry
+
+Native `VideoPlayerScreen._navigateToEpisode` carries the current audio track as
+an item-agnostic intent and subtitles via `SubtitlePreference.demoteToIntent`,
+unless `followServerTrackSelections` is enabled. `TrackSelectionService`
+requires matching language and forced-class evidence, prefers role/title
+over codec/channel tiebreakers, and rejects ambiguous candidates rather than
+choosing by stream position. Off subtitles remain an explicit intent.
+
+webOS currently launches episodes from separate season/detail routes rather
+than performing MPV's in-place Next Episode navigation. To make the requested
+cross-episode choice available through these routes, the last explicit audio
+and subtitle selections are remembered per series **for the app session**.
+Selections from either pre-play episode menus or the playing TrackSheet apply
+to other episodes, including other seasons, when source track semantics match.
+Source IDs are never reused across episodes. A missing or ambiguous target
+falls through to Plex/Jellyfin's own item selection; missing lightweight
+stream catalogs are fetched before opening an episode. Choosing a new track
+supersedes earlier sibling episode choices for that kind only. Server switches
+discard the session memory. This is a webOS navigation adaptation, not a
+server-side bulk update, account-wide preference change, or a promise of
+persistence across restarts. LG hardware playback remains to be checked.
+
 ## Simkl-specific parity decision
 
 Upstream `SimklTracker._scrobbleBody` sends:
