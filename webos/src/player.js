@@ -394,6 +394,13 @@ export class Player {
     list.classList.toggle('player-track-columns', kind === 'tracks');
     this.sheet.classList.toggle('sheet-tracks', kind === 'tracks');
     if (kind === 'settings') {
+      const selectedSubtitle = this.selectedSubtitleTrack();
+      if (this.api?.server?.kind === 'plex' && selectedSubtitle?.external && selectedSubtitle.key) {
+        const sync = document.createElement('button');
+        sync.textContent = 'Subtitle sync';
+        sync.onclick = () => this.openSubtitleSync();
+        list.appendChild(sync);
+      }
       const quality = this.root.querySelector('[data-action="transcode"]');
       const button = document.createElement('button');
       button.textContent = quality.textContent;
@@ -488,8 +495,78 @@ export class Player {
     if (first) first.focus();
     else this.sheet.querySelector('[data-action="close-options"]').focus();
   }
+  selectedSubtitleTrack() {
+    const select = this.root.querySelector('[data-track="subtitle"]');
+    const id = Number(select?.value);
+    return (this.session?.subtitles || []).find(track => Number(track.id) === id) || null;
+  }
+  openSubtitleSync() {
+    const track = this.selectedSubtitleTrack();
+    if (!track?.external || !track.key || this.api?.server?.kind !== 'plex') return;
+    this.openSheetAction = 'options';
+    this.sheet.querySelector('[data-sheet-title]').textContent = 'Subtitle sync';
+    const list = this.sheet.querySelector('.player-options-list');
+    list.textContent = '';
+    list.classList.remove('player-track-columns');
+    this.sheet.classList.remove('sheet-tracks');
+    this.sheet.classList.add('sheet-sync');
+    const row = document.createElement('div');
+    row.className = 'subtitle-sync-control';
+    const value = document.createElement('output');
+    value.className = 'subtitle-sync-value';
+    let offset = Number(track.offset) || 0;
+    const render = () => {
+      const sign = offset > 0 ? '+' : '';
+      value.textContent = sign + (offset / 1000).toFixed(2) + ' s';
+      slider.value = String(Math.max(-10000, Math.min(10000, offset)));
+      slider.setAttribute('aria-valuetext', value.textContent);
+    };
+    const apply = async next => {
+      offset = Math.max(-60000, Math.min(60000, Math.round(next / 50) * 50));
+      render();
+      minus.disabled = offset <= -60000;
+      plus.disabled = offset >= 60000;
+      reset.disabled = offset === 0;
+      try {
+        await this.api.setSubtitleOffset(track, offset);
+        track.offset = offset;
+      } catch (error) {
+        this.status.textContent = error.message;
+        offset = Number(track.offset) || 0;
+        render();
+      }
+    };
+    const minus = document.createElement('button');
+    minus.type = 'button'; minus.textContent = '−'; minus.setAttribute('aria-label', 'Decrease subtitle delay by 50 milliseconds');
+    minus.onclick = () => apply(offset - 50);
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.min = '-10000'; slider.max = '10000'; slider.step = '50';
+    slider.setAttribute('aria-label', 'Subtitle timing offset');
+    slider.oninput = () => {
+      offset = Number(slider.value);
+      value.textContent = (offset > 0 ? '+' : '') + (offset / 1000).toFixed(2) + ' s';
+      slider.setAttribute('aria-valuetext', value.textContent);
+    };
+    slider.onchange = () => apply(Number(slider.value));
+    const plus = document.createElement('button');
+    plus.type = 'button'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Increase subtitle delay by 50 milliseconds');
+    plus.onclick = () => apply(offset + 50);
+    const reset = document.createElement('button');
+    reset.type = 'button'; reset.textContent = 'Reset'; reset.onclick = () => apply(0);
+    row.append(minus, slider, plus, value, reset);
+    list.appendChild(row);
+    this.sheet.classList.remove('sheet-tracks');
+    this.sheet.hidden = false;
+    render();
+    minus.disabled = offset <= -60000;
+    plus.disabled = offset >= 60000;
+    reset.disabled = offset === 0;
+    slider.focus();
+    this.reveal();
+  }
   closeSheet() {
     this.sheet.hidden = true;
+    this.sheet.classList.remove('sheet-sync');
     this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
