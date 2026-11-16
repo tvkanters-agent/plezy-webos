@@ -1,6 +1,7 @@
 ## 1.12.1
 
 - Fix subtitle sync on Chromium 53 by supplying the Object APIs needed by Media Captions, and match Plezy's Plex sidecar URLs (codec extension and UTF-8).
+- Bundle libass's required default font, omitted from its npm package, with its license and a build-time asset check.
 - Exercise visible SRT cues and actual WASM/legacy libass canvas output through live positive/negative/reset sync adjustments.
 
 ## 1.12.0 — Guarded native Direct Play

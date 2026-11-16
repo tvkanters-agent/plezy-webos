@@ -11,6 +11,11 @@ await cp(path.join(root, 'public'), path.join(root, 'dist'), {recursive: true});
 // Bundle the local libass workers; TV playback must never depend on a CDN.
 await cp(path.join(root, 'node_modules/libass-wasm/dist/js'),
   path.join(root, 'dist/libass'), {recursive: true});
+// The npm package omits libass's default font; public/libass supplies the
+// pinned upstream file and its license. Refuse an IPK with a broken ASS worker.
+const fallbackFont = await readFile(path.join(root, 'dist/libass/default.woff2'));
+if (fallbackFont.toString('ascii', 0, 4) !== 'wOF2')
+  throw new Error('The bundled libass fallback font is missing or invalid.');
 await cp(path.join(root, '../LICENSE'), path.join(root, 'dist/LICENSE.txt'));
 // Prepare LG's native loading image before packaging, not at TV startup.
 await generateSplash(root, path.join(root, 'dist/splash.png'));

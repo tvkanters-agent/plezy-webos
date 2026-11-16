@@ -563,3 +563,9 @@ before application startup. They adjust the real UI while checking marked-up
 SRT visibility at a fixed paused clock, and actual libass canvas pixels in both
 WASM and legacy worker modes, including positive/negative delay and Reset.
 This simulates the relevant missing APIs; physical LG decoding is unverified.
+
+The libass-wasm 4.1.0 npm package's file list omits default.woff2 even though
+the worker requires it. The port now vendors the unmodified fallback font
+from the matching upstream tag (Git blob a562391696ad477e5a8ad28ef8b4d53c90bb0d42)
+and its SIL OFL license in public/libass. It is copied with the application
+and build-checked, so ASS never depends on downloading a font from a CDN.
