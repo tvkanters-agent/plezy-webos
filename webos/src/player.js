@@ -2,6 +2,7 @@
 import {clamp, nextFocus, time} from './core.js';
 import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
 import {parseBif, bifFrameAt} from './scrub-preview.js';
+import {SubtitleOverlay} from './subtitles.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -27,6 +28,7 @@ export class Player {
     this.sheet = root.querySelector('.player-sheet');
     this.subtitleSyncOffsetMs = 0;
     this.subtitleCueTimes = new WeakMap();
+    this.subtitleOverlay = new SubtitleOverlay(this.video, root.querySelector('.player-captions'));
     this.status = root.querySelector('.player-status');
     this.buffering = root.querySelector('.player-buffering');
     this.seeking = false;
@@ -196,7 +198,8 @@ export class Player {
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
-        return this.reopen({[kind]:id, transcode:true},
+        return this.reopen({[kind]:id, burnSubtitles:false,
+          transcode:kind === 'audio' || !!this.options.transcode},
           !this.sheet.hidden && this.openSheetAction === 'tracks-options' ? {kind, id} : null);
       };
     }
@@ -546,6 +549,7 @@ export class Player {
     slider.focus();
   }
   applySubtitleSyncOffset() {
+    this.subtitleOverlay.update(this.subtitleSyncOffsetMs);
     if (!this.video?.textTracks || !this.subtitleCueTimes) return;
     const offset = this.subtitleSyncOffsetMs / 1000;
     for (const track of Array.from(this.video.textTracks)) {
@@ -768,6 +772,15 @@ export class Player {
       // sought and decoded. Loading indicators remain independently visible.
       this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
       this.loadSource(session);
+      this.subtitleOverlay.onError = error => {
+        if (generation === this.generation && this.session === session)
+          this.subtitleFailed(error, session);
+      };
+      if (session.subtitleAsset) this.subtitleOverlay.load(session.subtitleAsset, this.subtitleSyncOffsetMs)
+        .catch(error => {
+          if (generation === this.generation && this.session === session && error.name !== 'AbortError')
+            this.subtitleFailed(error, session);
+        });
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       this.startTimeout = setTimeout(() => {
@@ -892,6 +905,8 @@ export class Player {
     this.syncHoldFired = false;
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
+    this.subtitleOverlay.clear();
+    this.root.classList.remove('subtitle-lift');
     if (this.previewAbort) this.previewAbort.abort();
     this.previewAbort = null;
     this.previewFrames = null;
@@ -952,6 +967,13 @@ export class Player {
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
     return this.open(this.api, this.item, options, true, trackSheetFocus);
+  }
+  async subtitleFailed(error, session) {
+    if (!this.session || this.session !== session || this.recovering) return;
+    console.warn('Subtitle renderer failed; retrying with Plex burn-in:', error);
+    this.recovering = true;
+    try { await this.reopen({transcode:true, burnSubtitles:true}); }
+    finally { this.recovering = false; }
   }
   async failed() {
     if (!this.session || this.recovering) return;
@@ -1052,6 +1074,7 @@ export class Player {
     if (byBack) this.backHideTime = Date.now();
     this.cancelRemoteSeek();
     this.controls.classList.add('hidden-controls');
+    this.root.classList.remove('subtitle-lift');
     this.root.querySelector('.player-top').classList.add('hidden-controls');
     this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
     this.hideSeekPreview();
@@ -1204,6 +1227,7 @@ export class Player {
   reveal() {
     this.controlsDismissedByBack = false;
     this.controls.classList.remove('hidden-controls');
+    this.root.classList.add('subtitle-lift');
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
     this.renderSkipMarker();
