@@ -7,6 +7,13 @@
 - Keep HLS for incompatible codecs, selected subtitles, different/non-default audio tracks, server-default subtitles, and manual Compatible playback, with automatic fallback if the LG decoder rejects a direct stream.
 - Preserve native `mediaOption` resume and correct source MIME; add codec/profile/bitrate tests and browser fallback coverage.
 
+## 1.9.3 — Match Plezy episode-row metadata
+
+- Use Plezy's normal-weight muted metadata text rather than relying on inherited button typography.
+- Give each episode metadata separator its own spaced bullet, matching Plezy's 6 logical pixels on either side at TV scale.
+- Restore the 6px vertical gap above metadata without the extra inline-text line box.
+- Add a real-browser layout check for episode-row metadata weight, separation, and vertical spacing.
+
 ## 1.9.2 — Plezy subtitle-sync focus and layout
 
 - Replace the incorrectly embedded subtitle slider with Plezy's compact top-centered sync bar, opened from a settings row.

@@ -1295,7 +1295,14 @@ function episodeCard(item) {
   const metadata = [item.duration ? time(item.duration) : '',
     item.raw?.originallyAvailableAt || item.raw?.originallyAvailableAt,
     resolutionLabel(item.raw?.Media?.[0]?.videoResolution)].filter(Boolean);
-  if (metadata.length) details.append(el('small', metadata.join('  •  '), 'episode-row-meta'));
+  if (metadata.length) {
+    const meta = el('small', undefined, 'episode-row-meta');
+    metadata.forEach((value, index) => {
+      if (index) meta.append(el('span', '•', 'episode-row-meta-separator'));
+      meta.append(el('span', value, 'episode-row-meta-value'));
+    });
+    details.append(meta);
+  }
   node.append(image, details);
   const more = detailMoreOptions(() => episodeMenuActions(item, () => {
     Array.from(image.querySelectorAll('.badge,.episode-progress')).forEach(control => control.remove());
