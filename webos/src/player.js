@@ -207,7 +207,7 @@ export class Player {
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => {
         const id = Number(event.target.value);
-        const track = (this.session?.[kind === 'audio' ? 'audio' : 'subtitles'] || [])
+        const track = ((this.session || this.trackCatalog)?.[kind === 'audio' ? 'audio' : 'subtitles'] || [])
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
@@ -754,6 +754,7 @@ export class Player {
       session = await api.playback(item, {...options, skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
+      this.trackCatalog = session;
       this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;
@@ -937,7 +938,9 @@ export class Player {
     if (session) this.report('stopped');
     // Tracking belongs to the viewing, not a particular decoder session. A
     // failed/replaced decoder must still finish the started Simkl viewing.
-    if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
+    if (!preserveTracking) {
+      this.track('stop', ended); this.playbackTracking = null; this.trackCatalog = null;
+    }
     this.clearSkipMarker(); this.hasFirstFrame = false;
     this.skippedMarker = null;
     this.session = null; this.pendingStart = 0;

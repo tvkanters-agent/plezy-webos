@@ -1462,12 +1462,13 @@ async function paginated(loader, currentRevision, options = {}) {
     if (observer) observer.disconnect();
   }
   async function applyFresh(offset, initialPage, update) {
+    const watchEpoch = detailWatchEpoch;
     if (!update || !update.changed || mountedRevision !== revision ||
         !grid.isConnected || !loadedPages.has(offset)) return;
     await prewarmPosters(update.value.items || [], api,
       {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
     if (mountedRevision !== revision || !grid.isConnected ||
-        !loadedPages.has(offset)) return;
+        !loadedPages.has(offset) || detailWatchEpoch !== watchEpoch) return;
     if (watchedOverride !== undefined)
       update.value.items.forEach(item => updateLocalWatchState(item, watchedOverride));
     loadedPages.set(offset, update.value);
