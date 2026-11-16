@@ -1,5 +1,13 @@
 # webOS changelog
 
+## 1.10.1 — Reliable seek resume and TV subtitle sync focus
+
+- Match Plezy's preview behavior: remote seek movements update BIF/timeline only, without pausing the decoder or initiating a seek until OK.
+- After OK, preserve the pre-seek play/pause state. Recover automatically from delayed or missing `seeked` events on older LG decoders, without reopening hidden controls.
+- Subtitle sync Up/Down adjusts the offset by 50 ms while Left/Right moves focus one control at a time, including directly across the slider without adjusting it.
+- Replace all Unicode sync-bar button glyphs with reliable SVG icons, including Reset, which previously appeared as a missing-glyph box on some LG TVs.
+- Extend browser regressions for delayed resume, decoder deadlock recovery, cancel/Back, complete D-pad traversal, and SVG visual states.
+
 ## 1.10.0 — Direct Play compatible Plex formats
 
 - Use the LG webOS 4.x codec/container capabilities instead of transcoding every MKV or HEVC file.

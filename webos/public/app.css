@@ -802,13 +802,17 @@ main.has-alpha-bar { padding-right:60px; }
 .player-sheet.sheet-sync .sync-offset-bar button.sync-offset-button:focus {
   background:#ededed; color:#17191e; box-shadow:0 0 0 2px rgba(255,255,255,.23);
 }
-.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"] {
-  margin:0 8px; font-size:29px; background:transparent; border-radius:18px;
+.player-sheet.sheet-sync .sync-offset-bar button.sync-offset-button svg {
+  display:block; width:22px; height:22px; pointer-events:none;
 }
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"] {
+  margin:0 8px; background:transparent; border-radius:18px;
+}
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"] svg { width:25px; height:25px; }
 .player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"][aria-disabled="true"] { color:#737780; }
 .player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"]:focus { background:#ededed; color:#17191e; }
 .player-sheet.sheet-sync .sync-offset-bar button[data-sync="close"] {
-  background:transparent; font-size:30px; border-radius:18px;
+  background:transparent; border-radius:18px;
 }
 .player-sheet.sheet-sync .sync-offset-value {
   display:block; -webkit-flex:0 0 92px; flex:0 0 92px;
