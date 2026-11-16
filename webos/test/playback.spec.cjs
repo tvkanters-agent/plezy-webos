@@ -849,12 +849,20 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   const settingsRow=page.getByRole('button',{name:'Subtitle sync',exact:true});
   await expect(settingsRow).toBeFocused();
   await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
+    const png=await page.locator('.player-sheet').screenshot({animations:'disabled'});
+    console.log('PLEZY_SETTINGS_IMAGE:'+png.toString('base64'));
+  }
   await page.keyboard.press('Enter');
 
   const bar=page.locator('.player-sheet.sheet-sync');
   const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
   await expect(bar).toBeVisible();
   await expect(slider).toBeFocused();
+  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
+    const png=await bar.screenshot({animations:'disabled'});
+    console.log('PLEZY_SYNC_IMAGE:'+png.toString('base64'));
+  }
   await expect(slider).toHaveAttribute('min','-10000');
   await expect(slider).toHaveAttribute('max','10000');
   const box=await bar.boundingBox();
@@ -864,10 +872,10 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
 
   await page.keyboard.press('ArrowRight');
   await expect(slider).toBeFocused();
-  await expect(page.locator('.sync-offset-value')).toHaveText('+0.05 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+50ms');
   await page.keyboard.press('ArrowLeft');
   await expect(slider).toBeFocused();
-  await expect(page.locator('.sync-offset-value')).toHaveText('0.00 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
 
   // Upstream FocusableSlider: OK leaves the slider for close. Left walks
   // close -> reset -> plus -> slider, without escaping into the player.
@@ -878,7 +886,7 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('button',{name:'Increase subtitle delay'})).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.sync-offset-value')).toHaveText('+0.05 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+50ms');
   await page.keyboard.press('ArrowLeft');
   await expect(slider).toBeFocused();
 
@@ -905,7 +913,7 @@ test('subtitle sync reaches both full-minute limits, updates live cues, and rese
   });
   // Buttons continue beyond the fine-control ±10s slider, up to ±60s.
   await plus.evaluate(button => {for(let n=0;n<1200;n++) button.click();});
-  await expect(page.locator('.sync-offset-value')).toHaveText('+60.00 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+60.0s');
   await expect(slider).toHaveValue('10000');
   await expect.poll(() => page.evaluate(() => window.subtitleSyncCue.startTime)).toBe(70);
   await slider.evaluate(input => {
@@ -913,10 +921,10 @@ test('subtitle sync reaches both full-minute limits, updates live cues, and rese
     input.dispatchEvent(new Event('input',{bubbles:true}));
   });
   await minus.evaluate(button => {for(let n=0;n<1000;n++) button.click();});
-  await expect(page.locator('.sync-offset-value')).toHaveText('−60.00 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('-60.0s');
   await expect.poll(() => page.evaluate(() => window.subtitleSyncCue.startTime)).toBe(-50);
   await page.getByRole('button',{name:'Reset subtitle sync'}).click();
-  await expect(page.locator('.sync-offset-value')).toHaveText('0.00 s');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
   await expect.poll(() => page.evaluate(() => window.subtitleSyncCue.startTime)).toBe(10);
 });
 
