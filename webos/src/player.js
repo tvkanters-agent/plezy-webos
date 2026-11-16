@@ -425,7 +425,11 @@ export class Player {
   }
   formatSubtitleSyncOffset() {
     const offset = this.subtitleSyncOffsetMs;
-    return (offset > 0 ? '+' : offset < 0 ? '−' : '') + (Math.abs(offset) / 1000).toFixed(2) + ' s';
+    // Port upstream formatSyncOffset: signed milliseconds below 10s,
+    // signed seconds to one decimal at larger corrections.
+    const magnitude = Math.abs(offset);
+    return (offset >= 0 ? '+' : '-') +
+      (magnitude >= 10000 ? (magnitude / 1000).toFixed(1) + 's' : magnitude + 'ms');
   }
   updateSubtitleSyncControls() {
     const label = this.formatSubtitleSyncOffset();
@@ -1163,8 +1167,10 @@ export class Player {
           this.sheet.querySelector('[data-sync="close"]').focus();
         } else if (current.dataset?.syncStep) {
           const step = Number(current.dataset.syncStep);
-          this.adjustSubtitleSync(step);
-          this.startSyncHold(step);
+          if (!this.syncHoldTimeout && !this.syncHoldInterval) {
+            this.adjustSubtitleSync(step);
+            this.startSyncHold(step);
+          }
         } else if (current.dataset?.sync === 'reset') {
           this.setSubtitleSyncOffset(0);
         } else if (current.dataset?.sync === 'close') {
