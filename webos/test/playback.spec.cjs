@@ -1270,3 +1270,43 @@ test('explicit Pause during preview is not overridden by confirming or cancellin
   await page.waitForTimeout(1100);
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
 });
+
+test('SRT uses the latest sync adjustment after a delayed subtitle download',async({page})=>{
+  let finishDownload;
+  const download=new Promise(resolve=>{finishDownload=resolve;});
+  await page.route('http://plex.test/subtitles.srt**',async route=>{
+    await download;
+    return route.fulfill({contentType:'text/plain',
+      body:'1\n00:00:00,000 --> 00:00:01,000\nFIRST CUE\n\n2\n00:00:10,000 --> 00:00:11,000\nOFFSET CUE\n'});
+  });
+  await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/subtitles.srt',selected:1}
+    ]}]}]});
+  await page.locator('[data-action="pause"]').click();
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  await page.locator('.sync-offset-slider').evaluate(input=>{
+    input.value='2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
+  finishDownload();
+  await expect(page.locator('.player-captions')).not.toContainText('OFFSET CUE');
+  await page.locator('video').evaluate(video=>{video.currentTime=12.5;});
+  await expect(page.locator('.player-captions')).toContainText('OFFSET CUE');
+  await page.locator('video').evaluate(video=>{video.currentTime=0.5;});
+  await expect(page.locator('.player-captions')).not.toContainText('FIRST CUE');
+});
+
+test('subtitle lift clears the measured controls at different viewport sizes',async({page})=>{
+  await setup(page);
+  for (const height of [720,1080]) {
+    await page.setViewportSize({width:1920,height});
+    await page.locator('#player').dispatchEvent('mousemove',{clientX:100,clientY:100});
+    const geometry=await page.locator('#player').evaluate(root=>({
+      lift:parseFloat(getComputedStyle(root).getPropertyValue('--subtitle-lift')),
+      controls:root.querySelector('.controls').offsetHeight
+    }));
+    expect(geometry.lift).toBe(-geometry.controls);
+  }
+});

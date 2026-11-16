@@ -1,3 +1,7 @@
+## 1.11.3
+
+- Correct subtitle timing, asynchronous sync changes, and measured clearance above controls.
+
 ## 1.11.2
 
 - Fix automatic resume across every seek entry point and slow LG buffering; preserve explicit Pause intent.

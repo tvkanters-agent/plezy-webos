@@ -876,7 +876,7 @@ main.has-alpha-bar { padding-right:60px; }
   pointer-events: none; text-align: center; word-break: break-word;
   transition: transform .18s ease;
 }
-#player.subtitle-lift .player-captions { transform: translateY(-135px); }
+#player.subtitle-lift .player-captions { transform: translateY(var(--subtitle-lift, 0px)); }
 #player .player-captions [part="cue-display"] {
   position: absolute; direction: ltr; overflow: visible;
   top: var(--cue-top); left: var(--cue-left); right: var(--cue-right); bottom: var(--cue-bottom);

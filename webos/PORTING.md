@@ -525,3 +525,7 @@ Scrolling cards mount immediately after metadata arrives, letting the bounded ar
 ### Seek play intent on the HTML decoder
 
 Native Plezy preserves playing/paused intent through timeline and chapter seeks. HTMLMediaElement.paused is an observation of the LG pipeline, not a reliable record of that intent during buffering. All webOS committed seeks now retain the pre-seek intent; unconfirmed D-pad movements still never seek. Play is requested at confirmation even if the pipeline reports paused=false/seeking=true, and retried without expiring during slow buffering. A seeked event permits keyframe landing; actual advancing time ends recovery. Explicit Pause, source replacement, errors and backgrounding cancel recovery. The bounded pause/play wakeup is reserved for a landed, frozen decoder. Event-order simulations do not establish physical TV behavior.
+
+### Subtitle clock and controls clearance
+
+Media Captions receives the current media clock on animation frames only while SRT playback is active, plus immediate pause/seek updates; no subtitle parsing occurs per frame. Negative shifted times are retained so a positive delay cannot display a zero-start cue early. Async SRT/ASS construction reads the latest applied delay, never its stale download-time argument. The caption lift uses the actual transport height and is refreshed on resize. ASS canvas positioning stays with libass. These are minimal HTML equivalents of MPV's timed cues and Flutter's measured chrome clearance.

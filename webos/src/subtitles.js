@@ -3,7 +3,7 @@ import {CaptionsRenderer, parseText} from 'media-captions';
 
 // Positive sync offsets delay subtitles, matching the native text-track editor.
 export function subtitleTime(videoTime, offsetMs) {
-  return Math.max(0, (Number(videoTime) || 0) - (Number(offsetMs) || 0) / 1000);
+  return (Number(videoTime) || 0) - (Number(offsetMs) || 0) / 1000;
 }
 
 export function subtitleFormat(codec) {
@@ -22,10 +22,40 @@ export class SubtitleOverlay {
     this.kind = null;
     this.offsetMs = 0;
     this.abort = null;
+    this.frame = null;
+    // timeupdate may arrive only four times a second. Keep SRT cue boundaries
+    // aligned to the visible playback clock, including short cues.
+    video.addEventListener?.('playing', () => this.startClock());
+    for (const event of ['pause', 'ended', 'seeking']) {
+      video.addEventListener?.(event, () => { this.stopClock(); this.update(this.offsetMs); });
+    }
+    video.addEventListener?.('seeked', () => {
+      this.update(this.offsetMs); this.startClock();
+    });
+  }
+
+  stopClock() {
+    if (this.frame != null) cancelAnimationFrame(this.frame);
+    this.frame = null;
+  }
+
+  startClock() {
+    this.stopClock();
+    if (this.kind !== 'srt' || this.video.paused || this.video.ended || this.video.seeking ||
+        typeof requestAnimationFrame !== 'function') return;
+    const tick = () => {
+      this.frame = null;
+      if (this.kind !== 'srt') return;
+      this.update(this.offsetMs);
+      if (!this.video.paused && !this.video.ended && !this.video.seeking)
+        this.frame = requestAnimationFrame(tick);
+    };
+    this.frame = requestAnimationFrame(tick);
   }
 
   clear() {
     ++this.generation;
+    this.stopClock();
     if (this.abort) this.abort.abort();
     this.abort = null;
     const renderer = this.renderer;
@@ -57,7 +87,8 @@ export class SubtitleOverlay {
       this.renderer = renderer;
       this.kind = 'srt';
       renderer.changeTrack(track);
-      this.update(offsetMs);
+      this.update(this.offsetMs);
+      this.startClock();
     } else if (asset.format === 'ass') {
       if (typeof window.SubtitlesOctopus !== 'function')
         throw new Error('SubtitlesOctopus is unavailable');
@@ -68,7 +99,7 @@ export class SubtitleOverlay {
         // failure; the player retries using Plex burn-in through onError.
         workerUrl: 'libass/subtitles-octopus-worker.js',
         legacyWorkerUrl: 'libass/subtitles-octopus-worker-legacy.js',
-        timeOffset: -offsetMs / 1000,
+        timeOffset: -this.offsetMs / 1000,
         onReady: () => {
           if (generation === this.generation && this.renderer === renderer)
             renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));

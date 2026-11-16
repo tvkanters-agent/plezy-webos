@@ -182,7 +182,7 @@ export class Player {
     });
     if (typeof window !== 'undefined') window.addEventListener('resize', () => {
       this.skipControlsHeight = -1;
-      if (this.active) this.renderSkipMarker();
+      if (this.active) { this.updateSubtitleLift(); this.renderSkipMarker(); }
     });
     root.querySelector('[data-chapter]').onchange = event => {
       if (event.target.value !== '') this.seekTo(Number(event.target.value));
@@ -1273,9 +1273,14 @@ export class Player {
     this.update(); this.reveal();
     this.tryResumeAfterSeek();
   }
+  updateSubtitleLift() {
+    const height = this.controls.offsetHeight;
+    if (height > 0) this.root.style?.setProperty('--subtitle-lift', -height + 'px');
+  }
   reveal() {
     this.controlsDismissedByBack = false;
     this.controls.classList.remove('hidden-controls');
+    this.updateSubtitleLift();
     this.root.classList.add('subtitle-lift');
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
