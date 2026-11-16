@@ -489,17 +489,55 @@ test('remote seeks in hidden mode and center commits preview then dismisses cont
   await expect(page.locator('#player')).toBeVisible();
   await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime)).toBeGreaterThanOrEqual(next-2);
 });
-test('leaving a timeline preview for Stop restores normal transport arrows',async({page})=>{
+test('leaving a remote seek waits for decoder completion before resuming playback',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('slider',{name:'Seek playback'})).toBeFocused();
-  await expect(page.locator('.seek-preview')).toBeVisible();
+  const slider=page.getByRole('slider',{name:'Seek playback'});
+  const target=Number(await slider.inputValue());
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    const originalPlay=video.play.bind(video);
+    video.play=()=>{window.seekPlayCalls++;return originalPlay();};
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+  });
   const stop=page.getByRole('button',{name:'Stop',exact:true});
   await stop.focus();
   await expect(page.locator('.seek-preview')).toBeHidden();
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  await page.locator('video').evaluate(video=>{
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return false;}});
+    video.dispatchEvent(new Event('seeked'));
+  });
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls)).toBe(1);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(target-1);
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
+});
+
+test('confirming a remote seek waits for decoder completion before resuming playback',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  const slider=page.getByRole('slider',{name:'Seek playback'});
+  const target=Number(await slider.inputValue());
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    const originalPlay=video.play.bind(video);
+    video.play=()=>{window.seekPlayCalls++;return originalPlay();};
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+  });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#player .controls')).toBeHidden();
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  await page.locator('video').evaluate(video=>{
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return false;}});
+    video.dispatchEvent(new Event('seeked'));
+  });
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls)).toBe(1);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(target-1);
 });
 test('refocusing transport during committed-seek buffering cancels deferred chrome hiding',async({page})=>{
   await setup(page);
@@ -701,7 +739,7 @@ test('hidden-chrome skip prompt stays under the pointer through a single click',
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(15);
 });
 
-test('controls keep Stop focused through intro-skip buffering and arrow navigation',async({page})=>{
+test('transport focus survives decoder buffering but controls still auto-hide',async({page})=>{
   await setup(page,{Marker:[{type:'intro',startTimeOffset:4000,endTimeOffset:15000}]});
   await page.locator('video').evaluate(video=>{
     window.PalmSystem={};video.currentTime=5;
@@ -719,14 +757,14 @@ test('controls keep Stop focused through intro-skip buffering and arrow navigati
   await page.evaluate(()=>document.activeElement.blur());
   await page.locator('video').dispatchEvent('playing');
   await expect(stop).toBeFocused();
-  // The five-second inactivity timer must not evict a focused control.
-  await page.waitForTimeout(5200);
-  await expect(stop).toBeFocused();
-  await expect(page.locator('#player .controls')).toBeVisible();
   const before=await page.locator('video').evaluate(video=>video.currentTime);
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
   expect(await page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(before+2);
+  // Focus restoration is not ongoing activity: chrome must time out normally.
+  await page.waitForTimeout(5200);
+  await expect(page.locator('#player .controls')).toBeHidden();
+  await expect(page.locator('video')).toBeFocused();
 });
 
 test('LG OK skips the newly focused intro without opening player chrome',async({page})=>{
