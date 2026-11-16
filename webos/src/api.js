@@ -539,7 +539,12 @@ export class Plex {
     const url = this.url('/:/timeline', params);
     // release() serializes the final report before opening a fallback decoder.
     // Bound this transport too: a hung timeline POST must not block recovery.
-    await request(url, {method:'POST', headers:{Accept:'*/*'}, responseType:'none'});
+    try {
+      await request(url, {method:'POST', headers:{Accept:'*/*'}, responseType:'none'});
+    } catch (error) {
+      if (error.status) error.message = 'Plex playback timeline returned HTTP ' + error.status + '.';
+      throw error;
+    }
   }
   async stop(session) {
     if (session.transcode) await this.get('/video/:/transcode/universal/stop', {session: session.sessionId});
