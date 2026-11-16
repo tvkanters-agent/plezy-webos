@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.8.10 — Reliable seeking and control-bar timeout
+
+- Resume remote seeks only after the webOS decoder has completed the requested seek, both when confirming a seek and when moving focus away from the timeline.
+- Restore the five-second control-bar auto-hide even when playback has restored focus to a transport button; active seeking and open sheets still keep controls visible.
+- Add browser regressions for delayed seek completion, playback resumption and focused-control auto-hide.
+
+
 ## 1.8.9 — Keep episode details mounted after watched changes
 
 - Marking an episode watched or unwatched now updates the existing action buttons and play/resume state in place, without clearing or rebuilding the detail page, flashing its artwork black, or losing focus.
