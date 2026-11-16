@@ -5,7 +5,8 @@ import {SubtitleOverlay, subtitleTime} from '../src/subtitles.js';
 test('positive subtitle sync offsets delay SRT and ASS relative to video', () => {
   assert.equal(subtitleTime(9, 1500), 7.5);
   assert.equal(subtitleTime(9, -750), 9.75);
-  assert.equal(subtitleTime(0.5, 2000), 0);
+  assert.equal(subtitleTime(0.5, 2000), -1.5,
+    'a delayed cue at zero must remain hidden before its delayed start');
 
   const overlay = new SubtitleOverlay({currentTime:10}, {textContent:''});
   const srt = {currentTime:0};
@@ -43,4 +44,48 @@ test('switching subtitle files releases the previous renderer and pending downlo
   assert.equal(destroyed, true);
   assert.equal(overlay.renderer, null);
   assert.equal(element.textContent, '');
+});
+
+test('a sync adjustment during download supplies the current offset to ASS', async t => {
+  let resolveDownload, options;
+  const download = new Promise(resolve => { resolveDownload = resolve; });
+  t.mock.method(globalThis,'fetch',async () => ({ok:true,text:() => download}));
+  const previousWindow = globalThis.window;
+  globalThis.window = {SubtitlesOctopus:function (value) {
+    options = value;
+    this.dispose = () => {};
+    this.setCurrentTime = () => {};
+  }};
+  t.after(() => { globalThis.window = previousWindow; });
+  const overlay = new SubtitleOverlay({currentTime:10}, {textContent:''});
+  t.after(() => overlay.clear());
+  const loading = overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
+  overlay.update(2500);
+  resolveDownload('[Script Info]');
+  await loading;
+  assert.equal(options.timeOffset,-2.5);
+  assert.equal(overlay.offsetMs,2500);
+});
+
+test('SRT clock renders between timeupdate events and is cancelled on clear', t => {
+  const previousRequest = globalThis.requestAnimationFrame;
+  const previousCancel = globalThis.cancelAnimationFrame;
+  let callback, cancelled = 0;
+  globalThis.requestAnimationFrame = next => { callback = next; return 7; };
+  globalThis.cancelAnimationFrame = id => { cancelled = id; };
+  t.after(() => {
+    globalThis.requestAnimationFrame = previousRequest;
+    globalThis.cancelAnimationFrame = previousCancel;
+  });
+  const video = {currentTime:1,paused:false,ended:false,seeking:false};
+  const overlay = new SubtitleOverlay(video,{textContent:''});
+  overlay.renderer = {currentTime:0,destroy(){}};
+  const renderer = overlay.renderer;
+  overlay.kind = 'srt';
+  overlay.startClock();
+  video.currentTime = 1.125;
+  callback();
+  assert.equal(renderer.currentTime,1.125);
+  overlay.clear();
+  assert.equal(cancelled,7);
 });
