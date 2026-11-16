@@ -576,7 +576,7 @@ test('a paused player remains paused after confirming a remote seek',async({page
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
 });
 
-test('confirming a remote seek waits for decoder completion before resuming playback',async({page})=>{
+test('confirming a remote seek wakes a paused decoder without waiting for seeked',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
   await page.keyboard.press('ArrowRight');
@@ -593,7 +593,7 @@ test('confirming a remote seek waits for decoder completion before resuming play
   });
   await page.keyboard.press('Enter');
   await expect(page.locator('#player .controls')).toBeHidden();
-  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBeGreaterThan(0);
   await page.locator('video').evaluate(video=>{
     Object.defineProperty(video,'seeking',{configurable:true,get(){return false;}});
     video.dispatchEvent(new Event('seeked'));
@@ -623,7 +623,7 @@ test('remote seek recovers when old webOS never emits seeked while paused',async
   });
   await page.keyboard.press('Enter');
   await expect(page.locator('.controls')).toBeHidden();
-  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBeGreaterThan(0);
   await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls),{timeout:3000}).toBeGreaterThan(0);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused),{timeout:3000}).toBe(false);
   // Recovery must not reopen chrome.
@@ -657,9 +657,60 @@ test('remote seek resumes even when old webOS reports the stale timestamp until 
   });
   await page.keyboard.press('Enter');
   await expect(page.locator('.controls')).toBeHidden();
-  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBeGreaterThan(0);
   await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls),{timeout:3000}).toBeGreaterThan(0);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused),{timeout:3000}).toBe(false);
+  await expect(page.locator('.controls')).toBeHidden();
+});
+
+test('LG seek recovery wakes an unpaused decoder whose clock never advances',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    window.seekDecoderKicks=0;
+    const nativePlay=video.play.bind(video);
+    const nativePause=video.pause.bind(video);
+    const timeDescriptor=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    let seekTarget=null;
+    Object.defineProperty(video,'currentTime',{
+      configurable:true,
+      get(){return seekTarget===null ? timeDescriptor.get.call(video) : seekTarget;},
+      set(next){seekTarget=next;timeDescriptor.set.call(video,next);}
+    });
+    video.pause=()=>{
+      window.seekDecoderKicks++;
+      return nativePause();
+    };
+    video.play=()=>{
+      if (window.seekDecoderKicks) delete video.currentTime;
+      return nativePlay();
+    };
+  });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.controls')).toBeHidden();
+  // The browser claims playback is running, but the exposed decoder clock is
+  // frozen on the exact requested seek timestamp. No OK/Play key is sent.
+  await expect.poll(()=>page.evaluate(()=>window.seekDecoderKicks),{timeout:7000}).toBeGreaterThan(0);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  await expect(page.locator('.controls')).toBeHidden();
+});
+test('LG seek recovery retries a Play promise that never settles',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    const originalPlay=video.play.bind(video);
+    video.pause();
+    video.play=()=>{
+      window.seekPlayCalls++;
+      if (window.seekPlayCalls===1) return new Promise(()=>{});
+      return originalPlay();
+    };
+  });
+  await page.keyboard.press('Enter');
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls),{timeout:6500}).toBeGreaterThanOrEqual(2);
   await expect(page.locator('.controls')).toBeHidden();
 });
 
@@ -1043,6 +1094,10 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   const close=page.getByRole('button',{name:'Close subtitle sync'});
   await expect(slider).toBeFocused();
   await expect(slider).toHaveValue('0');
+  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
+    const screenshot=await page.locator('.sync-offset-bar').screenshot();
+    console.log('SYNC_SLIDER_QA_IMAGE:'+screenshot.toString('base64'));
+  }
   // Video decoders sometimes drop focus to the page body while a sheet is
   // open. A direction key must restore a reachable focused control.
   await page.evaluate(()=>document.activeElement.blur());
@@ -1053,6 +1108,8 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   // (an apparent checkbox) on the target LG's browser/font combination.
   await expect(page.locator('.sync-offset-button svg')).toHaveCount(4);
   await expect(reset.locator('svg path')).toHaveCount(1);
+  await expect(reset.locator('svg path')).toHaveAttribute('d',/M3 12a9 9/);
+  await expect(reset.locator('svg')).toHaveCSS('position','absolute');
   await expect(reset).toHaveText('');
 
   await page.keyboard.press('ArrowLeft');
@@ -1063,6 +1120,10 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   await expect(plus).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(reset).toBeFocused();
+  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
+    const screenshot=await page.locator('.sync-offset-bar').screenshot();
+    console.log('SYNC_RESET_QA_IMAGE:'+screenshot.toString('base64'));
+  }
   await page.keyboard.press('ArrowRight');
   await expect(close).toBeFocused();
   await page.keyboard.press('ArrowLeft');
