@@ -181,7 +181,7 @@ export class Player {
       }
     });
     this.seekBar.addEventListener('pointermove', event => {
-      if (!this.session || !this.timelineDuration()) return;
+      if (!this.session || !this.timelineDuration() || this.remoteSeeking || this.scrubbing) return;
       const bounds = this.seekBar.getBoundingClientRect();
       const fraction = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
       this.renderSeekPreview(fraction * this.timelineDuration());
@@ -1058,7 +1058,7 @@ export class Player {
       const bytes = await this.api.scrubPreview(session, controller.signal);
       if (generation !== this.generation || this.session !== session) return;
       this.previewFrames = parseBif(bytes);
-      if (!this.seekTooltip.hidden) this.renderSeekPreview(this.seekPreview);
+      if (!this.seekTooltip.hidden) this.renderSeekPreview(this.seekTooltipTime ?? this.seekPreview);
     } catch (_) { /* Some Plex servers do not provide BIF indexes. */ }
   }
   renderSeekPreview(seconds) {
@@ -1081,7 +1081,7 @@ export class Player {
       0, Math.max(0, track.clientWidth - width)) + 'px';
     this.seekTooltip.querySelector('span').textContent = time(seconds);
     this.seekTooltip.hidden = false;
-    this.seekPreview = seconds;
+    this.seekTooltipTime = seconds;
   }
   releaseSeekFrameUrl() {
     if (this.seekFrameUrl) URL.revokeObjectURL(this.seekFrameUrl);

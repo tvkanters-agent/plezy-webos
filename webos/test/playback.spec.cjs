@@ -1365,3 +1365,26 @@ test('rapid audio and subtitle changes during cleanup retain both choices and re
   await expect(page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}))
     .toHaveAttribute('aria-pressed','true');
 });
+
+test('pointer hover cannot replace the displayed D-pad seek target',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  const slider=page.locator('[data-action="seek"]');
+  const expected=Number(await slider.inputValue());
+  await slider.evaluate(input=>{
+    const bounds=input.getBoundingClientRect();
+    input.dispatchEvent(new MouseEvent('pointermove',{bubbles:true,
+      clientX:bounds.left+1,clientY:bounds.top+1}));
+  });
+  await expect(slider).toHaveValue(String(expected));
+  await page.locator('video').evaluate(video=>{
+    const descriptor=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    Object.defineProperty(video,'currentTime',{configurable:true,
+      get(){return descriptor.get.call(video);},
+      set(value){window.confirmedRemoteSeek=value;descriptor.set.call(video,value);}
+    });
+  });
+  await page.keyboard.press('Enter');
+  expect(Math.abs(await page.evaluate(()=>window.confirmedRemoteSeek)-expected)).toBeLessThanOrEqual(1);
+});
