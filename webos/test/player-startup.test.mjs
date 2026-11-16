@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Player} from '../src/player.js';
+import {Plex} from '../src/api.js';
 
 test('metadata and decoded-but-frozen startup keep the recovery deadline; clock progress clears it',t=>{
   t.mock.timers.enable({apis:['setTimeout']});
@@ -116,4 +117,19 @@ test('a silent native startup failure retains requested Play rather than a pause
   assert.deepEqual(opened[2],{mediaIndex:1,subtitle:90,transcode:true,start:125});
   player.openIntentPlaying=false;
   await player.reopen({transcode:true});assert.equal(opened[5],false,'explicit Pause still wins');
+});
+
+test('a hung Plex timeline cannot indefinitely block release and native fallback',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let aborted=false;
+  t.mock.method(globalThis,'fetch',(_,options)=>new Promise((resolve,reject)=>{
+    options.signal.addEventListener('abort',()=>{
+      aborted=true;reject(Object.assign(new Error('aborted'),{name:'AbortError'}));
+    });
+  }));
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv');
+  const reporting=api.report({item:{id:'movie',duration:120},sessionId:'session'},'stopped',20);
+  t.mock.timers.tick(15000);
+  await assert.rejects(reporting,/timed out/);
+  assert.equal(aborted,true);
 });
