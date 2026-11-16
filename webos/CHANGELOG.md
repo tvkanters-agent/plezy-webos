@@ -1,3 +1,8 @@
+## 1.11.5
+
+- Fix subtitle sync on Chromium 53 by supplying the Object APIs needed by Media Captions, and match Plezy's Plex sidecar URLs (codec extension and UTF-8).
+- Exercise visible SRT cues and actual WASM/legacy libass canvas output through live positive/negative/reset sync adjustments.
+
 ## 1.11.4
 
 - Fix episode refresh identity/focus, aggregate watch badges and cache state, rapid/paused track changes, Plex XML success responses, subtitle offset isolation, and delayed episode launch races.

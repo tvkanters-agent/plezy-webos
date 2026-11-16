@@ -535,3 +535,27 @@ Media Captions receives the current media clock on animation frames only while S
 Episode menu wrappers retain a separate catalog identity while their play and overflow controls retain stable focus IDs. Catalog reconciliation can therefore preserve unchanged rows and restore the specific control. As with WatchStateNotifier, a server-acknowledged aggregate watched action updates mounted children, their source metadata and saved child pages without remounting artwork; older revalidation cannot undo it. Later loaded children inherit the aggregate action while the route stays mounted.
 
 Source-track PUT follows PlexClient.selectStreams and treats HTTP success as success regardless of an XML/empty body. Rapid changes merge their options and position before awaiting old-session cleanup, and paused track changes pause again after the first resumed decoder frame (LG needs Play to decode that frame). Subtitle offset storage is scoped by the existing account/server fingerprint plus item ID; ambiguous old unscoped offsets are not migrated. Only the latest pending episode Play action may launch after metadata arrives.
+
+### Subtitle sync on Chromium 53 and real Plex sidecar keys
+
+MPV applies sub-delay to decoded subtitle tracks. The HTML equivalent only
+works while SRT/ASS are rendered locally; Plex burn-in contains fixed pixels.
+Media Captions 0.0.18 uses Object.values in VTTParser.done (also used by SRT)
+and Object.entries to render marked-up cues. Both APIs appeared in Chromium
+54, while the target LG engine is Chromium 53. Conditional, nonenumerable
+shims now provide those two standard operations before the renderer runs.
+Without them, SRT parsing threw and the player silently reopened with burn-in,
+so changing the sync slider could not affect the visible subtitles.
+
+PlexClient._buildSidecarSubtitleUrl is authoritative for sidecar requests:
+append the codec extension to Plex's bare Stream.key and request encoding=utf-8.
+The port now does so, retaining already-suffixed keys, SSA format, query
+parameters and account authentication. Embedded/image subtitles still follow
+upstream's burn-in path on HLS; this change does not invent stream extraction
+endpoints or claim that already-burned subtitles can be retimed.
+
+Browser regressions remove Object.values, Object.entries and ResizeObserver
+before application startup. They adjust the real UI while checking marked-up
+SRT visibility at a fixed paused clock, and actual libass canvas pixels in both
+WASM and legacy worker modes, including positive/negative delay and Reset.
+This simulates the relevant missing APIs; physical LG decoding is unverified.

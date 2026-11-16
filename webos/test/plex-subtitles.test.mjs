@@ -66,3 +66,30 @@ test('local SRT/ASS follows Plex subtitle selection with conservative Direct Pla
   assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
   await session.extrasPromise;
 });
+
+test('real Plex sidecar keys request the codec extension and UTF-8, including SSA', async () => {
+  const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
+  api.get = async () => ({MediaContainer:{Metadata:[{}]}});
+  for (const [codec, suffix, format] of [
+    ['srt','srt','srt'], ['subrip','srt','srt'], ['ass','ass','ass'], ['ssa','ssa','ass']
+  ]) {
+    const media = makeMedia('mkv');
+    media.Part[0].Stream = [
+      {streamType:3,id:90,codec,key:'/library/streams/90?download=1',selected:1}
+    ];
+    assert.deepEqual(plexExternalSubtitle(media), {
+      id:90, format, key:'/library/streams/90.' + suffix + '?download=1'
+    });
+    const session = await api.playback({id:'123',raw:{Media:[media]}});
+    const url = new URL(session.subtitleAsset.url);
+    assert.equal(url.pathname, '/library/streams/90.' + suffix);
+    assert.equal(url.searchParams.get('encoding'), 'utf-8');
+    assert.equal(url.searchParams.get('download'), '1');
+    assert.equal(url.searchParams.get('X-Plex-Token'), 'token');
+    assert.equal(new URL(session.url).searchParams.get('subtitles'), 'none');
+    await session.extrasPromise;
+  }
+  const media = makeMedia();
+  media.Part[0].Stream[2].key = '/library/streams/90.SRT?download=1';
+  assert.equal(plexExternalSubtitle(media).key, '/library/streams/90.SRT?download=1');
+});
