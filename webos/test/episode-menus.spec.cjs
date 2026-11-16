@@ -5,7 +5,9 @@ async function seasonServer(page, multi = false) {
   const episode={ratingKey:'ep1',type:'episode',title:'The First Episode',index:1,
     grandparentTitle:'Example Series',grandparentRatingKey:'show',parentRatingKey:'season',
     parentIndex:1,duration:120000,viewOffset:15000,
-    Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'part',key:'/fixture.mp4'}]}]};
+    summary:'A brief episode synopsis.',originallyAvailableAt:'2026-11-15',
+    Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',videoResolution:'1080',
+      Part:[{id:'part',key:'/fixture.mp4'}]}]};
   const detailed={...episode,Media:[{...episode.Media[0],Part:[{...episode.Media[0].Part[0],
     Stream:[
       {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
@@ -53,6 +55,31 @@ async function seasonServer(page, multi = false) {
   await page.goto('/');
   return calls;
 }
+
+test('season episode metadata matches Plezy weight and separator spacing',async({page})=>{
+  await seasonServer(page);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  const row=page.locator('.episode-entry').first();
+  const meta=row.locator('.episode-row-meta');
+  await expect(meta).toHaveCSS('font-weight','400');
+  await expect(meta.locator('.episode-row-meta-value')).toHaveCount(3);
+  await expect(meta.locator('.episode-row-meta-separator')).toHaveCount(2);
+  const spacing=await row.evaluate(node=>{
+    const summary=node.querySelector('.episode-summary').getBoundingClientRect();
+    const metadata=node.querySelector('.episode-row-meta');
+    const children=Array.from(metadata.children).map(child=>child.getBoundingClientRect());
+    return {
+      above:metadata.getBoundingClientRect().top-summary.bottom,
+      before:children[1].left-children[0].right,
+      after:children[2].left-children[1].right
+    };
+  });
+  expect(spacing.above).toBeGreaterThanOrEqual(5.5);
+  expect(spacing.above).toBeLessThanOrEqual(6.5);
+  expect(spacing.before).toBeGreaterThanOrEqual(8.5);
+  expect(spacing.after).toBeGreaterThanOrEqual(8.5);
+});
 
 test('season episode overflow changes watched state without starting playback',async({page})=>{
   const calls=await seasonServer(page);
