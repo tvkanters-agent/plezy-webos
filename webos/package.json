@@ -1,6 +1,6 @@
 {
   "name": "plezy-webos",
-  "version": "1.10.2",
+  "version": "1.11.0",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
@@ -16,5 +16,9 @@
     "@playwright/test": "1.51.1",
     "@webos-tools/cli": "^3.2.1",
     "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "libass-wasm": "4.1.0",
+    "media-captions": "0.0.18"
   }
 }
