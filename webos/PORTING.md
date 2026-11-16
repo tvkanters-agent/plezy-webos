@@ -419,6 +419,13 @@ uses the same BIF timestamp lookup, capped at the upstream 50 MiB TV budget,
 with an ordinary time tooltip if the server has no index. Frame URLs are
 revoked on scrub exit and source changes. Its use of a separate thumbnail
 source avoids depending on LG's video decoder producing a paused seek frame.
+Like Plezy's `DesktopVideoControls._timelineSeek`, repeated Left/Right
+changes affect only preview state until a single confirmed seek; the user
+specifically requested OK to commit on webOS (rather than Flutter's debounce/
+key-release commit). On webOS an unconfirmed preview is canceled by Back or
+focus leaving the timeline, restoring the preceding playing/paused state.
+No `video.currentTime` assignment or buffering spinner is triggered by preview
+movement: LG's native video pipeline would otherwise buffer on each step.
 Jellyfin Trickplay remains outside this Plex-focused port; full TV hardware
 verification is still needed.
 
@@ -427,7 +434,10 @@ blur a transport control to the document body. The player tracks the last
 selected transport control and restores it on `playing` without taking focus
 from track/chapter sheets. It keeps chrome visible while the user is focused
 in that strip, and Left/Right can seek only from the slider or video surface.
-Moving focus off the remote timeline finalizes its preview state. The floating
+Moving focus off the remote timeline discards its unconfirmed preview. Delayed
+decoder pause/playing events and synthetic focus/mouse notifications must not
+reopen controls explicitly hidden by Back; the second Back exits the player.
+The floating
 skip prompt is positioned above the *measured* transport chrome instead of
 using a fixed bottom offset that overlaps the seekbar on different TVs. Moving
 a mouse over the floating prompt must not reveal the controls underneath it:

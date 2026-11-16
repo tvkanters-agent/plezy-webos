@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.9.1 — Fix remote seek preview and Back dismissal
+
+- Left/Right now move only the timeline/BIF preview; the webOS decoder seeks and buffers only when OK commits the target.
+- Moving focus away or pressing Back cancels an unconfirmed seek instead of implicitly seeking. Resume the original playback state, including staying paused if already paused.
+- Prevent delayed decoder events and spurious focus/mouse events from reopening controls after Back; the next Back exits playback.
+- Cover repeat seek steps, confirmation, cancellation, late playback events, and paused playback in browser regressions.
+
 ## 1.9.0 — Subtitle synchronization
 
 - Add a subtitle timing adjustment control to playback settings, covering offsets from −60 to +60 seconds in 50 ms increments.
