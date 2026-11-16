@@ -154,8 +154,9 @@ https://webostv.developer.lge.com/develop/specifications/video-audio-40 .
 
 Unlike mpv, the HTML5 player cannot reliably select arbitrary embedded audio
 and subtitle tracks. Explicit changes to a different audio stream and selected
-subtitles therefore retain the existing Plex HLS path. Selecting an audio
-stream that is already marked selected does not need to re-encode video.
+subtitles therefore retain the existing Plex HLS path. Selecting the first native audio
+stream does not need to re-encode video; a server-selected later stream or
+server-default subtitle still requires HLS to preserve the intended tracks.
 Unsupported codecs, TrueHD, Hi10P H.264 and out-of-profile bitrates also keep
 HLS; the user's Compatible playback action still forces HLS.
 

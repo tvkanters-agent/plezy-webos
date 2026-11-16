@@ -12,10 +12,8 @@ const FORMATS = {
 
 const VIDEO_CODECS = ['h264', 'hevc'];
 
-function selectedAudio(part) {
-  return (part?.Stream || []).find(stream =>
-    Number(stream.streamType) === 2 &&
-    (stream.selected === true || stream.selected === 1 || stream.selected === '1'));
+function selected(stream) {
+  return stream.selected === true || stream.selected === 1 || stream.selected === '1';
 }
 
 /**
@@ -34,9 +32,19 @@ export function plexDirectPlayMime(media, options = {}) {
   if (!format || !VIDEO_CODECS.includes(videoCodec) || !format.audio.includes(audioCodec)) return null;
   if (options.transcode || (options.subtitle !== undefined && String(options.subtitle) !== '-1')) return null;
 
-  // A chosen *already-selected* audio stream needs no remux/transcode.
-  // A different audio stream still needs Plex to switch the audio output.
-  if (options.audio !== undefined && String(selectedAudio(part)?.id) !== String(options.audio)) return null;
+  const tracks = part?.Stream || [];
+  // The native HTML5 pipeline cannot reliably select embedded subtitle tracks.
+  // Do not silently lose server-default subtitles just because no explicit
+  // per-episode override was supplied. An explicit "off" permits Direct Play.
+  if (options.subtitle === undefined && tracks.some(stream =>
+    Number(stream.streamType) === 3 && selected(stream))) return null;
+
+  // The native decoder normally starts with the first audio stream. Server
+  // preferences apply to transcoding, not to the bytes of a direct part URL.
+  const audio = tracks.filter(stream => Number(stream.streamType) === 2);
+  const chosen = audio.find(selected);
+  if (chosen && audio.length && String(chosen.id) !== String(audio[0].id)) return null;
+  if (options.audio !== undefined && String(audio[0]?.id) !== String(options.audio)) return null;
 
   const videoStream = (part?.Stream || []).find(stream => Number(stream.streamType) === 1);
   const bitDepth = Number(videoStream?.bitDepth || media?.videoBitDepth || 0);

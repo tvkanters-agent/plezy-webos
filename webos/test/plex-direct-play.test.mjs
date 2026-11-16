@@ -40,7 +40,17 @@ test('explicit incompatible track and quality requests retain transcoding', () =
   assert.equal(plexDirectPlayMime(input, {audio: 22}), null);
   assert.equal(plexDirectPlayMime(input, {transcode: true}), null);
   assert.equal(plexDirectPlayMime(input, {audio: 21, subtitle: -1}), 'video/x-matroska',
-    'choosing the already selected stream must not needlessly transcode');
+    'choosing the native first audio stream must not needlessly transcode');
+  const secondAudioDefault = media('mkv', 'hevc', 'aac');
+  secondAudioDefault.Part[0].Stream[1].selected = 0;
+  secondAudioDefault.Part[0].Stream[2].selected = 1;
+  assert.equal(plexDirectPlayMime(secondAudioDefault), null,
+    'Plex selecting a later audio track cannot be applied by the native part URL');
+  const defaultSubtitle = media('mkv', 'hevc', 'aac');
+  defaultSubtitle.Part[0].Stream.push({streamType: 3, id: 90, selected: 1});
+  assert.equal(plexDirectPlayMime(defaultSubtitle), null, 'server-default subtitles must remain visible');
+  assert.equal(plexDirectPlayMime(defaultSubtitle, {subtitle: -1}), 'video/x-matroska',
+    'turning server-default subtitles off may Direct Play');
 });
 
 test('Plex playback uses a direct part URL when the TV accepts the source', async () => {
