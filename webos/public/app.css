@@ -748,7 +748,7 @@ main.has-alpha-bar { padding-right:60px; }
 
 /* Plezy subtitle sync control: compact timing slider with 50ms steps. */
 #player .player-sheet.sheet-sync { top:24px; bottom:auto; left:50%; right:auto;
-  width:min(900px,calc(100% - 48px)); max-height:110px;
+  width:calc(100% - 48px); max-width:900px; max-height:110px;
   -webkit-transform:translateX(-50%); transform:translateX(-50%); }
 #player .sheet-sync .player-sheet-header { min-height:34px; padding:6px 12px; }
 #player .sheet-sync .player-sheet-header h3 { font-size:17px; }
