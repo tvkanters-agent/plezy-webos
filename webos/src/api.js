@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Protocols ported from lib/services/{plex,jellyfin}_* and their client parts.
-import {plexDirectPlayMime} from './plex-direct-play.js';
+import {plexDirectPlayMime, plexSubtitleAsset} from './plex-direct-play.js';
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
 import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
@@ -437,13 +437,19 @@ export class Plex {
     // with Plex HLS, including TV-specific profile/container limitations.
     const mimeType = plexDirectPlayMime(media, options);
     const transcode = !mimeType;
+    // Separately rendered external SRT/ASS must not also be burned into HLS.
+    // Embedded/unsupported tracks retain Plex's existing burn-in behavior.
+    const subtitle = !options.burnSubtitles && plexSubtitleAsset(media, options);
+    const subtitleAsset = subtitle ? {id:subtitle.id, format:subtitle.format,
+      url:this.url(subtitle.key)} : null;
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       // Match Plezy's full-title HLS timeline. The player supplies the
       // resume point to the decoder at open, not to the transcoder URL.
       session: sessionId,
-      subtitleSize: 100, subtitles: 'burn',
+      subtitleSize: 100, subtitles: subtitleAsset ? 'none' : 'burn',
+      ...(subtitleAsset ? {subtitleStreamID:0} : {}),
       'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
@@ -469,7 +475,7 @@ export class Plex {
       options.skipSettings);
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, mimeType, item,
+      sessionId, sourceId: String(part.id), transcode, mimeType, item, subtitleAsset,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
       extrasPromise,
