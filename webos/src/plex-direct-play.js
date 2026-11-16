@@ -12,6 +12,21 @@ const FORMATS = {
 
 const VIDEO_CODECS = ['h264', 'hevc'];
 
+// Plex supplies external subtitle files through Stream.key. Embedded tracks
+// have no independently downloadable file and must stay on the burn-in path.
+export function plexSubtitleAsset(media, options = {}) {
+  const streams = media?.Part?.[0]?.Stream || [];
+  const subtitles = streams.filter(stream => Number(stream.streamType) === 3);
+  const stream = options.subtitle === undefined ? subtitles.find(selected)
+    : String(options.subtitle) === '-1' ? null
+    : subtitles.find(entry => String(entry.id) === String(options.subtitle));
+  if (!stream?.key) return null;
+  const codec = String(stream.codec || '').toLowerCase();
+  const format = ['srt', 'subrip'].includes(codec) ? 'srt'
+    : ['ass', 'ssa'].includes(codec) ? 'ass' : null;
+  return format ? {id:stream.id, key:stream.key, format} : null;
+}
+
 function selected(stream) {
   return stream.selected === true || stream.selected === 1 || stream.selected === '1';
 }
@@ -30,14 +45,15 @@ export function plexDirectPlayMime(media, options = {}) {
   const videoCodec = String(media?.videoCodec || '').toLowerCase();
   const audioCodec = String(media?.audioCodec || '').toLowerCase();
   if (!format || !VIDEO_CODECS.includes(videoCodec) || !format.audio.includes(audioCodec)) return null;
-  if (options.transcode || (options.subtitle !== undefined && String(options.subtitle) !== '-1')) return null;
+  if (options.transcode || options.burnSubtitles) return null;
 
   const tracks = part?.Stream || [];
-  // The native HTML5 pipeline cannot reliably select embedded subtitle tracks.
-  // Do not silently lose server-default subtitles just because no explicit
-  // per-episode override was supplied. An explicit "off" permits Direct Play.
-  if (options.subtitle === undefined && tracks.some(stream =>
-    Number(stream.streamType) === 3 && selected(stream))) return null;
+  // Native video + a separately downloaded text subtitle is safe. The HTML5
+  // decoder cannot select embedded tracks, so those still need Plex HLS.
+  const selectedSubtitle = options.subtitle === undefined
+    ? tracks.some(stream => Number(stream.streamType) === 3 && selected(stream))
+    : String(options.subtitle) !== '-1';
+  if (selectedSubtitle && !plexSubtitleAsset(media, options)) return null;
 
   // The native decoder normally starts with the first audio stream. Server
   // preferences apply to transcoding, not to the bytes of a direct part URL.
