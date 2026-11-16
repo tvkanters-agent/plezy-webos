@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-export const VERSION = '1.11.3';
+export const VERSION = '1.11.4';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -35,7 +35,7 @@ export function endpoint(base, path, params = {}) {
   });
   return url.href;
 }
-export async function request(url, {method = 'GET', headers = {}, body, timeout = 15000, signal} = {}) {
+export async function request(url, {method = 'GET', headers = {}, body, timeout = 15000, signal, responseType = 'json'} = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal) {
@@ -53,6 +53,7 @@ export async function request(url, {method = 'GET', headers = {}, body, timeout 
       error.status = response.status;
       throw error;
     }
+    if (responseType === 'none') return {};
     const text = await response.text();
     if (!text) return {};
     try { return JSON.parse(text); } catch (_) { throw new Error('The server did not return JSON. Check the server URL.'); }

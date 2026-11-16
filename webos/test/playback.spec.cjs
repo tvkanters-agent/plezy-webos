@@ -1310,3 +1310,20 @@ test('subtitle lift clears the measured controls at different viewport sizes',as
     expect(geometry.lift).toBe(-geometry.controls);
   }
 });
+
+test('track changes while paused keep the selected position and paused state',async({page})=>{
+  await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
+      {streamType:2,id:12,languageCode:'fra',codec:'aac'}
+    ]}]}]});
+  await page.locator('video').evaluate(video=>{video.currentTime=22;});
+  await page.locator('[data-action="pause"]').click();
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').getByRole('button',{name:/French/}).click();
+  await expect(page.locator('.player-track-column button[aria-pressed="true"]')).toHaveAttribute('data-track-id','12');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.readyState)).toBeGreaterThanOrEqual(2);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(21);
+});

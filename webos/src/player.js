@@ -3,6 +3,7 @@ import {clamp, nextFocus, time} from './core.js';
 import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
 import {parseBif, bifFrameAt} from './scrub-preview.js';
 import {SubtitleOverlay} from './subtitles.js';
+import {catalogScope} from './persistent-catalog.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -82,6 +83,14 @@ export class Player {
       if (!this.initialSeekPending) this.hasFirstFrame = true;
       this.update();
       this.focusSkipMarkerIfReady();
+      // Reopening for a track change must retain a deliberately paused title.
+      // LG still needs Play to decode its initial/resume frame before pausing.
+      if (this.pauseAfterOpen && !this.initialSeekPending) {
+        this.pauseAfterOpen = false;
+        this.video.pause();
+        this.update();
+        return;
+      }
       if(!this.initialSeekPending) this.showBuffering(false);
       this.report('playing');
       this.track('start');
@@ -420,7 +429,8 @@ export class Player {
   }
   subtitleSyncStorageKey() {
     const id = this.item?.ratingKey || this.item?.id || this.item?.key;
-    return id ? 'plezy.webos.subtitleSync.' + String(id) : null;
+    return id && this.api?.server
+      ? 'plezy.webos.subtitleSync.' + catalogScope(this.api.server) + '.' + String(id) : null;
   }
   loadSubtitleSyncOffset() {
     this.subtitleSyncOffsetMs = 0;
@@ -704,7 +714,8 @@ export class Player {
     this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
-  async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null) {
+  async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null, playing = true) {
+    this.openIntentPlaying = playing;
     const tracking = preserveTracking ? this.playbackTracking : null;
     this.closing = false;
     const cleanup = this.release(false, preserveTracking);
@@ -713,6 +724,7 @@ export class Player {
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
     this.loadSubtitleSyncOffset();
+    this.pauseAfterOpen = !playing;
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
@@ -971,10 +983,16 @@ export class Player {
         trackSheetFocus = {kind:focused.dataset.trackKind, id:focused.dataset.trackId};
       else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
     }
-    const options = {...this.options, ...changes, start: changes.start ?? this.position()};
+    const playing = this.session ? this.resumeAfterSeekTarget != null || !this.video.paused
+      : this.openIntentPlaying !== false;
+    const position = this.session ? this.position() : this.options.start || this.lastPosition || 0;
+    const options = {...this.options, ...changes, start: changes.start ?? position};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
-    return this.open(this.api, this.item, options, true, trackSheetFocus);
+    // Publish the combined choice before cleanup awaits network reporting.
+    // Another selection while the sheet stays open must build on this one.
+    this.options = options;
+    return this.open(this.api, this.item, options, true, trackSheetFocus, playing);
   }
   async subtitleFailed(error, session) {
     if (!this.session || this.session !== session || this.recovering) return;

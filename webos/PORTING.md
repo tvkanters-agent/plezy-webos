@@ -529,3 +529,9 @@ Native Plezy preserves playing/paused intent through timeline and chapter seeks.
 ### Subtitle clock and controls clearance
 
 Media Captions receives the current media clock on animation frames only while SRT playback is active, plus immediate pause/seek updates; no subtitle parsing occurs per frame. Negative shifted times are retained so a positive delay cannot display a zero-start cue early. Async SRT/ASS construction reads the latest applied delay, never its stale download-time argument. The caption lift uses the actual transport height and is refreshed on resize. ASS canvas positioning stays with libass. These are minimal HTML equivalents of MPV's timed cues and Flutter's measured chrome clearance.
+
+### Regression follow-up: retained rows, watch state and track restarts
+
+Episode menu wrappers retain a separate catalog identity while their play and overflow controls retain stable focus IDs. Catalog reconciliation can therefore preserve unchanged rows and restore the specific control. As with WatchStateNotifier, a server-acknowledged aggregate watched action updates mounted children, their source metadata and saved child pages without remounting artwork; older revalidation cannot undo it. Later loaded children inherit the aggregate action while the route stays mounted.
+
+Source-track PUT follows PlexClient.selectStreams and treats HTTP success as success regardless of an XML/empty body. Rapid changes merge their options and position before awaiting old-session cleanup, and paused track changes pause again after the first resumed decoder frame (LG needs Play to decode that frame). Subtitle offset storage is scoped by the existing account/server fingerprint plus item ID; ambiguous old unscoped offsets are not migrated. Only the latest pending episode Play action may launch after metadata arrives.

@@ -471,7 +471,7 @@ export class Plex {
       'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
-        subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1}, {method: 'PUT'});
+        subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
     }
     // Native PlexClient.getPlaybackExtras reads the current metadata with
     // includeChapters/includeMarkers. Home shelves and cached detail pages can
