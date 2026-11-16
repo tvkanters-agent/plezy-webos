@@ -425,7 +425,7 @@ export class Player {
           this.subtitleCueTimes.set(cue, original);
         }
         try {
-          const start = Math.max(0, original.start + offset);
+          const start = original.start + offset;
           const end = Math.max(start + 0.001, original.end + offset);
           if (cue.startTime !== start) cue.startTime = start;
           if (cue.endTime !== end) cue.endTime = end;
