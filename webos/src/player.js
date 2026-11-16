@@ -33,12 +33,15 @@ export class Player {
     this.seekPreview = 0;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.resumeAfterSeekTarget = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
-    this.video.addEventListener('loadedmetadata', () => { this.resume(); this.startAfterInitialSeek(); });
+    this.video.addEventListener('loadedmetadata', () => {
+      this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
+    });
     this.video.addEventListener('canplay', () => {
-      this.status.textContent = ''; this.resume();
+      this.status.textContent = ''; this.resume(); this.tryResumeAfterSeek();
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
@@ -56,6 +59,7 @@ export class Player {
       if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
       this.applySubtitleSyncOffset();
       this.update();
+      this.tryResumeAfterSeek();
     });
     this.video.textTracks?.addEventListener?.('addtrack', () => this.applySubtitleSyncOffset());
     this.video.addEventListener('loadedmetadata', () => this.applySubtitleSyncOffset());
@@ -107,6 +111,7 @@ export class Player {
       if (!this.initialSeekPending &&
           (this.video.readyState >= 2 || this.video.paused || this.atMediaEnd()))
         this.showBuffering(false);
+      this.tryResumeAfterSeek();
     });
     this.video.addEventListener('ended', () => this.close(true));
     this.video.addEventListener('error', () => this.failed());
@@ -126,9 +131,12 @@ export class Player {
         // Moving from the timeline to a transport button commits the preview
         // without leaving directional seeking armed on that button.
         if (this.remoteSeeking) {
+          const target = this.seekPreview;
+          const shouldResume = this.seekWasPlaying;
           this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
           this.hideSeekPreview();
-          if (this.seekWasPlaying) this.video.play().catch(() => this.failed());
+          this.seekTo(target);
+          if (shouldResume) this.queueResumeAfterSeek(target);
           this.seekWasPlaying = false;
         }
         this.lastControlFocus = event.target;
@@ -783,6 +791,7 @@ export class Player {
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.resumeAfterSeekTarget = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
@@ -951,11 +960,34 @@ export class Player {
     this.hideSeekPreview();
     this.seekTo(point);
     this.showBuffering(true);
-    // OK confirms the preview and resumes playback from that frame.
-    this.video.play().catch(() => this.failed());
+    // Wait for the webOS decoder's seeked event before resuming. Calling play()
+    // while the hardware seek is still pending can leave the player paused.
+    this.queueResumeAfterSeek(point);
     this.seekWasPlaying = false;
     this.hideControls();
     return true;
+  }
+  queueResumeAfterSeek(target) {
+    this.resumeAfterSeekTarget = target;
+    this.tryResumeAfterSeek();
+  }
+  tryResumeAfterSeek() {
+    const target = this.resumeAfterSeekTarget;
+    if (target === null) return;
+    if (!this.session || this.closing) {
+      this.resumeAfterSeekTarget = null;
+      return;
+    }
+    if (!this.video.paused) {
+      this.resumeAfterSeekTarget = null;
+      return;
+    }
+    if (this.pendingStart || this.video.readyState < 1 || this.video.seeking ||
+        !Number.isFinite(this.video.currentTime) || Math.abs(this.video.currentTime - target) > 1) return;
+    this.resumeAfterSeekTarget = null;
+    this.video.play().catch(error => {
+      if (error.name !== 'AbortError') this.failed();
+    });
   }
   timelineDuration() {
     const duration = this.video.duration;
@@ -967,6 +999,7 @@ export class Player {
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
+    this.resumeAfterSeekTarget = null;
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
     if (this.video.readyState < 1) this.pendingStart = target;
@@ -986,7 +1019,7 @@ export class Player {
     this.renderSkipMarker();
     this.hideTimer = setTimeout(() => {
       if (this.session && this.sheet.hidden && !this.video.paused &&
-          !this.controls.contains(document.activeElement) &&
+          !this.seeking && !this.remoteSeeking && !this.scrubbing &&
           !['SELECT'].includes(document.activeElement.tagName)) {
         this.hideControls();
       }
