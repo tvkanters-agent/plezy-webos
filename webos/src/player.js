@@ -186,6 +186,9 @@ export class Player {
       root.querySelector('[data-action="' + action + '"]').onclick = () => this.openSheet(action);
     }
     root.querySelector('[data-action="close-options"]').onclick = () => this.closeSheet();
+    root.addEventListener('keyup', event => {
+      if (event.keyCode === 13) { this.stopSyncHold(); this.syncHoldFired = false; }
+    });
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => {
         const id = Number(event.target.value);
@@ -418,6 +421,113 @@ export class Player {
       }
     } catch (_) {}
     this.applySubtitleSyncOffset();
+    this.updateSubtitleSyncControls();
+  }
+  formatSubtitleSyncOffset() {
+    const offset = this.subtitleSyncOffsetMs;
+    return (offset > 0 ? '+' : offset < 0 ? '−' : '') + (Math.abs(offset) / 1000).toFixed(2) + ' s';
+  }
+  updateSubtitleSyncControls() {
+    const label = this.formatSubtitleSyncOffset();
+    const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
+    if (settingsValue) settingsValue.textContent = label;
+    const settingsRow = this.sheet.querySelector('.player-settings-sync');
+    if (settingsRow) settingsRow.classList.toggle('is-active', this.subtitleSyncOffsetMs !== 0);
+    const value = this.sheet.querySelector('.sync-offset-value');
+    if (value) value.textContent = label;
+    const slider = this.sheet.querySelector('.sync-offset-slider');
+    if (slider) {
+      const position = clamp(this.subtitleSyncOffsetMs, -10000, 10000);
+      slider.value = String(position);
+      slider.style.setProperty('--sync-progress', ((position + 10000) / 200) + '%');
+    }
+    const reset = this.sheet.querySelector('[data-sync="reset"]');
+    if (reset) reset.setAttribute('aria-disabled', String(this.subtitleSyncOffsetMs === 0));
+  }
+  adjustSubtitleSync(direction, step = 50) {
+    this.setSubtitleSyncOffset(this.subtitleSyncOffsetMs + direction * step);
+  }
+  stopSyncHold() {
+    clearTimeout(this.syncHoldTimeout);
+    clearInterval(this.syncHoldInterval);
+    this.syncHoldTimeout = null;
+    this.syncHoldInterval = null;
+  }
+  startSyncHold(direction) {
+    this.stopSyncHold();
+    this.syncHoldFired = false;
+    this.syncHoldTimeout = setTimeout(() => {
+      this.syncHoldFired = true;
+      this.adjustSubtitleSync(direction, 1000);
+      this.syncHoldInterval = setInterval(() => this.adjustSubtitleSync(direction, 1000), 200);
+    }, 400);
+  }
+  openSyncBar() {
+    this.stopSyncHold();
+    this.openSheetAction = 'options';
+    this.sheet.classList.remove('sheet-tracks');
+    this.sheet.classList.add('sheet-sync');
+    this.sheet.querySelector('[data-sheet-title]').textContent = 'Subtitle sync';
+    const list = this.sheet.querySelector('.player-options-list');
+    list.classList.remove('player-track-columns');
+    list.textContent = '';
+    const bar = document.createElement('div');
+    bar.className = 'sync-offset-bar';
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Subtitle sync');
+    const icon = document.createElement('span');
+    icon.className = 'sync-offset-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 11h5m2 0h5M6 15h12" stroke="currentColor" stroke-width="2"/></svg>';
+    const title = document.createElement('span');
+    title.className = 'sync-offset-title';
+    title.textContent = 'Subtitle sync';
+    const stepButton = (action, symbol, label, direction) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sync-offset-button';
+      button.dataset.sync = action;
+      button.textContent = symbol;
+      button.setAttribute('aria-label', label);
+      if (direction) {
+        button.dataset.syncStep = String(direction);
+        button.onclick = () => {
+          if (this.syncHoldFired) { this.syncHoldFired = false; return; }
+          this.adjustSubtitleSync(direction);
+        };
+        button.addEventListener('pointerdown', event => {
+          if (event.button === 0) this.startSyncHold(direction);
+        });
+        button.addEventListener('pointerup', () => this.stopSyncHold());
+        button.addEventListener('pointerleave', () => this.stopSyncHold());
+        button.addEventListener('blur', () => this.stopSyncHold());
+        button.addEventListener('pointercancel', () => {
+          this.stopSyncHold(); this.syncHoldFired = false;
+        });
+      }
+      return button;
+    };
+    const minus = stepButton('minus', '−', 'Decrease subtitle delay', -1);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.className = 'sync-offset-slider';
+    slider.min = '-10000'; slider.max = '10000'; slider.step = '50';
+    slider.setAttribute('aria-label', 'Subtitle sync offset');
+    slider.addEventListener('input', () => this.setSubtitleSyncOffset(Number(slider.value)));
+    const plus = stepButton('plus', '+', 'Increase subtitle delay', 1);
+    const value = document.createElement('output');
+    value.className = 'sync-offset-value';
+    value.setAttribute('aria-live', 'off');
+    const reset = stepButton('reset', '↺', 'Reset subtitle sync');
+    reset.onclick = () => this.setSubtitleSyncOffset(0);
+    const close = stepButton('close', '×', 'Close subtitle sync');
+    close.onclick = () => this.closeSheet();
+    bar.append(icon, title, minus, slider, plus, value, reset, close);
+    list.appendChild(bar);
+    this.sheet.hidden = false;
+    this.updateSubtitleSyncControls();
+    this.reveal();
+    slider.focus();
   }
   applySubtitleSyncOffset() {
     if (!this.video?.textTracks || !this.subtitleCueTimes) return;
@@ -444,6 +554,8 @@ export class Player {
   openSheet(action, preferredTrack = null) {
     const kind = {options:'settings', 'tracks-options':'tracks',
       'chapter-options':'chapter'}[action];
+    this.stopSyncHold();
+    this.sheet.classList.remove('sheet-sync');
     this.openSheetAction = action;
     this.sheet.querySelector('[data-sheet-title]').textContent = {
       settings:'Playback settings', tracks:'Audio & Subtitles', chapter:'Chapters'}[kind];
@@ -452,39 +564,23 @@ export class Player {
     list.classList.toggle('player-track-columns', kind === 'tracks');
     this.sheet.classList.toggle('sheet-tracks', kind === 'tracks');
     if (kind === 'settings') {
-      const sync = document.createElement('div');
-      sync.className = 'subtitle-sync-control';
-      const heading = document.createElement('div');
-      heading.className = 'subtitle-sync-heading';
-      const label = document.createElement('label');
-      label.htmlFor = 'subtitle-sync-offset';
-      label.textContent = 'Subtitle sync';
-      const value = document.createElement('output');
-      value.className = 'subtitle-sync-value';
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.id = 'subtitle-sync-offset';
-      slider.min = '-60000'; slider.max = '60000'; slider.step = '50';
-      slider.value = String(this.subtitleSyncOffsetMs);
-      slider.setAttribute('aria-label', 'Subtitle sync offset');
-      const reset = document.createElement('button');
-      reset.type = 'button'; reset.className = 'subtitle-sync-reset'; reset.textContent = 'Reset';
-      const renderValue = () => {
-        const seconds = Math.abs(this.subtitleSyncOffsetMs) / 1000;
-        value.textContent = (this.subtitleSyncOffsetMs > 0 ? '+' : this.subtitleSyncOffsetMs < 0 ? '−' : '') + seconds.toFixed(2) + ' s';
-      };
-      slider.oninput = () => { this.setSubtitleSyncOffset(Number(slider.value)); renderValue(); };
-      reset.onclick = () => { this.setSubtitleSyncOffset(0); slider.value = '0'; renderValue(); };
-      renderValue(); heading.append(label, value); sync.append(heading, slider, reset);
-      list.appendChild(sync);
-      const quality = this.root.querySelector('[data-action="transcode"]');
+      // Plezy shows a settings row that opens a compact sync bar at the top,
+      // leaving the subtitles visible while the slider is adjusted.
       const button = document.createElement('button');
-      button.textContent = quality.textContent;
-      button.onclick = () => {
+      button.className = 'player-settings-sync';
+      button.setAttribute('aria-label', 'Subtitle sync');
+      button.innerHTML = '<span class="player-settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 11h5m2 0h5M6 15h12" stroke="currentColor" stroke-width="2"/></svg></span><span class="player-settings-label">Subtitle sync</span><span class="player-settings-sync-value"></span><span class="player-settings-chevron" aria-hidden="true">›</span>';
+      button.onclick = () => this.openSyncBar();
+      list.appendChild(button);
+      this.updateSubtitleSyncControls();
+      const quality = this.root.querySelector('[data-action="transcode"]');
+      const qualityButton = document.createElement('button');
+      qualityButton.textContent = quality.textContent;
+      qualityButton.onclick = () => {
         this.closeSheet();
         quality.click();
       };
-      list.appendChild(button);
+      list.appendChild(qualityButton);
     } else if (kind === 'tracks') {
       const audio = this.session?.audio || [];
       const subtitles = this.session?.subtitles || [];
@@ -572,7 +668,10 @@ export class Player {
     else this.sheet.querySelector('[data-action="close-options"]').focus();
   }
   closeSheet() {
+    this.stopSyncHold();
+    this.syncHoldFired = false;
     this.sheet.hidden = true;
+    this.sheet.classList.remove('sheet-sync');
     this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
@@ -1034,6 +1133,45 @@ export class Player {
       event.preventDefault();
       if (!event.repeat) this.activateSkipMarker();
       return true;
+    }
+    if (!this.sheet.hidden && this.sheet.classList.contains('sheet-sync')) {
+      const current = document.activeElement;
+      const direction = {37:'left',38:'up',39:'right',40:'down'}[code];
+      if (direction) {
+        event.preventDefault();
+        if (current.classList?.contains('sync-offset-slider') && (code === 37 || code === 39)) {
+          this.adjustSubtitleSync(code === 37 ? -1 : 1);
+          return true;
+        }
+        // As in Plezy's FocusableSlider, horizontal arrows adjust the value
+        // while it has focus. Other controls remain in a spatial focus row.
+        if (code === 37 && current.dataset?.sync === 'close') {
+          this.sheet.querySelector('[data-sync="reset"]').focus();
+          return true;
+        }
+        const candidates = Array.from(this.sheet.querySelectorAll('button, input[type="range"]'))
+          .filter(node => node !== current && node.getClientRects().length && !node.hidden);
+        const next = nextFocus(current.getBoundingClientRect(),
+          candidates.map(value => ({value, rect:value.getBoundingClientRect()})), direction);
+        if (next) next.focus();
+        return true;
+      }
+      if (code === 13) {
+        event.preventDefault();
+        if (event.repeat) return true;
+        if (current.classList?.contains('sync-offset-slider')) {
+          this.sheet.querySelector('[data-sync="close"]').focus();
+        } else if (current.dataset?.syncStep) {
+          const step = Number(current.dataset.syncStep);
+          this.adjustSubtitleSync(step);
+          this.startSyncHold(step);
+        } else if (current.dataset?.sync === 'reset') {
+          this.setSubtitleSyncOffset(0);
+        } else if (current.dataset?.sync === 'close') {
+          this.closeSheet();
+        }
+        return true;
+      }
     }
     if (!this.sheet.hidden && [37,38,39,40].includes(code)) {
       event.preventDefault();
