@@ -90,7 +90,14 @@ export function plexExternalSubtitle(media, options = {}) {
   const codec = String(stream.codec || '').toLowerCase();
   const format = ['srt', 'subrip'].includes(codec) ? 'srt'
     : ['ass', 'ssa'].includes(codec) ? 'ass' : null;
-  return format ? {id:stream.id, format, key:stream.key} : null;
+  if (!format) return null;
+  // Plex Stream.key normally ends at /library/streams/{id}. Match Plezy's
+  // PlexClient._buildSidecarSubtitleUrl: request the codec extension and UTF-8.
+  // Keep already-suffixed keys and their query parameters intact.
+  const [, path, query] = /^([^?#]*)(.*)$/.exec(stream.key);
+  const extension = codec === 'ssa' ? 'ssa' : format;
+  const key = /\.(srt|ass|ssa)$/i.test(path) ? path : path + '.' + extension;
+  return {id:stream.id, format, key:key + query};
 }
 export function mediaSourceTracks(item, mediaIndex = 0) {
   const raw = item?.raw || {};
@@ -455,7 +462,7 @@ export class Plex {
     const mimeType = plexDirectPlayMime(media, {...options, localSubtitle:!!subtitle});
     const transcode = !mimeType;
     const subtitleAsset = subtitle ? {id:subtitle.id, format:subtitle.format,
-      url:this.url(subtitle.key)} : null;
+      url:this.url(subtitle.key, {encoding:'utf-8'})} : null;
     // Keep the established full-title HLS fallback for incompatible native files.
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',

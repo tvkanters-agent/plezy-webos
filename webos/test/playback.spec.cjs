@@ -16,8 +16,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
-    if (subtitleResponse && url.pathname === '/subtitles.srt')
-      return route.fulfill({contentType:'text/plain',body:await subtitleResponse()});
+    if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/')))
+      return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});
     if (url.pathname.endsWith('/indexes/sd'))
       return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
         : route.fulfill({status:404,body:''});
@@ -1428,3 +1428,107 @@ test('failed replacement HLS reports an error while the original Play promise st
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await expect(page.locator('#player')).toBeHidden();
 });
+
+test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn-in fallback',async({page})=>{
+  await page.addInitScript(()=>{
+    Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
+  });
+  const errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/library/streams/31',selected:1}
+    ]}]}]},undefined,[],{},null,null,async url=>{
+      // A real Plex key has no suffix. Reject the old unsuffixed request.
+      if(url.pathname!=='/library/streams/31.srt') return '<html>Not Found</html>';
+      return '1\n00:00:10,000 --> 00:00:11,000\n<i>OFFSET CUE</i>\n';
+    });
+  await page.locator('[data-action="pause"]').click();
+  await page.locator('video').evaluate(video=>{video.currentTime=10.025;});
+  const captions=page.locator('.player-captions');
+  await expect(captions).toContainText('OFFSET CUE');
+  await expect(captions.locator('i')).toHaveText('OFFSET CUE');
+  expect(calls.some(url=>url.pathname==='/library/streams/31.srt' &&
+    url.searchParams.get('encoding')==='utf-8')).toBe(true);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+  // Up/Down must immediately change actual displayed cues at a fixed clock.
+  await page.keyboard.press('ArrowUp');
+  await expect(slider).toHaveValue('50');
+  await expect(captions).not.toContainText('OFFSET CUE');
+  await page.keyboard.press('ArrowDown');
+  await expect(captions).toContainText('OFFSET CUE');
+  await slider.evaluate(input=>{
+    input.value='2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await expect(captions).not.toContainText('OFFSET CUE');
+  await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+  await expect(captions).toContainText('OFFSET CUE');
+  await slider.evaluate(input=>{
+    input.value='-2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await expect(captions).not.toContainText('OFFSET CUE');
+  await page.locator('video').evaluate(video=>{video.currentTime=8.5;});
+  await expect(captions).toContainText('OFFSET CUE');
+  expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
+for (const legacy of [false,true]) {
+  test('sync slider retimes actual ASS canvas pixels using '+(legacy?'legacy':'WASM')+' libass',async({page})=>{
+    test.setTimeout(90000);
+    page.on('console',message=>console.log('ASS '+(legacy?'legacy':'WASM')+': '+message.text()));
+    page.on('pageerror',error=>console.log('ASS error: '+error.message));
+    page.on('response',response=>{
+      if(response.status()>=400 && new URL(response.url()).hostname==='127.0.0.1')
+        console.log('ASS asset HTTP '+response.status()+': '+new URL(response.url()).pathname);
+    });
+    await page.addInitScript(legacy=>{
+      Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
+      if(legacy) window.WebAssembly=undefined;
+    },legacy);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+      Part:[{id:'part',key:'/video.webm',Stream:[
+        {streamType:3,id:31,codec:'ass',key:'/library/streams/31',selected:1}
+      ]}]}]},undefined,[],{},null,null,async url=>{
+        if(url.pathname!=='/library/streams/31.ass') return '<html>Not Found</html>';
+        return '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n'+
+          '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'+
+          'Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n'+
+          '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
+          'Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,OFFSET CUE\n';
+      });
+    await page.locator('[data-action="pause"]').click();
+    await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
+    const canvas=page.locator('#player canvas.libassjs-canvas');
+    await expect(canvas).toBeVisible({timeout:60000});
+    const hasPixels=()=>canvas.evaluate(canvas=>{
+      const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+      for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
+      return false;
+    });
+    await expect.poll(hasPixels,{timeout:60000}).toBe(true);
+    await page.getByRole('button',{name:'Playback settings'}).click();
+    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+    const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+    await slider.evaluate(input=>{
+      input.value='2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await expect.poll(hasPixels).toBe(false);
+    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+    await expect.poll(hasPixels).toBe(true);
+    await slider.evaluate(input=>{
+      input.value='-2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await expect.poll(hasPixels).toBe(false);
+    await page.locator('video').evaluate(video=>{video.currentTime=8.5;});
+    await expect.poll(hasPixels).toBe(true);
+    expect(calls.some(url=>url.pathname==='/library/streams/31.ass' &&
+      url.searchParams.get('encoding')==='utf-8')).toBe(true);
+    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
+    expect(errors).toEqual([]);
+  });
+}

@@ -2,6 +2,22 @@
 // Compatibility primitives needed by the Chromium 53 engine in webOS TV 4.x.
 // All shims are conditional; newer webOS versions keep their native APIs.
 (function () {
+  // Media Captions uses values when finishing SRT parsing and entries when
+  // rendering markup. Both arrived in Chromium 54, after our TV's Chromium 53.
+  // Without these, subtitles silently fall back to Plex burn-in and sync
+  // adjustments cannot change the already-rendered video pixels.
+  if (!Object.values) {
+    Object.defineProperty(Object, 'values', {configurable: true, writable: true,
+      value: function (object) {
+        return Object.keys(object).map(function (key) { return object[key]; });
+      }});
+  }
+  if (!Object.entries) {
+    Object.defineProperty(Object, 'entries', {configurable: true, writable: true,
+      value: function (object) {
+        return Object.keys(object).map(function (key) { return [key, object[key]]; });
+      }});
+  }
   if (!String.prototype.padStart) {
     String.prototype.padStart = function (length, padding) {
       var value = String(this), fill = padding === undefined ? ' ' : String(padding);
