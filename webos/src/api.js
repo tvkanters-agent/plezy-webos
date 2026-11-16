@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Protocols ported from lib/services/{plex,jellyfin}_* and their client parts.
-import {plexDirectPlayMime} from './plex-direct-play.js';
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
 import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
@@ -432,11 +431,10 @@ export class Plex {
     if (!part) throw new Error('This version has no playable media.');
     if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
     const sessionId = id();
-    // Ask the LG native pipeline to play supported files unchanged, as desktop
-    // Plezy does through mpv. Player.failed() still retries unsupported files
-    // with Plex HLS, including TV-specific profile/container limitations.
-    const mimeType = plexDirectPlayMime(media, options);
-    const transcode = !mimeType;
+    const transcode = options.transcode || !['mp4', 'm4v', 'mov'].includes(media.container)
+      || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
+      || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
+    // Conservative direct play, with user-accessible HLS fallback for TV-specific limits.
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
@@ -469,7 +467,7 @@ export class Plex {
       options.skipSettings);
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, mimeType, item,
+      sessionId, sourceId: String(part.id), transcode, item,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
       extrasPromise,

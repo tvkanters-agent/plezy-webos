@@ -48,29 +48,6 @@ for (const transcode of [false, true]) {
   });
 }
 
-test('LG passes the correct Matroska MIME and resume position to the native decoder', () => {
-  const oldWindow = globalThis.window, oldDocument = globalThis.document;
-  const sources = [];
-  globalThis.window = {PalmSystem: {}};
-  globalThis.document = {createElement: () => ({
-    attributes: {}, setAttribute(k, v) {this.attributes[k] = v;},
-    addEventListener() {}
-  })};
-  try {
-    const video = {appendChild(source) {sources.push(source);}, load() {}};
-    const player = Object.assign(Object.create(Player.prototype), {
-      video, generation: 1, initialSeekTarget: 800, pendingStart: 800
-    });
-    player.loadSource({url: 'http://plex.test/library/parts/55/file.mkv',
-      transcode: false, mimeType: 'video/x-matroska'});
-    assert.equal(sources.length, 1);
-    const [mime, encoded] = sources[0].attributes.type.split(';mediaOption=');
-    assert.equal(mime, 'video/x-matroska');
-    assert.equal(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start, 800000);
-    assert.equal(player.pendingStart, 0);
-  } finally {globalThis.window = oldWindow; globalThis.document = oldDocument;}
-});
-
 test('release removes native sources before load, so reopening cannot select an old episode', async () => {
   const operations=[];
   const player=Object.assign(Object.create(Player.prototype), {
