@@ -466,30 +466,72 @@ test('Back hides player controls first and a second Back exits',async({page})=>{
   await page.keyboard.press('Escape');
   await expect(page.locator('.controls')).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
+  // LG can deliver decoder events and restore the previous button's focus
+  // after the first Back. None of these can reopen the chrome.
+  await page.evaluate(()=>{
+    const video=document.querySelector('#player video');
+    video.dispatchEvent(new Event('pause'));
+    document.querySelector('[data-action="stop"]').focus();
+    video.dispatchEvent(new Event('playing'));
+    video.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:0,clientY:0}));
+  });
+  await expect(page.locator('.controls')).toBeHidden();
   await page.keyboard.press('Escape');
+  await expect(page.locator('#player')).toBeHidden();
+});
+test('LG 461 Back is not undone by delayed pause or focus restoration',async({page})=>{
+  await setup(page);
+  const lgBack=()=>page.evaluate(()=>{
+    const event=new KeyboardEvent('keydown',{bubbles:true,cancelable:true});
+    Object.defineProperty(event,'keyCode',{value:461});
+    window.dispatchEvent(event);
+  });
+  await lgBack();
+  await expect(page.locator('.controls')).toBeHidden();
+  await page.evaluate(()=>{
+    const video=document.querySelector('#player video');
+    video.dispatchEvent(new Event('pause'));
+    document.querySelector('[data-action="pause"]').focus();
+    video.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:500,clientY:300}));
+  });
+  await expect(page.locator('.controls')).toBeHidden();
+  await lgBack();
   await expect(page.locator('#player')).toBeHidden();
 });
 test('remote seeks in hidden mode and center commits preview then dismisses controls',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
   await expect(page.locator('.controls')).toBeHidden();
+  await page.locator('video').evaluate(video=>{
+    window.decoderSeekTargets=[];
+    const descriptor=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    Object.defineProperty(video,'currentTime',{
+      configurable:true,
+      get(){return descriptor.get.call(video);},
+      set(value){window.decoderSeekTargets.push(value);descriptor.set.call(video,value);}
+    });
+    window.decoderSeekEvents=0;
+    video.addEventListener('seeking',()=>window.decoderSeekEvents++);
+  });
   await page.keyboard.press('ArrowRight');
   const slider=page.getByRole('slider',{name:'Seek playback'});
   await expect(slider).toBeFocused();
   const value=Number(await slider.inputValue());
   expect(value).toBeGreaterThanOrEqual(10);
-  await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime))
-    .toBeGreaterThanOrEqual(value-1);
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
   await page.keyboard.press('ArrowRight');
   const next=Number(await slider.inputValue());
   expect(next).toBeGreaterThan(value);
+  expect(await page.evaluate(()=>window.decoderSeekTargets)).toEqual([]);
+  expect(await page.evaluate(()=>window.decoderSeekEvents)).toBe(0);
+  await expect(page.locator('.player-buffering')).toBeHidden();
   await page.keyboard.press('Enter');
   await expect(page.locator('.controls')).toBeHidden();
   await expect(page.locator('#player')).toBeVisible();
+  expect(await page.evaluate(()=>window.decoderSeekTargets)).toHaveLength(1);
   await expect.poll(()=>page.locator('video').evaluate(el=>el.currentTime)).toBeGreaterThanOrEqual(next-2);
 });
-test('leaving a remote seek waits for decoder completion before resuming playback',async({page})=>{
+test('leaving a remote seek cancels preview without seeking or losing transport focus',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
   await page.keyboard.press('ArrowRight');
@@ -499,21 +541,39 @@ test('leaving a remote seek waits for decoder completion before resuming playbac
     window.seekPlayCalls=0;
     const originalPlay=video.play.bind(video);
     video.play=()=>{window.seekPlayCalls++;return originalPlay();};
-    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
   });
   const stop=page.getByRole('button',{name:'Stop',exact:true});
   await stop.focus();
   await expect(page.locator('.seek-preview')).toBeHidden();
-  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
-  await page.locator('video').evaluate(video=>{
-    Object.defineProperty(video,'seeking',{configurable:true,get(){return false;}});
-    video.dispatchEvent(new Event('seeked'));
-  });
   await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls)).toBe(1);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
-  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(target-1);
+  expect(await page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(target-2);
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
+});
+test('Back cancels unconfirmed remote seek and then exits the player',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.seek-preview')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.controls')).toBeHidden();
+  await expect(page.locator('.seek-preview')).toBeHidden();
+  await expect(page.locator('.player-buffering')).toBeHidden();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  expect(await page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(10);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#player')).toBeHidden();
+});
+test('a paused player remains paused after confirming a remote seek',async({page})=>{
+  await setup(page);
+  await page.locator('video').evaluate(video=>video.pause());
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(9);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
 });
 
 test('confirming a remote seek waits for decoder completion before resuming playback',async({page})=>{

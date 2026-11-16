@@ -34,6 +34,9 @@ export class Player {
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
     this.resumeAfterSeekTarget = null;
+    this.controlsDismissedByBack = false;
+    this.backHideTime = 0;
+    this.lastPointerPosition = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporting = Promise.resolve();
@@ -97,14 +100,16 @@ export class Player {
         this.showBuffering(false);
       if (this.session && !this.closing && !this.remoteSeeking) {
         this.report('paused'); this.track('pause');
-        if (!this.hideAfterSeek) this.reveal();
+        // Decoder pause events can arrive after Back hides the chrome.
+        // Only an explicit Pause action should reveal it (toggle does so).
+        if (!this.hideAfterSeek && !this.controls.classList.contains('hidden-controls')) this.reveal();
       }
     });
     this.video.addEventListener('waiting', () => {
       this.onPlaybackStarved();
     });
     this.video.addEventListener('seeking', () => {
-      if (this.session && !this.atMediaEnd()) this.showBuffering(true);
+      if (this.session && !this.remoteSeeking && !this.atMediaEnd()) this.showBuffering(true);
     });
     this.video.addEventListener('seeked', () => {
       this.startAfterInitialSeek();
@@ -126,19 +131,12 @@ export class Player {
     this.seekBar = root.querySelector('[data-action="seek"]');
     this.scrubbing = false;
     root.addEventListener('focusin', event => {
-      if (!this.controls.contains(event.target)) return;
+      if (!this.active || this.closing || !this.controls.contains(event.target)) return;
+      // A decoder/TV focus-restoration event must not undo an explicit Back.
+      if (this.controlsDismissedByBack && this.controls.classList.contains('hidden-controls')) return;
       if (event.target !== this.seekBar) {
-        // Moving from the timeline to a transport button commits the preview
-        // without leaving directional seeking armed on that button.
-        if (this.remoteSeeking) {
-          const target = this.seekPreview;
-          const shouldResume = this.seekWasPlaying;
-          this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
-          this.hideSeekPreview();
-          this.seekTo(target);
-          if (shouldResume) this.queueResumeAfterSeek(target);
-          this.seekWasPlaying = false;
-        }
+        // Moving focus is not seek confirmation. OK is the only D-pad commit.
+        this.cancelRemoteSeek();
         this.lastControlFocus = event.target;
       }
       this.hideAfterSeek = false;
@@ -201,6 +199,13 @@ export class Player {
     // reveal() changes its anchor when chrome was hidden, between hit-test
     // and click on slower TVs. Pointer activity on the prompt leaves it put.
     root.addEventListener('mousemove', event => {
+      if (!this.active || this.closing) return;
+      const previous = this.lastPointerPosition;
+      this.lastPointerPosition = {x:event.clientX, y:event.clientY};
+      // Some LG remotes emit a stationary mousemove alongside Back. Genuine
+      // pointer movement still reveals the controls after dismissal.
+      if (this.controlsDismissedByBack && (Date.now() - this.backHideTime < 400 || !previous ||
+          Math.abs(event.clientX - previous.x) + Math.abs(event.clientY - previous.y) < 3)) return;
       if (!this.skipButton.contains(event.target)) this.reveal();
     });
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
@@ -592,6 +597,8 @@ export class Player {
     this.showBuffering(true); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.controlsDismissedByBack = false;
+    this.lastPointerPosition = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
@@ -735,7 +742,8 @@ export class Player {
     this.syncSkipMarker(position);
     this.renderChapterBoundaries();
     this.updateChapterSheet();
-    const played = position;
+    // Live timeupdate events must not overwrite the unconfirmed seek readout.
+    const played = this.remoteSeeking ? this.seekPreview : position;
     const total = this.timelineDuration();
     this.root.querySelector('.elapsed').textContent = time(played) + ' / ' + time(total);
     this.root.querySelector('.elapsed-current').textContent = time(played);
@@ -791,6 +799,7 @@ export class Player {
     this.showBuffering(false); this.seeking = false; this.remoteSeeking = false;
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
+    this.controlsDismissedByBack = false;
     this.resumeAfterSeekTarget = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
@@ -912,8 +921,21 @@ export class Player {
     this.seekImage.removeAttribute('src');
     this.releaseSeekFrameUrl();
   }
-  hideControls() {
+  cancelRemoteSeek() {
+    if (!this.remoteSeeking) return;
+    const shouldResume = this.seekWasPlaying;
+    this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
+    this.seekWasPlaying = false;
+    this.hideSeekPreview();
+    this.update();
+    if (shouldResume && this.session && this.video.paused)
+      this.video.play().catch(error => { if (error.name !== 'AbortError') this.failed(); });
+  }
+  hideControls(byBack = false) {
     clearTimeout(this.hideTimer);
+    this.controlsDismissedByBack = byBack;
+    if (byBack) this.backHideTime = Date.now();
+    this.cancelRemoteSeek();
     this.controls.classList.add('hidden-controls');
     this.root.querySelector('.player-top').classList.add('hidden-controls');
     this.seeking = false; this.remoteSeeking = false; this.scrubbing = false;
@@ -934,14 +956,8 @@ export class Player {
       this.video.pause();
     }
     this.scrubbing = true;
-    // Plezy previews an actual video frame at every D-pad seek step.
-    // Changing only the range input moved a number but never the picture.
-    try {
-      if (this.video.readyState >= 1)
-        this.video.currentTime = Math.max(0,this.seekPreview);
-      else this.pendingStart = this.seekPreview;
-    } catch (_) { this.pendingStart = this.seekPreview; }
-    this.showBuffering(this.video.readyState < 2 || this.video.seeking);
+    // Native Plezy coalesces timeline movements before a decoder seek.
+    // Only the BIF thumbnail and UI change until the viewer confirms with OK.
     this.seekBar.max = String(Math.floor(total));
     this.seekBar.value = String(Math.round(this.seekPreview));
     this.seekBar.setAttribute('aria-valuetext', time(this.seekPreview) + ' of ' + time(total));
@@ -955,6 +971,7 @@ export class Player {
   commitSeek() {
     if (!this.seeking) return false;
     const point = this.seekPreview;
+    const shouldResume = this.seekWasPlaying;
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
     this.hideSeekPreview();
@@ -962,7 +979,7 @@ export class Player {
     this.showBuffering(true);
     // Wait for the webOS decoder's seeked event before resuming. Calling play()
     // while the hardware seek is still pending can leave the player paused.
-    this.queueResumeAfterSeek(point);
+    if (shouldResume) this.queueResumeAfterSeek(point);
     this.seekWasPlaying = false;
     this.hideControls();
     return true;
@@ -1013,6 +1030,7 @@ export class Player {
     this.update(); this.reveal();
   }
   reveal() {
+    this.controlsDismissedByBack = false;
     this.controls.classList.remove('hidden-controls');
     this.root.querySelector('.player-top').classList.remove('hidden-controls');
     clearTimeout(this.hideTimer);
@@ -1058,7 +1076,7 @@ export class Player {
     }
     if ([461, 27, 413].includes(code)) {
       event.preventDefault();
-      if (!this.controls.classList.contains('hidden-controls')) this.hideControls();
+      if (!this.controls.classList.contains('hidden-controls')) this.hideControls(true);
       else this.close();
       return true;
     }
