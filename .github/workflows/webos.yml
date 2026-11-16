@@ -30,8 +30,6 @@ jobs:
       - run: npm run build
       - run: npm run test:bundle
       - run: npm run test:e2e
-        env:
-          PLEZY_SYNC_VISUAL_QA: '1'
       - run: npm run package
       - uses: actions/upload-artifact@v4
         with:

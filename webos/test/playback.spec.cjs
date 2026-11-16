@@ -630,6 +630,39 @@ test('remote seek recovers when old webOS never emits seeked while paused',async
   await expect(page.locator('.controls')).toBeHidden();
 });
 
+test('remote seek resumes even when old webOS reports the stale timestamp until Play',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    const nativePlay=video.play.bind(video);
+    const staleTime=video.currentTime;
+    let queuedTarget=staleTime;
+    // Reproduce old LG native engines whose currentTime getter stays stale
+    // and whose seeking flag never clears until play() wakes the decoder.
+    Object.defineProperty(video,'currentTime',{
+      configurable:true,get(){return staleTime;},set(next){queuedTarget=next;}
+    });
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+    video.play=()=>{
+      window.seekPlayCalls++;
+      delete video.currentTime;
+      delete video.seeking;
+      video.currentTime=queuedTarget;
+      video.dispatchEvent(new Event('seeked'));
+      return nativePlay();
+    };
+    video.pause();
+  });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.controls')).toBeHidden();
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls),{timeout:3000}).toBeGreaterThan(0);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused),{timeout:3000}).toBe(false);
+  await expect(page.locator('.controls')).toBeHidden();
+});
+
 test('decoder pause arriving after a confirmed seek is recovered automatically',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
@@ -1016,16 +1049,6 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   await expect(page.locator('.sync-offset-button svg')).toHaveCount(4);
   await expect(reset.locator('svg path')).toHaveCount(1);
   await expect(reset).toHaveText('');
-  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
-    const png=await page.locator('.player-sheet.sheet-sync').screenshot({animations:'disabled'});
-    console.log('SYNC_SLIDER_FOCUSED_IMAGE:'+png.toString('base64'));
-    await page.keyboard.press('ArrowUp');
-    await reset.focus();
-    const focusedPng=await page.locator('.player-sheet.sheet-sync').screenshot({animations:'disabled'});
-    console.log('SYNC_RESET_FOCUSED_IMAGE:'+focusedPng.toString('base64'));
-    await slider.focus();
-    await page.keyboard.press('ArrowDown');
-  }
 
   await page.keyboard.press('ArrowLeft');
   await expect(minus).toBeFocused();

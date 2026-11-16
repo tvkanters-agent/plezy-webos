@@ -1093,8 +1093,8 @@ export class Player {
     this.hideSeekPreview();
     this.seekTo(point);
     this.showBuffering(true);
-    // Wait for the webOS decoder's seeked event before resuming. Calling play()
-    // while the hardware seek is still pending can leave the player paused.
+    // Resume after the hardware seek when possible. The watchdog also wakes
+    // decoders that remain paused and cannot emit seeked until Play is called.
     if (shouldResume) this.queueResumeAfterSeek(point);
     this.seekWasPlaying = false;
     this.hideControls();
@@ -1131,6 +1131,10 @@ export class Player {
     const position = this.video.currentTime;
     const atTarget = !this.pendingStart && Number.isFinite(position) && Math.abs(position - target) <= 1;
     const ready = this.video.readyState >= 1 && atTarget;
+    // Some webOS decoders keep returning the pre-seek timestamp until Play
+    // is called. A recovery watchdog must not require atTarget, or it will
+    // wait forever for a state that only playback itself can produce.
+    const wakeDecoder = elapsed >= 650 && (this.video.readyState >= 1 || elapsed >= 1250);
     if (!this.video.paused) {
       // Do not forget the resume request immediately: hardware can emit a
       // delayed pause after currentTime changed or even after seeked.
@@ -1138,7 +1142,7 @@ export class Player {
         this.clearResumeAfterSeek();
         return;
       }
-    } else if (ready && (!this.video.seeking || elapsed >= 500) && !this.resumeAfterSeekPlayPending) {
+    } else if (((ready && !this.video.seeking) || wakeDecoder) && !this.resumeAfterSeekPlayPending) {
       // Prefer the decoder's real seek completion. If it never arrives while
       // paused, kick playback after a short grace period so the seek can finish.
       const token = this.resumeAfterSeekToken;
