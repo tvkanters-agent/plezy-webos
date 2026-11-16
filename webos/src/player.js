@@ -393,9 +393,11 @@ export class Player {
     list.textContent = '';
     list.classList.toggle('player-track-columns', kind === 'tracks');
     this.sheet.classList.toggle('sheet-tracks', kind === 'tracks');
+    this.sheet.classList.remove('sheet-sync');
     if (kind === 'settings') {
       const selectedSubtitle = this.selectedSubtitleTrack();
-      if (this.api?.server?.kind === 'plex' && selectedSubtitle?.external && selectedSubtitle.key) {
+      if (this.api?.server?.kind === 'plex' && selectedSubtitle?.external && selectedSubtitle.key &&
+          ['srt','subrip','ass','ssa','vtt','webvtt'].includes(String(selectedSubtitle.codec || '').toLowerCase())) {
         const sync = document.createElement('button');
         sync.textContent = 'Subtitle sync';
         sync.onclick = () => this.openSubtitleSync();
@@ -500,7 +502,7 @@ export class Player {
     const id = Number(select?.value);
     return (this.session?.subtitles || []).find(track => Number(track.id) === id) || null;
   }
-  openSubtitleSync() {
+  openSubtitleSync(initialOffset = null) {
     const track = this.selectedSubtitleTrack();
     if (!track?.external || !track.key || this.api?.server?.kind !== 'plex') return;
     this.openSheetAction = 'options';
@@ -514,7 +516,7 @@ export class Player {
     row.className = 'subtitle-sync-control';
     const value = document.createElement('output');
     value.className = 'subtitle-sync-value';
-    let offset = Number(track.offset) || 0;
+    let offset = initialOffset === null ? (Number(track.offset) || 0) : Number(initialOffset);
     const render = () => {
       const sign = offset > 0 ? '+' : '';
       value.textContent = sign + (offset / 1000).toFixed(2) + ' s';
@@ -530,6 +532,7 @@ export class Player {
       try {
         await this.api.setSubtitleOffset(track, offset);
         track.offset = offset;
+        await this.reopen({subtitle:Number(track.id), transcode:true}, {kind:'subtitle-sync', offset});
       } catch (error) {
         this.status.textContent = error.message;
         offset = Number(track.offset) || 0;
@@ -638,7 +641,8 @@ export class Player {
       }
       this.root.querySelector('[data-action="tracks-options"]').hidden =
         session.audio.length <= 1 && session.subtitles.length === 0;
-      if (trackSheetFocus) this.openSheet('tracks-options', trackSheetFocus);
+      if (trackSheetFocus?.kind === 'subtitle-sync') this.openSubtitleSync(trackSheetFocus.offset);
+      else if (trackSheetFocus) this.openSheet('tracks-options', trackSheetFocus);
       this.populateChapterControls(session);
       // Keep the opening frame invisible until the resume target has been
       // sought and decoded. Loading indicators remain independently visible.
@@ -811,7 +815,9 @@ export class Player {
     // Decoder fallback can restart playback again after a track change.
     // Preserve the open sheet and the remote's focused track through that
     // secondary restart too, even when the fallback itself chose no track.
-    if (!trackSheetFocus && !this.sheet.hidden && this.openSheetAction === 'tracks-options') {
+    if (!trackSheetFocus && !this.sheet.hidden && this.sheet.classList.contains('sheet-sync')) {
+      trackSheetFocus = {kind:'subtitle-sync', offset:this.subtitleSyncOffset};
+    } else if (!trackSheetFocus && !this.sheet.hidden && this.openSheetAction === 'tracks-options') {
       const focused = document.activeElement;
       if (focused?.dataset?.trackKind)
         trackSheetFocus = {kind:focused.dataset.trackKind, id:focused.dataset.trackId};
