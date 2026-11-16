@@ -1269,7 +1269,7 @@ test('connected Simkl movie and series rating rows read existing user score and 
  expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
 });
 
-test('series Play uses the full on-deck episode resume offset before HLS buffering',async({page})=>{
+test('series Play uses the on-deck episode resume offset for native playback and HLS fallback',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
@@ -1312,14 +1312,23 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  await page.getByRole('button',{name:'Play',exact:true}).first().click();
  await expect(page.locator('#player')).toBeVisible();
  const opens=await page.evaluate(()=>window.nativeOpens);
- expect(opens).toHaveLength(1);
- const url=new URL(opens[0].url);
- expect(url.pathname).toBe('/video/:/transcode/universal/start.m3u8');
- expect(url.searchParams.has('offset')).toBe(false);
- expect(url.searchParams.get('path')).toBe('/library/metadata/episode2');
- const [mime,encoded]=opens[0].type.split(';mediaOption=');
- expect(mime).toBe('application/vnd.apple.mpegurl');
- expect(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start).toBe(125000);
+ expect(opens.length).toBeGreaterThanOrEqual(1);
+ const directUrl=new URL(opens[0].url);
+ expect(directUrl.pathname).toBe('/video.mkv');
+ const [directMime,directOptions]=opens[0].type.split(';mediaOption=');
+ expect(directMime).toBe('video/x-matroska');
+ expect(JSON.parse(decodeURIComponent(directOptions)).option.transmission.playTime.start).toBe(125000);
+ // Chromium may reject this LG-native source. If that triggers the HLS decoder
+ // fallback, it must preserve the same resume offset and episode identity.
+ for(const opened of opens.slice(1)) {
+   const url=new URL(opened.url);
+   expect(url.pathname).toBe('/video/:/transcode/universal/start.m3u8');
+   expect(url.searchParams.has('offset')).toBe(false);
+   expect(url.searchParams.get('path')).toBe('/library/metadata/episode2');
+   const [mime,encoded]=opened.type.split(';mediaOption=');
+   expect(mime).toBe('application/vnd.apple.mpegurl');
+   expect(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start).toBe(125000);
+ }
  // Preserve the target in progress reports while the decoder is opening.
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });

@@ -60,6 +60,19 @@ async function simulatePlaybackStarvation(page) {
     video.dispatchEvent(new Event('waiting'));
   });
 }
+test('native-compatible Plex MKV starts directly and decoder error falls back to HLS', async ({page}) => {
+  const {calls} = await setup(page, {Media: [{
+    container: 'mkv', videoCodec: 'hevc', audioCodec: 'aac',
+    width: 1920, height: 1080, bitrate: 8000,
+    Part: [{id: 'part', key: '/video.webm', Stream: []}]
+  }]});
+  expect(calls.some(url => url.pathname.endsWith('/start.m3u8'))).toBe(false);
+  await page.locator('#player video').evaluate(video => video.dispatchEvent(new Event('error')));
+  await expect.poll(() => calls.some(url =>
+    url.pathname.endsWith('/start.m3u8') && url.searchParams.get('directPlay') === '0')).toBe(true);
+  await expect.poll(() => page.locator('#player video').evaluate(video => video.paused)).toBe(false);
+});
+
 test('closing playback preserves the detail screen and focused action without a blank repaint',async({page})=>{
   await setup(page);
   await page.evaluate(()=>{
