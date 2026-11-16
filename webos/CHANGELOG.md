@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.11.0 — Local SRT/ASS subtitles and live sync
+
+- Parse and display external Plex SRT subtitle files with Media Captions; render ASS/SSA with SubtitlesOctopus/libass, including styled signs.
+- Keep the selected subtitle track when switching files, resuming and seeking; positive/negative subtitle sync updates both renderers immediately.
+- Lift SRT captions above the transport controls while displayed; leave ASS scene-positioned signs at their authored coordinates.
+- Direct Play supported video with external text subtitles without forcing video transcoding. Embedded/unsupported subtitle tracks and renderer failures continue using Plex HLS burn-in.
+- Ship the libass workers inside the TV package and provide a Chromium 53 overlay-size compatibility shim.
+
+
 ## 1.10.1 — Reliable seek resume and TV subtitle sync focus
 
 - Match Plezy's preview behavior: remote seek movements update BIF/timeline only, without pausing the decoder or initiating a seek until OK.
