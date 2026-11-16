@@ -895,7 +895,7 @@ export class Player {
     // loadedmetadata/loadeddata/canplay (and even a resolved Play) are not
     // proof the video clock advances. Paused reopens need just one frame.
     if (this.video.currentTime > this.initialSeekTarget + 0.1 ||
-        this.openIntentPlaying === false && this.hasFirstFrame && this.video.readyState >= 2) {
+        this.openIntentPlaying === false && this.hasFirstFrame) {
       this.startupComplete = true;
       clearTimeout(this.startTimeout);
     }
@@ -1008,7 +1008,7 @@ export class Player {
       else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
     }
     const playing = this.session ? this.resumeAfterSeekTarget != null ||
-      (this.video.error ? this.openIntentPlaying !== false : !this.video.paused)
+      ((this.video.error || this.startupComplete === false) ? this.openIntentPlaying !== false : !this.video.paused)
       : this.openIntentPlaying !== false;
     const position = this.session ? this.position() : this.options.start || this.lastPosition || 0;
     const options = {...this.options, ...changes, start: changes.start ?? position};

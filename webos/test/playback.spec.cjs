@@ -1417,11 +1417,13 @@ test('failed replacement HLS reports an error while the original Play promise st
     };
   });
   const {calls}=await setup(page,{},undefined,[],{},null,null,null,false);
+  let fallbackOpens=0;
   await page.route('http://plex.test/video/:/transcode/universal/start.m3u8**',
-    route=>route.fulfill({status:500,body:'decoder failure'}));
+    route=>{fallbackOpens++;return route.fulfill({status:500,body:'decoder failure'});});
+  await expect(page.locator('#player video')).toHaveAttribute('src',/video.webm/);
   await page.locator('#player video').evaluate(v=>v.dispatchEvent(new Event('error')));
   await expect(page.locator('.player-status')).toContainText('Video could not play');
-  expect(calls.filter(u=>u.pathname.endsWith('/start.m3u8')).length).toBeLessThanOrEqual(1);
+  expect(fallbackOpens).toBe(1);
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await expect(page.locator('#player')).toBeHidden();
 });

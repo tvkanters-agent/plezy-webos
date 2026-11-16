@@ -23,7 +23,7 @@ test('metadata and decoded-but-frozen startup keep the recovery deadline; clock 
 test('paused reopen needs one decoded frame while a resume target stays gated',()=>{
   const player=Object.assign(Object.create(Player.prototype),{
     session:{},initialSeekTarget:125,initialSeekPending:true,pendingStart:0,
-    video:{readyState:2,currentTime:125,videoWidth:1920},hasFirstFrame:true,openIntentPlaying:false
+    video:{readyState:1,currentTime:125,videoWidth:1920},hasFirstFrame:true,openIntentPlaying:false
   });
   player.checkStartupProgress();assert.notEqual(player.startupComplete,true);
   player.initialSeekPending=false;player.checkStartupProgress();assert.equal(player.startupComplete,true);
@@ -88,4 +88,32 @@ test('an audio-only clock does not establish a video frame; old startup deadline
   player.armStartupTimeout();player.generation++;player.session={};
   t.mock.timers.tick(30000);assert.equal(failures,0);
   player.armStartupTimeout();t.mock.timers.tick(30000);assert.equal(failures,1);
+});
+
+test('explicit Pause cancels startup deadline and Play rearms it after an autoplay denial',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let failures=0,plays=0;
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:{},generation:1,startupComplete:false,resumeAfterSeekTarget:null,
+    video:{paused:false,pause(){this.paused=true;},play(){plays++;return Promise.resolve();}},
+    clearResumeAfterSeek(){},cancelRemoteSeek(){},reveal(){},failed(){failures++;}
+  });
+  player.armStartupTimeout();player.toggle();
+  t.mock.timers.tick(30000);assert.equal(failures,0);
+  player.toggle();assert.equal(plays,1);
+  t.mock.timers.tick(30000);assert.equal(failures,1);
+});
+
+test('a silent native startup failure retains requested Play rather than a paused decoder observation',async()=>{
+  let opened;
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:{},item:{id:'movie'},sheet:{hidden:true},api:{},options:{mediaIndex:1,subtitle:90},
+    startupComplete:false,openIntentPlaying:true,video:{paused:true,error:null},position:()=>125,
+    open(...args){opened=args;}
+  });
+  await player.reopen({transcode:true});
+  assert.equal(opened[5],true);
+  assert.deepEqual(opened[2],{mediaIndex:1,subtitle:90,transcode:true,start:125});
+  player.openIntentPlaying=false;
+  await player.reopen({transcode:true});assert.equal(opened[5],false,'explicit Pause still wins');
 });
