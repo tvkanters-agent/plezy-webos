@@ -1327,3 +1327,36 @@ test('track changes while paused keep the selected position and paused state',as
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(21);
 });
+
+test('rapid audio and subtitle changes during cleanup retain both choices and resume position',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
+      {streamType:2,id:12,languageCode:'fra',codec:'aac'},
+      {streamType:3,id:31,languageCode:'eng',codec:'srt'},
+      {streamType:3,id:32,languageCode:'spa',codec:'srt'}
+    ]}]}]});
+  await page.locator('video').evaluate(video=>{video.currentTime=22;});
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.seeking)).toBe(false);
+  let finishCleanup,cleanupRequested=false;
+  const cleanup=new Promise(resolve=>{finishCleanup=resolve;});
+  await page.route('http://plex.test/**/timeline**',async route=>{
+    if (new URL(route.request().url()).searchParams.get('state')==='stopped') {
+      cleanupRequested=true;await cleanup;
+    }
+    await route.fulfill({json:{}});
+  });
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').first().getByRole('button',{name:/French/}).click();
+  await expect.poll(()=>cleanupRequested).toBe(true);
+  await page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}).click();
+  finishCleanup();
+  await expect.poll(()=>calls.some(url=>url.pathname==='/library/parts/part' &&
+    url.searchParams.get('audioStreamID')==='12' &&
+    url.searchParams.get('subtitleStreamID')==='32')).toBe(true);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(21);
+  await expect(page.locator('.player-track-column').first().getByRole('button',{name:/French/}))
+    .toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}))
+    .toHaveAttribute('aria-pressed','true');
+});
