@@ -1211,9 +1211,14 @@ test('stopping playback cancels an active subtitle-sync long press', async ({pag
   await page.waitForTimeout(650);
   await page.locator('#player video').evaluate(video => video.dispatchEvent(new Event('ended')));
   await expect(page.locator('#player')).toBeHidden();
-  const stored=await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'));
+  const storedOffset=() => page.evaluate(() => Object.keys(localStorage)
+    .filter(key=>key.startsWith('plezy.webos.subtitleSync.'))
+    .map(key=>({key,value:localStorage.getItem(key)})));
+  const stored=await storedOffset();
+  expect(stored).toHaveLength(1);
+  expect(Number(stored[0].value)).toBeGreaterThan(0);
   await page.waitForTimeout(500);
-  expect(await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'))).toBe(stored);
+  expect(await storedOffset()).toEqual(stored);
   await page.keyboard.up('Enter');
 });
 
