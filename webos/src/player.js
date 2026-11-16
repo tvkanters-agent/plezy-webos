@@ -46,7 +46,9 @@ export class Player {
       this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
     });
     this.video.addEventListener('canplay', () => {
-      this.status.textContent = ''; this.resume(); this.tryResumeAfterSeek();
+      this.status.textContent = ''; this.resume();
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawCanplay = true;
+      this.tryResumeAfterSeek();
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
@@ -71,6 +73,7 @@ export class Player {
     this.video.addEventListener('playing', () => {
       this.status.textContent = '';
       this.resume();
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawPlaying = true;
       this.tryResumeAfterSeek();
       // HTMLMediaElement.playing guarantees decoder playback; webOS 4.4 can
       // report readyState 1 during real frames. Do not hide a real intro prompt
@@ -537,7 +540,7 @@ export class Player {
     const value = document.createElement('output');
     value.className = 'sync-offset-value';
     value.setAttribute('aria-live', 'off');
-    const reset = stepButton('reset', svg('M12 4a8 8 0 1 1-7.6 10.5M4 4v7h7'), 'Reset subtitle sync');
+    const reset = stepButton('reset', svg('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5'), 'Reset subtitle sync');
     reset.onclick = () => this.setSubtitleSyncOffset(0);
     const close = stepButton('close', svg('M5 5l14 14M19 5L5 19'), 'Close subtitle sync');
     close.onclick = () => this.closeSheet();
@@ -929,7 +932,6 @@ export class Player {
     this.controlsDismissedByBack = false;
     this.clearResumeAfterSeek();
     this.resumeAfterSeekTimer = null;
-    this.resumeAfterSeekToken = 0;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
@@ -1129,74 +1131,112 @@ export class Player {
     this.resumeAfterSeekTimer = null;
     this.resumeAfterSeekTarget = null;
     this.resumeAfterSeekPlayPending = false;
+    this.resumeAfterSeekPlayRequestId = (this.resumeAfterSeekPlayRequestId || 0) + 1;
     this.resumeAfterSeekToken = (this.resumeAfterSeekToken || 0) + 1;
+    this.resumeAfterSeekWatchPosition = null;
+    this.resumeAfterSeekReadyAt = 0;
+    this.resumeAfterSeekWakeAttempts = 0;
+    this.resumeAfterSeekLastWakeAt = 0;
+    this.resumeAfterSeekSawPlaying = false;
+    this.resumeAfterSeekSawCanplay = false;
   }
   queueResumeAfterSeek(target) {
     this.clearResumeAfterSeek();
     this.resumeAfterSeekTarget = target;
     this.resumeAfterSeekGeneration = this.generation;
     this.resumeAfterSeekQueuedAt = Date.now();
-    // A paused LG decoder may wait forever for seeked/canplay until play()
-    // is invoked. Continue observing even when it emits no further events.
+    // Retain the play intent until the video clock actually advances. Neither
+    // paused=false nor seeked means an LG hardware decoder is showing frames.
     this.tryResumeAfterSeek();
+  }
+  requestResumeAfterSeek(forceRestart = false) {
+    if (this.resumeAfterSeekPlayPending || this.resumeAfterSeekTarget == null) return;
+    const token = this.resumeAfterSeekToken;
+    const requestId = ++this.resumeAfterSeekPlayRequestId;
+    this.resumeAfterSeekPlayPending = true;
+    this.resumeAfterSeekPlayRequestedAt = Date.now();
+    let request;
+    try {
+      // On some LG engines paused remains false even though the decoder has
+      // stopped advancing after seeking. A single pause/play transition
+      // wakes that state; only do it after confirming the clock is frozen.
+      if (forceRestart && !this.video.paused) this.video.pause();
+      request = this.video.play();
+    } catch (error) {
+      this.resumeAfterSeekPlayPending = false;
+      if (error.name === 'NotAllowedError') {
+        this.clearResumeAfterSeek();
+        this.status.textContent = 'Press Play to resume.';
+      } else if (error.name !== 'AbortError') this.failed();
+      return;
+    }
+    if (!request || typeof request.then !== 'function') {
+      this.resumeAfterSeekPlayPending = false;
+      return;
+    }
+    request.then(() => {
+      if (this.resumeAfterSeekToken !== token || this.resumeAfterSeekPlayRequestId !== requestId) return;
+      this.resumeAfterSeekPlayPending = false;
+      this.tryResumeAfterSeek();
+    }).catch(error => {
+      if (this.resumeAfterSeekToken !== token || this.resumeAfterSeekPlayRequestId !== requestId) return;
+      this.resumeAfterSeekPlayPending = false;
+      if (error.name === 'NotAllowedError') {
+        this.clearResumeAfterSeek();
+        this.status.textContent = 'Press Play to resume.';
+      } else if (error.name !== 'AbortError') this.failed();
+    });
   }
   tryResumeAfterSeek() {
     const target = this.resumeAfterSeekTarget;
     if (target == null) return;
-    if (!this.session || this.closing || this.resumeAfterSeekGeneration !== this.generation) {
+    if (!this.session || this.closing || this.resumeAfterSeekGeneration !== this.generation ||
+        this.atMediaEnd()) {
       this.clearResumeAfterSeek();
       return;
     }
     const elapsed = Date.now() - this.resumeAfterSeekQueuedAt;
-    if (elapsed > 9000) {
+    if (elapsed > 15000) {
       this.clearResumeAfterSeek();
       return;
     }
     const position = this.video.currentTime;
-    const atTarget = !this.pendingStart && Number.isFinite(position) && Math.abs(position - target) <= 1;
+    const atTarget = !this.pendingStart && Number.isFinite(position) &&
+      Math.abs(position - target) <= 1;
     const ready = this.video.readyState >= 1 && atTarget;
-    // Some webOS decoders keep returning the pre-seek timestamp until Play
-    // is called. A recovery watchdog must not require atTarget, or it will
-    // wait forever for a state that only playback itself can produce.
-    const wakeDecoder = elapsed >= 650 && (this.video.readyState >= 1 || elapsed >= 1250);
-    if (!this.video.paused) {
-      // Do not forget the resume request immediately: hardware can emit a
-      // delayed pause after currentTime changed or even after seeked.
-      if (ready && !this.video.seeking && elapsed >= 1500) {
+    if (ready && !this.video.seeking && !this.video.paused) {
+      if (this.resumeAfterSeekWatchPosition == null) {
+        this.resumeAfterSeekWatchPosition = position;
+        this.resumeAfterSeekReadyAt = Date.now();
+      } else if (position >= this.resumeAfterSeekWatchPosition + 0.2) {
+        // Confirm actual clock progression before forgetting automatic resume.
         this.clearResumeAfterSeek();
         return;
       }
-    } else if (((ready && !this.video.seeking) || wakeDecoder) && !this.resumeAfterSeekPlayPending) {
-      // Prefer the decoder's real seek completion. If it never arrives while
-      // paused, kick playback after a short grace period so the seek can finish.
-      const token = this.resumeAfterSeekToken;
-      this.resumeAfterSeekPlayPending = true;
-      let request;
-      try {
-        request = this.video.play();
-      } catch (error) {
-        this.resumeAfterSeekPlayPending = false;
-        if (error.name === 'NotAllowedError') {
-          this.clearResumeAfterSeek();
-          this.status.textContent = 'Press Play to resume.';
-          return;
-        }
-        if (error.name !== 'AbortError') this.failed();
-      }
-      if (request && typeof request.then === 'function') {
-        request.then(() => {
-          if (this.resumeAfterSeekToken !== token) return;
-          this.resumeAfterSeekPlayPending = false;
-          this.tryResumeAfterSeek();
-        }).catch(error => {
-          if (this.resumeAfterSeekToken !== token) return;
-          this.resumeAfterSeekPlayPending = false;
-          if (error.name === 'NotAllowedError') {
-            this.clearResumeAfterSeek();
-            this.status.textContent = 'Press Play to resume.';
-          } else if (error.name !== 'AbortError') this.failed();
-        });
-      } else this.resumeAfterSeekPlayPending = false;
+    }
+    // LG sometimes never resolves the first play() promise while buffering.
+    // A pending Promise must not suppress all subsequent recovery attempts.
+    if (this.resumeAfterSeekPlayPending &&
+        Date.now() - this.resumeAfterSeekPlayRequestedAt > 2200) {
+      this.resumeAfterSeekPlayPending = false;
+      this.resumeAfterSeekPlayRequestId++;
+    }
+    if (this.video.paused) {
+      // Call Play immediately when possible, while OK's user activation is
+      // still live. A paused decoder may need Play before it emits seeked.
+      if (this.video.readyState >= 1 || elapsed >= 650)
+        this.requestResumeAfterSeek();
+    } else if (ready && !this.video.seeking &&
+               (this.video.readyState >= 2 || this.resumeAfterSeekSawPlaying ||
+                this.resumeAfterSeekSawCanplay) &&
+               elapsed >= 3000 && this.resumeAfterSeekReadyAt &&
+               Date.now() - this.resumeAfterSeekReadyAt >= 1800 &&
+               this.resumeAfterSeekWakeAttempts < 2 &&
+               elapsed - this.resumeAfterSeekLastWakeAt >= 3000 &&
+               !this.resumeAfterSeekPlayPending) {
+      this.resumeAfterSeekWakeAttempts++;
+      this.resumeAfterSeekLastWakeAt = elapsed;
+      this.requestResumeAfterSeek(true);
     }
     clearTimeout(this.resumeAfterSeekTimer);
     this.resumeAfterSeekTimer = setTimeout(() => this.tryResumeAfterSeek(), 250);
