@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Plex} from '../src/api.js';
-import {plexDirectPlayMime} from '../src/plex-direct-play.js';
+import {plexDirectPlayMime, plexSubtitleAsset} from '../src/plex-direct-play.js';
 
 function media(container = 'mkv', videoCodec = 'hevc', audioCodec = 'eac3', extra = {}) {
   return {container, videoCodec, audioCodec, width: 3840, height: 2160, bitrate: 20000,
@@ -84,4 +84,48 @@ test('Plex playback retains the existing HLS fallback for incompatible files and
   assert.equal(requested[0].path, '/library/parts/55');
   assert.equal(requested[0].params.subtitleStreamID, 90);
   await session.extrasPromise;
+});
+
+test('external SRT and ASS use the selected file without forcing a video transcode', async () => {
+  const m = media();
+  m.Part[0].Stream.push(
+    {streamType:3, id:90, codec:'srt', key:'/library/streams/90.srt', selected:1},
+    {streamType:3, id:91, codec:'ass', key:'/library/streams/91.ass', selected:0},
+    {streamType:3, id:92, codec:'ass', selected:0}
+  );
+  assert.equal(plexDirectPlayMime(m), 'video/x-matroska', 'server-default SRT is rendered locally');
+  assert.equal(plexSubtitleAsset(m).id, 90);
+  assert.equal(plexSubtitleAsset(m, {subtitle:91}).format, 'ass');
+  assert.equal(plexDirectPlayMime(m, {subtitle:91}), 'video/x-matroska');
+  assert.equal(plexDirectPlayMime(m, {subtitle:92}), null, 'embedded ASS still needs Plex');
+  assert.equal(plexDirectPlayMime(m, {subtitle:-1}), 'video/x-matroska');
+  assert.equal(plexSubtitleAsset(m, {subtitle:-1}), null);
+  assert.equal(plexDirectPlayMime(m, {subtitle:91, burnSubtitles:true}), null);
+
+  const api = new Plex({url:'http://plex.test', token:'token'}, 'test-device');
+  const requests = [];
+  api.get = async (path, params, config) => {
+    requests.push({path,params,method:config?.method});
+    return {MediaContainer:{Metadata:[{Media:[m]}]}};
+  };
+  const item = {id:'123',title:'ASS test',type:'movie',duration:120,raw:{Media:[m]}};
+  const direct = await api.playback(item, {subtitle:91});
+  assert.equal(direct.transcode, false);
+  assert.equal(direct.subtitleAsset.format, 'ass');
+  assert.equal(new URL(direct.subtitleAsset.url).pathname, '/library/streams/91.ass');
+  assert.equal(requests[0].params.subtitleStreamID, 91, 'selected Plex subtitle ID persists');
+  await direct.extrasPromise;
+
+  const hls = await api.playback(item, {subtitle:90, transcode:true});
+  assert.equal(hls.transcode, true);
+  assert.equal(hls.subtitleAsset.format, 'srt');
+  const url = new URL(hls.url);
+  assert.equal(url.searchParams.get('subtitles'), 'none', 'avoid duplicated burned captions');
+  assert.equal(url.searchParams.get('subtitleStreamID'), '0');
+  await hls.extrasPromise;
+
+  const fallback = await api.playback(item, {subtitle:90, transcode:true, burnSubtitles:true});
+  assert.equal(fallback.subtitleAsset, null);
+  assert.equal(new URL(fallback.url).searchParams.get('subtitles'), 'burn');
+  await fallback.extrasPromise;
 });
