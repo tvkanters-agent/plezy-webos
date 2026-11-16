@@ -92,7 +92,7 @@ export function mediaSourceTracks(item, mediaIndex = 0) {
         ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
           language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle || s.extendedDisplayTitle,
           codec:s.codec, forced:s.forced === true || s.forced === 1 || s.forced === '1',
-          external:!!s.key,
+          external:!!s.key, key:s.key, offset:Number(s.offset) || 0,
           ...plexTrackLabel(s, 'subtitle', i)}))
     };
   }
@@ -155,6 +155,19 @@ export class Plex {
   constructor(server, deviceId) { this.server = server; this.deviceId = deviceId; }
   url(path, params = {}) { return endpoint(this.server.url, path, {...plexIdentity(this.deviceId), 'X-Plex-Token': this.server.token, ...params}); }
   get(path, params = {}, options = {}) { return request(this.url(path, params), options); }
+  async setSubtitleOffset(track, offsetMs) {
+    const match = /\/library\/streams\/(\d+)\.([a-z0-9]+)(?:[?#]|$)/i.exec(track?.key || '');
+    if (!match) throw new Error('This subtitle stream does not support timing adjustment.');
+    const response = await fetch(this.url('/library/streams/' + match[1] + '.' + match[2], {
+      offset: Math.round(offsetMs)
+    }), {method:'PUT', headers:{Accept:'*/*'}});
+    if (!response.ok) {
+      const error = new Error('Plex could not update the subtitle offset (HTTP ' + response.status + ').');
+      error.status = response.status;
+      throw error;
+    }
+    return true;
+  }
   async probe(signal, timeout = 15000) { return this.get('/', {}, {signal, timeout}); }
   async libraries() {
     const data = await this.get('/library/sections');
