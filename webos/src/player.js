@@ -441,6 +441,7 @@ export class Player {
     if (value) value.textContent = label;
     const slider = this.sheet.querySelector('.sync-offset-slider');
     if (slider) {
+      slider.setAttribute('aria-valuetext', label);
       const position = clamp(this.subtitleSyncOffsetMs, -10000, 10000);
       slider.value = String(position);
       slider.style.setProperty('--sync-progress', ((position + 10000) / 200) + '%');
@@ -873,6 +874,8 @@ export class Player {
     this.playbackTracking.event(action, position, duration, ended);
   }
   async release(ended = false, preserveTracking = false) {
+    this.stopSyncHold();
+    this.syncHoldFired = false;
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     if (this.previewAbort) this.previewAbort.abort();

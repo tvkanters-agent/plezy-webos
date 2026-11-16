@@ -849,20 +849,12 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   const settingsRow=page.getByRole('button',{name:'Subtitle sync',exact:true});
   await expect(settingsRow).toBeFocused();
   await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
-  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
-    const png=await page.locator('.player-sheet').screenshot({animations:'disabled'});
-    console.log('PLEZY_SETTINGS_IMAGE:'+png.toString('base64'));
-  }
   await page.keyboard.press('Enter');
 
   const bar=page.locator('.player-sheet.sheet-sync');
   const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
   await expect(bar).toBeVisible();
   await expect(slider).toBeFocused();
-  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
-    const png=await bar.screenshot({animations:'disabled'});
-    console.log('PLEZY_SYNC_IMAGE:'+png.toString('base64'));
-  }
   await expect(slider).toHaveAttribute('min','-10000');
   await expect(slider).toHaveAttribute('max','10000');
   const box=await bar.boundingBox();
@@ -944,3 +936,18 @@ test('subtitle sync holding +/- accelerates with Plezy long-press stride', async
   await expect(page.locator('.sync-offset-value')).toHaveText(heldValue);
 });
 
+
+test('stopping playback cancels an active subtitle-sync long press', async ({page}) => {
+  await setup(page);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  await page.getByRole('button',{name:'Increase subtitle delay'}).focus();
+  await page.keyboard.down('Enter');
+  await page.waitForTimeout(650);
+  await page.locator('#player video').evaluate(video => video.dispatchEvent(new Event('ended')));
+  await expect(page.locator('#player')).toBeHidden();
+  const stored=await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'));
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'))).toBe(stored);
+  await page.keyboard.up('Enter');
+});
