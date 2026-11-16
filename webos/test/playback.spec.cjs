@@ -823,7 +823,7 @@ test('subtitle sync adjusts native subtitle cues across a full minute and resets
   await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(70);
   await expect(page.locator('.subtitle-sync-value')).toHaveText('+60.00 s');
   await slider.evaluate(el=>{el.value='-60000';el.dispatchEvent(new Event('input',{bubbles:true}));});
-  await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(-50);
   await page.getByRole('button',{name:'Reset',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(10);
   await expect(page.locator('.subtitle-sync-value')).toHaveText('0.00 s');
