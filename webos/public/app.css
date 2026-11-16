@@ -746,14 +746,104 @@ main.has-alpha-bar { padding-right:60px; }
 .skip-pref-row input[type=text] { flex:1; min-width:0; }
 .skip-pref-row input[type=number] { width:84px; }
 
-/* Subtitle synchronization control, matching Plezy's millisecond adjustment. */
-.player-options-list .subtitle-sync-control { margin:8px 0 16px; padding:14px;
-  border-radius:10px; background:rgba(255,255,255,.07); }
-.subtitle-sync-heading { display:flex; align-items:center; justify-content:space-between;
-  gap:12px; margin-bottom:10px; font-size:17px; font-weight:600; }
-.subtitle-sync-value { font-variant-numeric:tabular-nums; color:#c5c8d0; }
-.subtitle-sync-control input[type=range] { display:block; width:100%; margin:8px 0 12px;
-  accent-color:#ededed; }
-.player-options-list .subtitle-sync-reset { width:auto; min-width:76px; min-height:38px;
-  padding:7px 16px; margin:0; font-size:15px; border-radius:20px; }
-.player-options-list .subtitle-sync-reset:focus { background:#ededed; color:#121212; }
+/* Plezy's CompactSyncBar: top-centred, single-row, below the title safe
+   area, so subtitle text remains visible while synchronising playback. */
+.player-sheet.sheet-sync {
+  top:24px; bottom:auto; left:50%; right:auto;
+  -webkit-transform:translateX(-50%); transform:translateX(-50%);
+  width:900px; max-width:calc(100vw - 48px);
+  max-height:none; overflow:visible; padding:12px 16px;
+  border-radius:14px;
+}
+.player-sheet.sheet-sync .player-sheet-header { display:none; }
+.player-sheet.sheet-sync .player-options-list {
+  display:block; margin:0; padding:0;
+}
+.player-options-list button.player-settings-sync {
+  display:-webkit-flex; display:flex; -webkit-flex-direction:row; flex-direction:row;
+  -webkit-align-items:center; align-items:center;
+  width:100%; min-height:48px; border-radius:10px;
+  padding:10px 12px; gap:10px; margin:0 0 6px;
+}
+.player-settings-icon, .sync-offset-icon {
+  display:block; width:20px; height:20px; -webkit-flex:0 0 20px; flex:0 0 20px;
+  color:#a2a5ae; margin-right:10px;
+}
+.player-settings-icon svg, .sync-offset-icon svg { display:block; width:100%; height:100%; }
+.player-settings-label { font-size:17px; white-space:nowrap; }
+.player-settings-sync-value { margin-left:auto; font-size:15px; color:#a2a5ae; white-space:nowrap; }
+.player-settings-chevron { color:#a2a5ae; font-size:26px; line-height:1; }
+.player-settings-sync.is-active .player-settings-icon,
+.player-settings-sync.is-active .player-settings-sync-value { color:#ffbf3e; }
+.player-settings-sync:focus .player-settings-icon,
+.player-settings-sync:focus .player-settings-sync-value,
+.player-settings-sync:focus .player-settings-chevron { color:#343840; }
+.sync-offset-bar {
+  display:-webkit-flex; display:flex;
+  -webkit-align-items:center; align-items:center;
+  width:100%; min-height:48px; white-space:nowrap;
+}
+.sync-offset-title { font-size:14px; font-weight:600; margin:0 16px 0 8px; }
+.player-sheet.sheet-sync .sync-offset-bar button.sync-offset-button {
+  display:-webkit-flex; display:flex;
+  -webkit-align-items:center; align-items:center;
+  -webkit-justify-content:center; justify-content:center;
+  width:36px; height:36px; min-width:36px; -webkit-flex:0 0 36px; flex:0 0 36px;
+  border:0; border-radius:8px; padding:0; margin:0;
+  text-align:center; font-size:26px; font-weight:400; line-height:1;
+  color:#ededed; background:#303238; box-shadow:none;
+}
+.player-sheet.sheet-sync .sync-offset-bar button.sync-offset-button:focus {
+  background:#ededed; color:#17191e; box-shadow:0 0 0 2px rgba(255,255,255,.23);
+}
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"] {
+  margin:0 8px; font-size:29px; background:transparent; border-radius:18px;
+}
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"][aria-disabled="true"] { color:#737780; }
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="reset"]:focus { background:#ededed; color:#17191e; }
+.player-sheet.sheet-sync .sync-offset-bar button[data-sync="close"] {
+  background:transparent; font-size:30px; border-radius:18px;
+}
+.player-sheet.sheet-sync .sync-offset-value {
+  display:block; -webkit-flex:0 0 92px; flex:0 0 92px;
+  text-align:center; font-size:16px; font-weight:700; font-variant-numeric:tabular-nums;
+  padding:0 5px;
+}
+.player-sheet.sheet-sync input.sync-offset-slider {
+  display:block; -webkit-flex:1 1 auto; flex:1 1 auto;
+  min-width:90px; width:auto; height:28px;
+  margin:0 8px; padding:0; border:0; border-radius:0;
+  background:transparent; -webkit-appearance:none; appearance:none;
+  outline:0; box-shadow:none;
+}
+.player-sheet.sheet-sync input.sync-offset-slider:focus { outline:0; border:0; box-shadow:none; }
+.player-sheet.sheet-sync input.sync-offset-slider::-webkit-slider-runnable-track {
+  height:4px; border:0; border-radius:4px;
+  background:-webkit-linear-gradient(left, #ededed 0%, #ededed var(--sync-progress), #62656b var(--sync-progress), #62656b 100%);
+  background:linear-gradient(to right, #ededed 0%, #ededed var(--sync-progress), #62656b var(--sync-progress), #62656b 100%);
+}
+.player-sheet.sheet-sync input.sync-offset-slider::-webkit-slider-thumb {
+  -webkit-appearance:none; appearance:none;
+  width:4px; height:20px; margin-top:-8px;
+  border:0; border-radius:2px; background:#ededed;
+}
+.player-sheet.sheet-sync input.sync-offset-slider:focus::-webkit-slider-thumb {
+  width:6px; height:24px; margin-top:-10px;
+  box-shadow:0 0 0 4px rgba(237,237,237,.25), 0 0 11px rgba(237,237,237,.65);
+}
+.player-sheet.sheet-sync input.sync-offset-slider::-moz-range-track {
+  height:4px; border:0; border-radius:4px;
+  background:linear-gradient(to right, #ededed 0%, #ededed var(--sync-progress), #62656b var(--sync-progress), #62656b 100%);
+}
+.player-sheet.sheet-sync input.sync-offset-slider::-moz-range-thumb {
+  width:4px; height:20px; border:0; border-radius:2px; background:#ededed;
+}
+.player-sheet.sheet-sync input.sync-offset-slider:focus::-moz-range-thumb {
+  width:6px; height:24px; box-shadow:0 0 0 4px rgba(237,237,237,.25);
+}
+@media (max-width:760px) {
+  .player-sheet.sheet-sync { padding:10px; }
+  .sync-offset-title { margin-right:8px; font-size:12px; }
+  .player-sheet.sheet-sync .sync-offset-value { -webkit-flex-basis:72px; flex-basis:72px; font-size:13px; }
+  .player-sheet.sheet-sync .sync-offset-icon { display:none; }
+}
