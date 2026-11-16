@@ -1342,6 +1342,11 @@ async function paginated(loader, currentRevision, options = {}) {
   let start = 0, loading = false, completed = false, listening = false;
   const loadedPages = new Map();
   let watchedOverride;
+  const watchExceptions = new Map();
+  const applyWatchOverride = item => {
+    const watched = watchExceptions.has(item.id) ? watchExceptions.get(item.id) : watchedOverride;
+    if (watched !== undefined) updateLocalWatchState(item, watched);
+  };
   const grid = options.grouped ? el('div', undefined, 'collection-sections') :
     options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
   const sentinel = el('div', undefined, 'page-sentinel');
@@ -1353,7 +1358,10 @@ async function paginated(loader, currentRevision, options = {}) {
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   function makeCard(item) {
     const node = options.episodes ? episodeCard(item,
-      () => options.onWatchChanged?.(loadedPages)) : card(item);
+      () => {
+        watchExceptions.set(item.id, item.watched);
+        options.onWatchChanged?.(loadedPages);
+      }) : card(item);
     node._catalogSignature = JSON.stringify(item);
     node._catalogItem = item;
     return node;
@@ -1470,7 +1478,7 @@ async function paginated(loader, currentRevision, options = {}) {
     if (mountedRevision !== revision || !grid.isConnected ||
         !loadedPages.has(offset) || detailWatchEpoch !== watchEpoch) return;
     if (watchedOverride !== undefined)
-      update.value.items.forEach(item => updateLocalWatchState(item, watchedOverride));
+      update.value.items.forEach(applyWatchOverride);
     loadedPages.set(offset, update.value);
     // A changed page length invalidates offsets of its successors.
     if (initialPage.items.length !== update.value.items.length) {
@@ -1493,6 +1501,7 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   grid._markWatched = watched => {
     watchedOverride = watched;
+    watchExceptions.clear();
     for (const page of loadedPages.values()) {
       for (const item of page.items) updateLocalWatchState(item, watched);
     }
@@ -1533,7 +1542,7 @@ async function paginated(loader, currentRevision, options = {}) {
       if (mountedRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       if (watchedOverride !== undefined)
-        page.items.forEach(item => updateLocalWatchState(item, watchedOverride));
+        page.items.forEach(applyWatchOverride);
       addPage(grid, page);
       loadedPages.set(offset, page);
       if (watchedOverride !== undefined) options.onWatchChanged?.(loadedPages);

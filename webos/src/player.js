@@ -231,6 +231,7 @@ export class Player {
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.session) {
+        this.openIntentPlaying = false; this.pauseAfterOpen = true;
         this.clearResumeAfterSeek(); this.seekWasPlaying = false;
         this.cancelRemoteSeek(); this.video.pause();
       }
@@ -724,7 +725,7 @@ export class Player {
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
     this.loadSubtitleSyncOffset();
-    this.pauseAfterOpen = !playing;
+    this.pauseAfterOpen = !this.openIntentPlaying;
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
@@ -986,7 +987,8 @@ export class Player {
         trackSheetFocus = {kind:focused.dataset.trackKind, id:focused.dataset.trackId};
       else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
     }
-    const playing = this.session ? this.resumeAfterSeekTarget != null || !this.video.paused
+    const playing = this.session ? this.resumeAfterSeekTarget != null ||
+      (this.video.error ? this.openIntentPlaying !== false : !this.video.paused)
       : this.openIntentPlaying !== false;
     const position = this.session ? this.position() : this.options.start || this.lastPosition || 0;
     const options = {...this.options, ...changes, start: changes.start ?? position};
@@ -1020,6 +1022,8 @@ export class Player {
   toggle() {
     if (!this.session) return;
     const pause = this.resumeAfterSeekTarget != null || !this.video.paused;
+    this.openIntentPlaying = !pause;
+    this.pauseAfterOpen = false;
     this.clearResumeAfterSeek();
     this.seekWasPlaying = false;
     this.cancelRemoteSeek();
@@ -1412,9 +1416,11 @@ export class Player {
       if (code === 412 || code === 34) this.seekChapter(false);
       else if (code === 417 || code === 33) this.seekChapter(true);
       else if (code === 415) {
+        this.openIntentPlaying = true; this.pauseAfterOpen = false;
         this.clearResumeAfterSeek(); this.cancelRemoteSeek();
         this.video.play().catch(() => this.failed());
       } else if (code === 19) {
+        this.openIntentPlaying = false; this.pauseAfterOpen = true;
         this.clearResumeAfterSeek();
         // Cancel preview without replaying its pre-preview play intent.
         this.seekWasPlaying = false; this.cancelRemoteSeek(); this.video.pause();

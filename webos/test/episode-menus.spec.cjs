@@ -256,3 +256,22 @@ test('a newer episode Play request wins when metadata returns out of order',asyn
   await page.waitForTimeout(300);
   await expect(page.locator('.player-title')).toHaveText('The Second Episode');
 });
+
+test('an explicit episode unwatch survives a refresh after marking its season watched',async({page})=>{
+  await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  await page.getByRole('button',{name:'Mark watched',exact:true}).click();
+  await expect(page.locator('.episode-entry .badge')).toHaveCount(2);
+  await page.getByRole('button',{name:'More options for 1. The First Episode'}).click();
+  await page.getByRole('button',{name:'Mark as Unwatched',exact:true}).click();
+  await expect(page.locator('.episode-entry').first().locator('.badge')).toHaveCount(0);
+  await page.evaluate(async()=>{
+    const grid=document.querySelector('.episode-list');
+    const items=Array.from(grid.children).map(row=>JSON.parse(JSON.stringify(row._catalogItem)));
+    items.forEach(item=>{item.watched=true;item.raw.viewCount=1;});
+    await grid._applyCatalogUpdate(0,{changed:true,value:{items,total:items.length}});
+  });
+  await expect(page.locator('.episode-entry').first().locator('.badge')).toHaveCount(0);
+  await expect(page.locator('.episode-entry').last().locator('.badge')).toHaveCount(1);
+});
