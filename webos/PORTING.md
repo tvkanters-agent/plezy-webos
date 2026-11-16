@@ -511,3 +511,21 @@ for remote navigation, without inflating the entire library.
 Following LibraryBrowseTab._computeVisibleRange and PaginatedItemLoader.ensureRangeLoaded, the sparse HTML grid requests the current viewport directly when scrolling completely beyond its mounted range. It no longer walks every intervening page through empty spacers. Negative local rows map correctly into the leading spacer for reverse scrolling. One metadata request remains in flight; its completion rechecks the latest viewport without snapping scroll to the old target. Adjacent prefetch covers at least three rows or one viewport.
 
 Scrolling cards mount immediately after metadata arrives, letting the bounded artwork queue hydrate placeholders independently, as native sliver cards do. Explicit alphabet jumps and initial navigation keep their cached-artwork preparation. Browser tests cover both grid and Chromium 53 flex geometry, blocked prewarming and delayed-request direction changes; hardware performance remains unverified.
+
+
+### Subtitle timing sync
+
+Native Plezy exposes subtitle timing from Playback Settings through its
+`SyncOffsetControl`: a ±10-second slider in 50ms increments, step buttons,
+reset, and a wider ±60-second adjustment bound. The webOS player mirrors that
+control in the Playback settings sheet.
+
+The browser player burns Plex subtitles into its HLS video, so it cannot use
+mpv's live `sub-delay` property. For Plex external text subtitles only, webOS
+uses Plex's documented `PUT /library/streams/{streamId}.{ext}?offset={ms}`
+operation, then reopens the HLS session at the current playback position while
+retaining the sync sheet. The UI is intentionally unavailable for embedded or
+image-based subtitle streams and for Jellyfin/Emby, where this Plex stream
+offset API does not apply. Plex's stream-offset endpoint may not be honored by
+every server/client combination; LG TV playback still requires hardware
+verification.
