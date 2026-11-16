@@ -804,3 +804,27 @@ test('an intro appearing behind the chapter sheet does not steal remote focus',a
   await expect(page.getByRole('button',{name:'Skip intro'})).toBeVisible();
   await expect(chapter).toBeFocused();
 });
+
+test('subtitle sync adjusts native subtitle cues across a full minute and resets cleanly', async ({page}) => {
+  await setup(page);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+  await expect(slider).toHaveAttribute('min','-60000');
+  await expect(slider).toHaveAttribute('max','60000');
+  await page.evaluate(() => {
+    const video=document.querySelector('#player video');
+    const track=video.addTextTrack('subtitles','Fixture subtitles','en');
+    track.mode='showing';
+    const cue=new VTTCue(10,12,'Fixture subtitle');
+    track.addCue(cue);
+    window.subtitleSyncCue=cue;
+  });
+  await slider.fill('60000');
+  await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(70);
+  await expect(page.locator('.subtitle-sync-value')).toHaveText('+60.00 s');
+  await slider.fill('-60000');
+  await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(0);
+  await page.getByRole('button',{name:'Reset',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.subtitleSyncCue.startTime)).toBe(10);
+  await expect(page.locator('.subtitle-sync-value')).toHaveText('0.00 s');
+});
