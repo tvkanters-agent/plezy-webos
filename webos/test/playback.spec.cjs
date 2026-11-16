@@ -1478,6 +1478,12 @@ test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn
 for (const legacy of [false,true]) {
   test('sync slider retimes actual ASS canvas pixels using '+(legacy?'legacy':'WASM')+' libass',async({page})=>{
     test.setTimeout(90000);
+    page.on('console',message=>console.log('ASS '+(legacy?'legacy':'WASM')+': '+message.text()));
+    page.on('pageerror',error=>console.log('ASS error: '+error.message));
+    page.on('response',response=>{
+      if(response.status()>=400 && new URL(response.url()).hostname==='127.0.0.1')
+        console.log('ASS asset HTTP '+response.status()+': '+new URL(response.url()).pathname);
+    });
     await page.addInitScript(legacy=>{
       Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
       if(legacy) window.WebAssembly=undefined;
