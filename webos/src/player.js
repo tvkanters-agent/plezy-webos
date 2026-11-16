@@ -67,6 +67,7 @@ export class Player {
       if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
       this.applySubtitleSyncOffset();
       this.update();
+      this.checkStartupProgress();
       this.tryResumeAfterSeek();
     });
     this.video.textTracks?.addEventListener?.('addtrack', () => this.applySubtitleSyncOffset());
@@ -89,6 +90,7 @@ export class Player {
         this.pauseAfterOpen = false;
         this.video.pause();
         this.update();
+        this.checkStartupProgress();
         return;
       }
       if(!this.initialSeekPending) this.showBuffering(false);
@@ -737,6 +739,7 @@ export class Player {
     this.lastPointerPosition = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
+    this.startupComplete = false;
     this.scrubbing = false;
     if (!trackSheetFocus) this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
@@ -794,7 +797,11 @@ export class Player {
       // Keep the opening frame invisible until the resume target has been
       // sought and decoded. Loading indicators remain independently visible.
       this.video.style.visibility = this.initialSeekPending ? 'hidden' : 'visible';
+      // Arm before load/play: synchronous errors and never-settling Play
+      // promises must not leave startup without a recovery deadline.
+      this.armStartupTimeout(session, generation);
       this.loadSource(session);
+      if (generation !== this.generation || this.session !== session) return;
       this.subtitleOverlay.onError = error => {
         if (generation === this.generation && this.session === session)
           this.subtitleFailed(error, session);
@@ -806,9 +813,6 @@ export class Player {
         });
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
-      this.startTimeout = setTimeout(() => {
-        if (generation === this.generation && (this.video.readyState < 2 || this.initialSeekPending)) this.failed();
-      }, 30000);
       // On webOS a non-started video often never reaches canplay/seeked.
       // Initialize the decoder, but do not show its frame until the resume
       // seek is ready.
@@ -825,7 +829,7 @@ export class Player {
       // pipeline BEFORE load/play. A later currentTime assignment buffers twice.
       const source = document.createElement('source');
       source.setAttribute('src', session.url);
-      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : 'video/mp4') +
+      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : (session.mimeType || 'video/mp4')) +
         ';mediaOption=' + encodeURIComponent(JSON.stringify({option: {
           transmission: {playTime: {start: this.initialSeekTarget * 1000}}
         }})));
@@ -848,10 +852,11 @@ export class Player {
     catch(error) {
       if (generation!==this.generation) return;
       if (error.name==='NotAllowedError') {
+        clearTimeout(this.startTimeout);
         this.showBuffering(false);this.status.textContent='Press Play to start.';
-      } else if (!this.video.error && error.name!=='AbortError') {
-        this.showBuffering(false);
-        this.status.textContent='Press Play, or try compatible playback.';
+      } else if (error.name!=='AbortError') {
+        // Some native opens reject Play without dispatching a media error.
+        this.failed();
       }
     }
   }
@@ -866,8 +871,6 @@ export class Player {
         if(this.initialSeekPending)this.initialSeekTarget=target;
       } catch (_) { /* Retry once the source is seekable. */ }
     }
-    if (!this.pendingStart && !this.initialSeekPending)
-      clearTimeout(this.startTimeout);
   }
   startAfterInitialSeek(playing = false) {
     if(!this.initialSeekPending || this.pendingStart || !this.session)return;
@@ -877,8 +880,25 @@ export class Player {
     this.hasFirstFrame = playing || this.video.readyState >= 2;
     this.video.style.visibility='visible';
     if (this.skipButton) this.update();
-    clearTimeout(this.startTimeout);
+    this.checkStartupProgress();
     this.showBuffering(false);
+  }
+  armStartupTimeout(session = this.session, generation = this.generation) {
+    clearTimeout(this.startTimeout);
+    this.startTimeout = setTimeout(() => {
+      if (generation === this.generation && this.session === session && !this.startupComplete) this.failed();
+    }, 30000);
+  }
+  checkStartupProgress() {
+    if (!this.session || this.startupComplete || this.initialSeekPending || this.pendingStart ||
+        !(this.video.videoWidth > 0)) return;
+    // loadedmetadata/loadeddata/canplay (and even a resolved Play) are not
+    // proof the video clock advances. Paused reopens need just one frame.
+    if (this.video.currentTime > this.initialSeekTarget + 0.1 ||
+        this.openIntentPlaying === false && this.hasFirstFrame) {
+      this.startupComplete = true;
+      clearTimeout(this.startTimeout);
+    }
   }
   position() {
     return (this.initialSeekPending ? this.initialSeekTarget : this.pendingStart) || (this.video.currentTime || 0);
@@ -988,7 +1008,7 @@ export class Player {
       else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
     }
     const playing = this.session ? this.resumeAfterSeekTarget != null ||
-      (this.video.error ? this.openIntentPlaying !== false : !this.video.paused)
+      ((this.video.error || this.startupComplete === false) ? this.openIntentPlaying !== false : !this.video.paused)
       : this.openIntentPlaying !== false;
     const position = this.session ? this.position() : this.options.start || this.lastPosition || 0;
     const options = {...this.options, ...changes, start: changes.start ?? position};
@@ -1000,20 +1020,25 @@ export class Player {
     return this.open(this.api, this.item, options, true, trackSheetFocus, playing);
   }
   async subtitleFailed(error, session) {
-    if (!this.session || this.session !== session || this.recovering) return;
+    if (!this.session || this.session !== session || this.recoveringSession === session) return;
     console.warn('Subtitle renderer failed; retrying with Plex burn-in:', error);
-    this.recovering = true;
+    this.recoveringSession = session;
     try { await this.reopen({transcode:true, burnSubtitles:true}); }
-    finally { this.recovering = false; }
+    finally { if (this.recoveringSession === session) this.recoveringSession = null; }
   }
   async failed() {
-    if (!this.session || this.recovering) return;
-    if (!this.session.transcode) {
-      this.recovering = true;
+    const session = this.session;
+    if (!session || this.closing || this.recoveringSession === session) return;
+    clearTimeout(this.startTimeout);
+    if (!session.transcode) {
+      this.recoveringSession = session;
       this.showBuffering(true);
-      await this.reopen({transcode: true});
-      this.recovering = false;
+      try { await this.reopen({transcode: true}); }
+      finally { if (this.recoveringSession === session) this.recoveringSession = null; }
     } else {
+      // A replacement HLS decoder can fail before the original reopen's
+      // Play promise settles. Its error must never be hidden by that attempt.
+      this.clearResumeAfterSeek();
       this.showBuffering(false);
       this.status.textContent = 'Video could not play. Check server transcoding and TV codec support. Press Stop to return.';
       this.reveal();
@@ -1027,7 +1052,13 @@ export class Player {
     this.clearResumeAfterSeek();
     this.seekWasPlaying = false;
     this.cancelRemoteSeek();
-    if (pause) this.video.pause(); else this.video.play().catch(() => this.failed());
+    if (pause) {
+      clearTimeout(this.startTimeout);
+      this.video.pause();
+    } else {
+      if (this.startupComplete === false) this.armStartupTimeout();
+      this.video.play().catch(() => this.failed());
+    }
     this.reveal();
   }
   atMediaEnd() {

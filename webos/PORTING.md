@@ -536,6 +536,10 @@ Episode menu wrappers retain a separate catalog identity while their play and ov
 
 Source-track PUT follows PlexClient.selectStreams and treats HTTP success as success regardless of an XML/empty body. Rapid changes merge their options and position before awaiting old-session cleanup, and paused track changes pause again after the first resumed decoder frame (LG needs Play to decode that frame). Subtitle offset storage is scoped by the existing account/server fingerprint plus item ID; ambiguous old unscoped offsets are not migrated. Only the latest pending episode Play action may launch after metadata arrives.
 
+### Guarded native Direct Play
+
+The reviewed native expansion is documented in [DIRECT_PLAY_REVIEW.md](DIRECT_PLAY_REVIEW.md). Unlike desktop mpv, LG HTML5 cannot select arbitrary embedded tracks; multi-audio files stay on HLS. Native-only AVC/HEVC formats require stream evidence within the C8/webOS 4.0 limits and correct source MIME. Independent SRT/ASS does not force a video transcode. Startup recovery is scoped to the session and remains armed past metadata until video clock progress, so native failures cannot hide indefinitely or suppress replacement HLS errors. Browser event tests are not hardware decode validation.
+
 ### Subtitle sync on Chromium 53 and real Plex sidecar keys
 
 MPV applies sub-delay to decoded subtitle tracks. The HTML equivalent only

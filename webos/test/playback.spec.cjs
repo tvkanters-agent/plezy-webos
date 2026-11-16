@@ -1,7 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
@@ -36,8 +36,10 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   await page.goto('/'); await page.getByRole('button',{name:'Test Movie',exact:true}).click();
   if (version !== undefined) await page.getByLabel('Media version',{exact:true}).selectOption(String(version));
   await page.getByRole('button',{name:'Play',exact:true}).first().click();
-  await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
-  await expect.poll(()=>events.length).toBeGreaterThan(0);
+  if (waitForPlayback) {
+    await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
+    await expect.poll(()=>events.length).toBeGreaterThan(0);
+  }
   return {calls,events};
 }
 function buildBif(image) {
@@ -1387,6 +1389,44 @@ test('pointer hover cannot replace the displayed D-pad seek target',async({page}
   });
   await page.keyboard.press('Enter');
   expect(Math.abs(await page.evaluate(()=>window.confirmedRemoteSeek)-expected)).toBeLessThanOrEqual(1);
+});
+
+test('metadata-only native open with an unresolved Play promise falls back and plays HLS',async({page})=>{
+  await page.clock.install();
+  await page.addInitScript(()=>{
+    const play=HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play=function(){
+      if(this.src.includes('/video.webm')) return new Promise(()=>{});
+      return play.call(this);
+    };
+  });
+  const {calls}=await setup(page,{},undefined,[],{},null,null,null,false);
+  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.readyState)).toBeGreaterThanOrEqual(1);
+  await expect(page.locator('#player video')).toHaveJSProperty('currentTime',0);
+  await page.clock.fastForward(31000);
+  await expect.poll(()=>calls.some(u=>u.pathname.endsWith('/start.m3u8'))).toBe(true);
+  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.paused)).toBe(false);
+  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.currentTime)).toBeGreaterThan(.25);
+  await expect(page.locator('.player-status')).toBeEmpty();
+});
+test('failed replacement HLS reports an error while the original Play promise stays unresolved',async({page})=>{
+  await page.addInitScript(()=>{
+    const play=HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play=function(){
+      if(this.src.includes('/video.webm')) return new Promise(()=>{});
+      return play.call(this);
+    };
+  });
+  const {calls}=await setup(page,{},undefined,[],{},null,null,null,false);
+  let fallbackOpens=0;
+  await page.route('http://plex.test/video/:/transcode/universal/start.m3u8**',
+    route=>{fallbackOpens++;return route.fulfill({status:500,body:'decoder failure'});});
+  await expect(page.locator('#player video')).toHaveAttribute('src',/video.webm/);
+  await page.locator('#player video').evaluate(v=>v.dispatchEvent(new Event('error')));
+  await expect(page.locator('.player-status')).toContainText('Video could not play');
+  expect(fallbackOpens).toBe(1);
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect(page.locator('#player')).toBeHidden();
 });
 
 test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn-in fallback',async({page})=>{

@@ -1,7 +1,15 @@
-## 1.11.5
+## 1.12.1
 
 - Fix subtitle sync on Chromium 53 by supplying the Object APIs needed by Media Captions, and match Plezy's Plex sidecar URLs (codec extension and UTF-8).
 - Exercise visible SRT cues and actual WASM/legacy libass canvas output through live positive/negative/reset sync adjustments.
+
+## 1.12.0 — Guarded native Direct Play
+
+- Restore validated AVC/HEVC MP4/MKV Direct Play on native webOS within the C8 decode limits.
+- Use actual stream codecs and check profiles, levels, frame rates, chroma and audio constraints. Keep incompatible/uncertain expanded formats and multiple embedded audio tracks on HLS.
+- Recover metadata-only/frozen startup and rejected Play; handle replacement HLS errors even if the original Play promise never settles.
+- Preserve selected version/tracks, native resume and independent SRT/ASS subtitle rendering through fallback.
+- Add the complete review in DIRECT_PLAY_REVIEW.md, unit coverage and browser startup/fallback regressions. Physical LG decoding remains unverified.
 
 ## 1.11.4
 

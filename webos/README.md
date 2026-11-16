@@ -55,7 +55,7 @@ This is a direct browser-to-Simkl integration. Successful network requests depen
 - Saved servers and switching, library browsing with pagination and server-side sorting/filtering (including unwatched titles), search, show/season/episode navigation and details. Plex episodes offer a Next episode button that follows subsequent seasons.
 - Continue Watching / Next Up / Recently Added (server-provided Plex hubs, with fallback to Plex library endpoints when home hubs are unavailable).
 - Mark watched/unwatched, resume, periodic server progress reporting and stop reports.
-- Native HTML video playback; conservative H.264/AAC MP4 direct play and HLS server transcoding for other media.
+- Native HTML video playback; guarded C8 AVC/HEVC MP4/MKV Direct Play with HLS fallback. See [Direct Play review](DIRECT_PLAY_REVIEW.md) for compatibility and validation limits.
 - Automatic one-time fallback when direct playback fails, plus **Compatible playback** for manual transcoding.
 - Plex chapter seeking, intro/credits skip controls and media-version selection.
 - Optional Simkl playback tracking, with persisted failed-stop retries and quota cooldowns.
@@ -105,7 +105,7 @@ Keyboard preview: Escape acts as Back, Space toggles playback. Text fields keep 
 
 ## Playback limits and remaining port work
 
-This first target intentionally advertises a conservative profile rather than claiming codecs every LG model can decode. HLS output requests H.264 video and AAC audio at up to 1080p / 12 Mbps; direct MP4 playback can retain the original resolution. A server with transcoding permission and sufficient CPU/GPU capacity is required when the original media cannot direct-play. Seek operates on the native player's media timeline; network and server seek performance varies.
+The native format gate follows the target C8/webOS 4.0 limits and uses HLS for incompatible or uncertain formats and multiple embedded audio tracks. HLS output requests H.264 video and AAC audio at up to 1080p / 12 Mbps; direct MP4 playback can retain the original resolution. A server with transcoding permission and sufficient CPU/GPU capacity is required when the original media cannot direct-play. Seek operates on the native player's media timeline; network and server seek performance varies.
 
 Not yet ported: native Flutter UI parity, music, Live TV/DVR, downloads, playlists, Plex Home user switching, Jellyfin Quick Connect, cross-server search, auto-next episode, multi-part playback, advanced filtering, localization, watch parties, additional tracker/Seerr integrations, HDR/Dolby Vision profiles, configurable HEVC/AV1 direct play, audio passthrough and mpv-specific shaders/subtitle rendering. There is no root/native Flutter embedder requirement.
 

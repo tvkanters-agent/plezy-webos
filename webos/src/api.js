@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Protocols ported from lib/services/{plex,jellyfin}_* and their client parts.
+import {plexDirectPlayMime} from './plex-direct-play.js';
 import {VERSION, baseUrl, endpoint, request, seconds, id} from './core.js';
 import {plexExternalIds} from './external-ids.js';
 import {trackLanguageName} from './languages.js';
@@ -277,7 +278,7 @@ export class Plex {
   async detail(itemId, kind = '') {
     const path = kind === 'collection' ? '/library/collections/' + enc(itemId) :
       kind === 'playlist' ? '/playlists/' + enc(itemId) : '/library/metadata/' + enc(itemId);
-    const data = await this.get(path, {includeGuids: 1, includeMarkers: 1, includeChapters: 1});
+    const data = await this.get(path, {includeGuids: 1, includeMarkers: 1, includeChapters: 1, includeStreams: 1, checkFiles: 1});
     return plexItem(data.MediaContainer.Metadata[0]);
   }
   async children(itemId, start = 0, kind = '') {
@@ -458,27 +459,23 @@ export class Plex {
       ? (part.Stream || []).some(stream => Number(stream.streamType) === 3 &&
           (stream.selected === true || stream.selected === 1 || stream.selected === '1'))
       : String(options.subtitle) !== '-1';
-    // Retain v1.10.2's conservative video codec/container decision. An
-    // independently rendered text subtitle is not a reason to transcode video.
-    const transcode = options.transcode || options.burnSubtitles ||
-      !['mp4', 'm4v', 'mov'].includes(media.container)
-      || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
-      || options.audio !== undefined || (hasSubtitle && !subtitle);
+    const mimeType = plexDirectPlayMime(media, {...options, localSubtitle:!!subtitle});
+    const transcode = !mimeType;
     const subtitleAsset = subtitle ? {id:subtitle.id, format:subtitle.format,
       url:this.url(subtitle.key, {encoding:'utf-8'})} : null;
-    // Conservative direct play, with user-accessible HLS fallback for TV-specific limits.
+    // Keep the established full-title HLS fallback for incompatible native files.
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       // Match Plezy's full-title HLS timeline. The player supplies the
       // resume point to the decoder at open, not to the transcoder URL.
       session: sessionId,
-      subtitleSize: 100, subtitles: subtitleAsset ? 'none' : 'burn',
-      ...(subtitleAsset ? {subtitleStreamID:0} : {}),
+      subtitleSize: 100, subtitles: subtitleAsset || !hasSubtitle ? 'none' : 'burn',
+      ...(subtitleAsset || !hasSubtitle ? {subtitleStreamID:0} : {}),
       'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
-        subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
+        subtitleStreamID: String(options.subtitle) === '-1' ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
     }
     // Native PlexClient.getPlaybackExtras reads the current metadata with
     // includeChapters/includeMarkers. Home shelves and cached detail pages can
@@ -500,7 +497,7 @@ export class Plex {
       options.skipSettings);
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, item, subtitleAsset,
+      sessionId, sourceId: String(part.id), transcode, mimeType, item, subtitleAsset,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
       extrasPromise,
@@ -547,10 +544,13 @@ export class Plex {
       duration: Math.round(Math.max(0, duration || session.item.duration || 0) * 1000),
       'X-Plex-Session-Identifier': session.sessionId};
     const url = this.url('/:/timeline', params);
-    const response = await fetch(url, {method: 'POST', headers: {Accept: '*/*'}});
-    if (!response.ok) {
-      const error = new Error('Plex playback timeline returned HTTP ' + response.status + '.');
-      error.status = response.status; throw error;
+    // release() serializes the final report before opening a fallback decoder.
+    // Bound this transport too: a hung timeline POST must not block recovery.
+    try {
+      await request(url, {method:'POST', headers:{Accept:'*/*'}, responseType:'none'});
+    } catch (error) {
+      if (error.status) error.message = 'Plex playback timeline returned HTTP ' + error.status + '.';
+      throw error;
     }
   }
   async stop(session) {
