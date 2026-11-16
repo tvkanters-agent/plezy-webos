@@ -123,6 +123,7 @@ export class Player {
       if (!this.initialSeekPending &&
           (this.video.readyState >= 2 || this.video.paused || this.atMediaEnd()))
         this.showBuffering(false);
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekLanded = true;
       this.tryResumeAfterSeek();
     });
     this.video.addEventListener('ended', () => this.close(true));
@@ -219,7 +220,12 @@ export class Player {
           Math.abs(event.clientX - previous.x) + Math.abs(event.clientY - previous.y) < 3)) return;
       if (!this.skipButton.contains(event.target)) this.reveal();
     });
-    document.addEventListener('visibilitychange', () => { if (document.hidden && this.session) this.video.pause(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.session) {
+        this.clearResumeAfterSeek(); this.seekWasPlaying = false;
+        this.cancelRemoteSeek(); this.video.pause();
+      }
+    });
   }
   get active() { return !this.root.hidden; }
   skipMode(marker) {
@@ -992,8 +998,11 @@ export class Player {
   }
   toggle() {
     if (!this.session) return;
+    const pause = this.resumeAfterSeekTarget != null || !this.video.paused;
     this.clearResumeAfterSeek();
-    if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
+    this.seekWasPlaying = false;
+    this.cancelRemoteSeek();
+    if (pause) this.video.pause(); else this.video.play().catch(() => this.failed());
     this.reveal();
   }
   atMediaEnd() {
@@ -1117,11 +1126,7 @@ export class Player {
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
     this.hideSeekPreview();
-    this.seekTo(point);
-    this.showBuffering(true);
-    // Resume after the hardware seek when possible. The watchdog also wakes
-    // decoders that remain paused and cannot emit seeked until Play is called.
-    if (shouldResume) this.queueResumeAfterSeek(point);
+    this.seekTo(point, false, shouldResume);
     this.seekWasPlaying = false;
     this.hideControls();
     return true;
@@ -1131,6 +1136,7 @@ export class Player {
     this.resumeAfterSeekTimer = null;
     this.resumeAfterSeekTarget = null;
     this.resumeAfterSeekPlayPending = false;
+    this.resumeAfterSeekPlayRequestedAt = 0;
     this.resumeAfterSeekPlayRequestId = (this.resumeAfterSeekPlayRequestId || 0) + 1;
     this.resumeAfterSeekToken = (this.resumeAfterSeekToken || 0) + 1;
     this.resumeAfterSeekWatchPosition = null;
@@ -1139,6 +1145,7 @@ export class Player {
     this.resumeAfterSeekLastWakeAt = 0;
     this.resumeAfterSeekSawPlaying = false;
     this.resumeAfterSeekSawCanplay = false;
+    this.resumeAfterSeekLanded = false;
   }
   queueResumeAfterSeek(target) {
     this.clearResumeAfterSeek();
@@ -1147,7 +1154,6 @@ export class Player {
     this.resumeAfterSeekQueuedAt = Date.now();
     // Retain the play intent until the video clock actually advances. Neither
     // paused=false nor seeked means an LG hardware decoder is showing frames.
-    this.tryResumeAfterSeek();
   }
   requestResumeAfterSeek(forceRestart = false) {
     if (this.resumeAfterSeekPlayPending || this.resumeAfterSeekTarget == null) return;
@@ -1191,19 +1197,16 @@ export class Player {
     const target = this.resumeAfterSeekTarget;
     if (target == null) return;
     if (!this.session || this.closing || this.resumeAfterSeekGeneration !== this.generation ||
-        this.atMediaEnd()) {
+        this.video.error || (this.atMediaEnd() && target >= this.timelineDuration() - 0.2)) {
       this.clearResumeAfterSeek();
       return;
     }
     const elapsed = Date.now() - this.resumeAfterSeekQueuedAt;
-    if (elapsed > 15000) {
-      this.clearResumeAfterSeek();
-      return;
-    }
     const position = this.video.currentTime;
     const atTarget = !this.pendingStart && Number.isFinite(position) &&
       Math.abs(position - target) <= 1;
-    const ready = this.video.readyState >= 1 && atTarget;
+    // seeked confirms landing even when HLS snaps to a nearby keyframe.
+    const ready = this.video.readyState >= 1 && (atTarget || this.resumeAfterSeekLanded);
     if (ready && !this.video.seeking && !this.video.paused) {
       if (this.resumeAfterSeekWatchPosition == null) {
         this.resumeAfterSeekWatchPosition = position;
@@ -1221,22 +1224,23 @@ export class Player {
       this.resumeAfterSeekPlayPending = false;
       this.resumeAfterSeekPlayRequestId++;
     }
-    if (this.video.paused) {
-      // Call Play immediately when possible, while OK's user activation is
-      // still live. A paused decoder may need Play before it emits seeked.
-      if (this.video.readyState >= 1 || elapsed >= 650)
-        this.requestResumeAfterSeek();
-    } else if (ready && !this.video.seeking &&
-               (this.video.readyState >= 2 || this.resumeAfterSeekSawPlaying ||
-                this.resumeAfterSeekSawCanplay) &&
-               elapsed >= 3000 && this.resumeAfterSeekReadyAt &&
-               Date.now() - this.resumeAfterSeekReadyAt >= 1800 &&
-               this.resumeAfterSeekWakeAttempts < 2 &&
-               elapsed - this.resumeAfterSeekLastWakeAt >= 3000 &&
-               !this.resumeAfterSeekPlayPending) {
+    const sincePlay = Date.now() - (this.resumeAfterSeekPlayRequestedAt || 0);
+    if (ready && !this.video.seeking && !this.video.paused &&
+        (this.video.readyState >= 2 || this.resumeAfterSeekSawPlaying ||
+         this.resumeAfterSeekSawCanplay) &&
+        elapsed >= 3000 && this.resumeAfterSeekReadyAt &&
+        Date.now() - this.resumeAfterSeekReadyAt >= 1800 &&
+        this.resumeAfterSeekWakeAttempts < 2 &&
+        elapsed - this.resumeAfterSeekLastWakeAt >= 3000 &&
+        !this.resumeAfterSeekPlayPending) {
       this.resumeAfterSeekWakeAttempts++;
       this.resumeAfterSeekLastWakeAt = elapsed;
       this.requestResumeAfterSeek(true);
+    } else if (!this.resumeAfterSeekPlayPending && sincePlay >= 1000) {
+      // Play is idempotent. LG can report paused=false AND seeking=true
+      // until Play wakes the pipeline. Request it while OK still owns user
+      // activation, then retry through buffering without a wall-clock expiry.
+      this.requestResumeAfterSeek();
     }
     clearTimeout(this.resumeAfterSeekTimer);
     this.resumeAfterSeekTimer = setTimeout(() => this.tryResumeAfterSeek(), 250);
@@ -1246,12 +1250,15 @@ export class Player {
     return Number.isFinite(duration) && duration > 0 ? duration : (this.item?.duration || 0);
   }
   seek(delta) { this.seekTo(this.position() + delta); }
-  seekTo(position, fromSkipMarker = false) {
+  seekTo(position, fromSkipMarker = false, resumePlayback = null) {
     if (!this.session || !Number.isFinite(position)) return;
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
+    const shouldResume = resumePlayback === null
+      ? this.resumeAfterSeekTarget != null || !this.video.paused : resumePlayback;
     this.clearResumeAfterSeek();
+    if (shouldResume) this.queueResumeAfterSeek(target);
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
     if (this.video.readyState < 1) this.pendingStart = target;
@@ -1262,7 +1269,9 @@ export class Player {
     this.seekBar.value = String(Math.round(target));
     this.seekBar.setAttribute('aria-valuetext', time(target) + ' of ' + time(total));
     this.report(this.video.paused ? 'paused' : 'playing');
+    this.showBuffering(this.video.seeking || !!this.pendingStart || this.video.readyState < 2);
     this.update(); this.reveal();
+    this.tryResumeAfterSeek();
   }
   reveal() {
     this.controlsDismissedByBack = false;
@@ -1376,8 +1385,14 @@ export class Player {
       event.preventDefault();
       if (code === 412 || code === 34) this.seekChapter(false);
       else if (code === 417 || code === 33) this.seekChapter(true);
-      else if (code === 415) this.video.play().catch(() => this.failed());
-      else if (code === 19) { this.clearResumeAfterSeek(); this.video.pause(); }
+      else if (code === 415) {
+        this.clearResumeAfterSeek(); this.cancelRemoteSeek();
+        this.video.play().catch(() => this.failed());
+      } else if (code === 19) {
+        this.clearResumeAfterSeek();
+        // Cancel preview without replaying its pre-preview play intent.
+        this.seekWasPlaying = false; this.cancelRemoteSeek(); this.video.pause();
+      }
       else this.toggle();
       return true;
     }

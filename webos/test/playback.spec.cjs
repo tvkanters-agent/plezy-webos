@@ -1215,3 +1215,58 @@ test('stopping playback cancels an active subtitle-sync long press', async ({pag
   await page.keyboard.up('Enter');
 });
 
+
+test('all seek entry points recover a decoder pause without another remote Play',async({page})=>{
+  await setup(page,{Chapter:[{title:'First',startTimeOffset:0},
+    {title:'Second',startTimeOffset:45000}]});
+  await page.locator('video').evaluate(video=>{
+    const descriptor=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    Object.defineProperty(video,'currentTime',{configurable:true,
+      get(){return descriptor.get.call(video);},
+      set(value){video.pause();descriptor.set.call(video,value);}
+    });
+  });
+  await page.getByRole('button',{name:'Next chapter',exact:true}).click();
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(44);
+  await page.locator('[data-action="seek"]').evaluate(slider=>{
+    slider.value='20';slider.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(19);
+});
+
+test('confirmed seek wakes an unpaused LG decoder with stale time and seeking=true',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    const before=video.currentTime;
+    let queued=before;
+    const nativePlay=video.play.bind(video);
+    window.unpausedSeekPlayCalls=0;
+    Object.defineProperty(video,'currentTime',{configurable:true,
+      get(){return before;},set(value){queued=value;}});
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+    video.play=()=>{
+      window.unpausedSeekPlayCalls++;
+      delete video.currentTime;delete video.seeking;
+      video.currentTime=queued;
+      return nativePlay();
+    };
+  });
+  await page.keyboard.press('Enter');
+  await expect.poll(()=>page.evaluate(()=>window.unpausedSeekPlayCalls)).toBeGreaterThan(0);
+  await expect(page.locator('.controls')).toBeHidden();
+});
+
+test('explicit Pause during preview is not overridden by confirming or cancelling it',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{keyCode:19,bubbles:true})));
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1100);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+});
