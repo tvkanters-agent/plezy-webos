@@ -745,3 +745,18 @@ main.has-alpha-bar { padding-right:60px; }
   border:1px solid #626670; border-radius:8px; padding:9px; font-size:16px; }
 .skip-pref-row input[type=text] { flex:1; min-width:0; }
 .skip-pref-row input[type=number] { width:84px; }
+
+/* Plezy subtitle sync control: compact timing slider with 50ms steps. */
+#player .player-sheet.sheet-sync { top:24px; bottom:auto; left:50%; right:auto;
+  width:min(900px,calc(100% - 48px)); max-height:110px;
+  -webkit-transform:translateX(-50%); transform:translateX(-50%); }
+#player .sheet-sync .player-sheet-header { min-height:34px; padding:6px 12px; }
+#player .sheet-sync .player-sheet-header h3 { font-size:17px; }
+#player .sheet-sync .player-options-list { padding:8px 12px 12px; }
+.subtitle-sync-control { display:flex; align-items:center; gap:12px; min-height:42px; }
+.subtitle-sync-control button { min-width:42px; min-height:38px; padding:5px 10px;
+  border-radius:9px; background:#383c46; color:#ededed; }
+.subtitle-sync-control button:disabled { opacity:.4; }
+.subtitle-sync-control input[type=range] { flex:1; min-width:120px; height:28px; }
+.subtitle-sync-value { min-width:76px; text-align:center; font-size:17px;
+  font-weight:700; font-variant-numeric:tabular-nums; }
