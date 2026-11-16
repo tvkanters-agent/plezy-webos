@@ -1405,7 +1405,8 @@ test('metadata-only native open with an unresolved Play promise falls back and p
   await expect(page.locator('#player video')).toHaveJSProperty('currentTime',0);
   await page.clock.fastForward(31000);
   await expect.poll(()=>calls.some(u=>u.pathname.endsWith('/start.m3u8'))).toBe(true);
-  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.currentTime)).toBeGreaterThan(0);
+  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.paused)).toBe(false);
+  await expect.poll(()=>page.locator('#player video').evaluate(v=>v.currentTime)).toBeGreaterThan(.25);
   await expect(page.locator('.player-status')).toBeEmpty();
 });
 test('failed replacement HLS reports an error while the original Play promise stays unresolved',async({page})=>{
