@@ -518,7 +518,7 @@ test('remote seeks in hidden mode and center commits preview then dismisses cont
   await expect(slider).toBeFocused();
   const value=Number(await slider.inputValue());
   expect(value).toBeGreaterThanOrEqual(10);
-  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await expect(page.locator('video')).toHaveJSProperty('paused',false);
   await page.keyboard.press('ArrowRight');
   const next=Number(await slider.inputValue());
   expect(next).toBeGreaterThan(value);
@@ -545,8 +545,8 @@ test('leaving a remote seek cancels preview without seeking or losing transport 
   const stop=page.getByRole('button',{name:'Stop',exact:true});
   await stop.focus();
   await expect(page.locator('.seek-preview')).toBeHidden();
-  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls)).toBe(1);
-  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  await expect(page.locator('video')).toHaveJSProperty('paused',false);
   expect(await page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(target-2);
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByRole('button',{name:'+30 seconds',exact:true})).toBeFocused();
@@ -586,7 +586,10 @@ test('confirming a remote seek waits for decoder completion before resuming play
     window.seekPlayCalls=0;
     const originalPlay=video.play.bind(video);
     video.play=()=>{window.seekPlayCalls++;return originalPlay();};
+    // Simulate a decoder pausing during seek. The remote preview itself
+    // remains playing, so we force the hardware failure before confirming.
     Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+    video.pause();
   });
   await page.keyboard.press('Enter');
   await expect(page.locator('#player .controls')).toBeHidden();
@@ -599,6 +602,44 @@ test('confirming a remote seek waits for decoder completion before resuming play
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(target-1);
 });
+test('remote seek recovers when old webOS never emits seeked while paused',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    const nativePlay=video.play.bind(video);
+    video.play=()=>{
+      window.seekPlayCalls++;
+      // Decoder wakes up when playback is requested; seeked is not emitted
+      // beforehand on this mocked LG behavior.
+      Object.defineProperty(video,'seeking',{configurable:true,get(){return false;}});
+      video.dispatchEvent(new Event('seeked'));
+      return nativePlay();
+    };
+    // Old LG video engines may not resolve seeking until they are playing.
+    Object.defineProperty(video,'seeking',{configurable:true,get(){return true;}});
+    video.pause();
+  });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.controls')).toBeHidden();
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls),{timeout:3000}).toBeGreaterThan(0);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused),{timeout:3000}).toBe(false);
+  // Recovery must not reopen chrome.
+  await expect(page.locator('.controls')).toBeHidden();
+});
+
+test('decoder pause arriving after a confirmed seek is recovered automatically',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await page.locator('video').evaluate(video=>video.pause());
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused),{timeout:3000}).toBe(false);
+  await expect(page.locator('.controls')).toBeHidden();
+});
+
 test('refocusing transport during committed-seek buffering cancels deferred chrome hiding',async({page})=>{
   await setup(page);
   await page.keyboard.press('Escape');
@@ -922,15 +963,25 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   expect(box.width).toBeGreaterThan(500);
   expect(Math.abs(box.x + box.width / 2 - 960)).toBeLessThan(3);
 
-  await page.keyboard.press('ArrowRight');
+  // Up/Down changes the offset, Left/Right changes focus. Never use a
+  // slider endpoint to reach the other buttons.
+  await page.keyboard.press('ArrowUp');
   await expect(slider).toBeFocused();
   await expect(page.locator('.sync-offset-value')).toHaveText('+50ms');
-  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowDown');
   await expect(slider).toBeFocused();
   await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('button',{name:'Decrease subtitle delay'})).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(slider).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('button',{name:'Increase subtitle delay'})).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
+  await page.keyboard.press('ArrowLeft');
+  await expect(slider).toBeFocused();
 
-  // Upstream FocusableSlider: OK leaves the slider for close. Left walks
-  // close -> reset -> plus -> slider, without escaping into the player.
+  // OK still offers a shortcut directly to Close.
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button',{name:'Close subtitle sync'})).toBeFocused();
   await page.keyboard.press('ArrowLeft');
@@ -948,7 +999,7 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   await expect(page.getByRole('button',{name:'Playback settings'})).toBeFocused();
 });
 
-test('all subtitle-sync buttons are D-pad reachable without moving the slider value', async ({page}) => {
+test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without moving focus', async ({page}) => {
   await setup(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
@@ -959,11 +1010,28 @@ test('all subtitle-sync buttons are D-pad reachable without moving the slider va
   const close=page.getByRole('button',{name:'Close subtitle sync'});
   await expect(slider).toBeFocused();
   await expect(slider).toHaveValue('0');
-  await page.keyboard.press('ArrowUp');
+
+  // Icons must be actual SVGs. The previous ↺ character was a missing glyph
+  // (an apparent checkbox) on the target LG's browser/font combination.
+  await expect(page.locator('.sync-offset-button svg')).toHaveCount(4);
+  await expect(reset.locator('svg path')).toHaveCount(1);
+  await expect(reset).toHaveText('');
+  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
+    const png=await page.locator('.player-sheet.sheet-sync').screenshot({animations:'disabled'});
+    console.log('SYNC_SLIDER_FOCUSED_IMAGE:'+png.toString('base64'));
+    await page.keyboard.press('ArrowUp');
+    await reset.focus();
+    const focusedPng=await page.locator('.player-sheet.sheet-sync').screenshot({animations:'disabled'});
+    console.log('SYNC_RESET_FOCUSED_IMAGE:'+focusedPng.toString('base64'));
+    await slider.focus();
+    await page.keyboard.press('ArrowDown');
+  }
+
+  await page.keyboard.press('ArrowLeft');
   await expect(minus).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(slider).toBeFocused();
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
   await expect(plus).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(reset).toBeFocused();
@@ -978,15 +1046,27 @@ test('all subtitle-sync buttons are D-pad reachable without moving the slider va
   await expect(slider).toHaveValue('0');
   await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
 
-  // The minus and plus buttons must be operable with OK as well as focusable.
+  // Up/Down always changes the value, never the focused element, including
+  // from another button in this one-row control.
   await page.keyboard.press('ArrowUp');
+  await expect(slider).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('+50ms');
+  await page.keyboard.press('ArrowLeft');
+  await expect(minus).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(minus).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
   await page.keyboard.press('Enter');
   await expect(minus).toBeFocused();
   await expect(page.locator('.sync-offset-value')).toHaveText('-50ms');
   await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
   await expect(plus).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  await expect(reset).toBeFocused();
   await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
 });
 

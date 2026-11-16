@@ -69,6 +69,7 @@ export class Player {
     this.video.addEventListener('playing', () => {
       this.status.textContent = '';
       this.resume();
+      this.tryResumeAfterSeek();
       // HTMLMediaElement.playing guarantees decoder playback; webOS 4.4 can
       // report readyState 1 during real frames. Do not hide a real intro prompt
       // behind an unreliable HAVE_CURRENT_DATA gate.
@@ -94,6 +95,7 @@ export class Player {
       else this.root.querySelector('[data-action="pause"]').focus();
     });
     this.video.addEventListener('pause', () => {
+      this.tryResumeAfterSeek();
       // Waiting/stalled can outlive a paused decoder (notably near EOF).
       // Keep the first-frame and active seek-preview loading gates intact.
       if (!this.initialSeekPending && !this.seeking && !this.video.seeking)
@@ -497,7 +499,7 @@ export class Player {
       button.type = 'button';
       button.className = 'sync-offset-button';
       button.dataset.sync = action;
-      button.textContent = symbol;
+      button.innerHTML = symbol;
       button.setAttribute('aria-label', label);
       if (direction) {
         button.dataset.syncStep = String(direction);
@@ -517,20 +519,23 @@ export class Player {
       }
       return button;
     };
-    const minus = stepButton('minus', '−', 'Decrease subtitle delay', -1);
+    // SVG paths are rendered reliably on LG's old Chromium. Unicode ↺ can
+    // fall back to a tofu/checkbox glyph when the TV lacks that font character.
+    const svg = path => '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + path + '"/></svg>';
+    const minus = stepButton('minus', svg('M5 12h14'), 'Decrease subtitle delay', -1);
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.className = 'sync-offset-slider';
     slider.min = '-10000'; slider.max = '10000'; slider.step = '50';
     slider.setAttribute('aria-label', 'Subtitle sync offset');
     slider.addEventListener('input', () => this.setSubtitleSyncOffset(Number(slider.value)));
-    const plus = stepButton('plus', '+', 'Increase subtitle delay', 1);
+    const plus = stepButton('plus', svg('M12 5v14M5 12h14'), 'Increase subtitle delay', 1);
     const value = document.createElement('output');
     value.className = 'sync-offset-value';
     value.setAttribute('aria-live', 'off');
-    const reset = stepButton('reset', '↺', 'Reset subtitle sync');
+    const reset = stepButton('reset', svg('M12 4a8 8 0 1 1-7.6 10.5M4 4v7h7'), 'Reset subtitle sync');
     reset.onclick = () => this.setSubtitleSyncOffset(0);
-    const close = stepButton('close', '×', 'Close subtitle sync');
+    const close = stepButton('close', svg('M5 5l14 14M19 5L5 19'), 'Close subtitle sync');
     close.onclick = () => this.closeSheet();
     bar.append(icon, title, minus, slider, plus, value, reset, close);
     list.appendChild(bar);
@@ -906,7 +911,9 @@ export class Player {
     this.hideAfterSeek = false;
     this.seekWasPlaying = false;
     this.controlsDismissedByBack = false;
-    this.resumeAfterSeekTarget = null;
+    this.clearResumeAfterSeek();
+    this.resumeAfterSeekTimer = null;
+    this.resumeAfterSeekToken = 0;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
@@ -960,6 +967,7 @@ export class Player {
   }
   toggle() {
     if (!this.session) return;
+    this.clearResumeAfterSeek();
     if (this.video.paused) this.video.play().catch(() => this.failed()); else this.video.pause();
     this.reveal();
   }
@@ -1059,7 +1067,9 @@ export class Player {
       this.seekWasPlaying = !this.video.paused;
       this.seeking = true;
       this.remoteSeeking = true;
-      this.video.pause();
+      // Like Plezy's coalesced timeline preview, keep playback running until
+      // OK commits a single decoder seek. Pausing first can deadlock webOS:
+      // some LG decoders only complete a seek while the player is running.
     }
     this.scrubbing = true;
     // Native Plezy coalesces timeline movements before a decoder seek.
@@ -1090,27 +1100,78 @@ export class Player {
     this.hideControls();
     return true;
   }
+  clearResumeAfterSeek() {
+    clearTimeout(this.resumeAfterSeekTimer);
+    this.resumeAfterSeekTimer = null;
+    this.resumeAfterSeekTarget = null;
+    this.resumeAfterSeekPlayPending = false;
+    this.resumeAfterSeekToken = (this.resumeAfterSeekToken || 0) + 1;
+  }
   queueResumeAfterSeek(target) {
+    this.clearResumeAfterSeek();
     this.resumeAfterSeekTarget = target;
+    this.resumeAfterSeekGeneration = this.generation;
+    this.resumeAfterSeekQueuedAt = Date.now();
+    // A paused LG decoder may wait forever for seeked/canplay until play()
+    // is invoked. Continue observing even when it emits no further events.
     this.tryResumeAfterSeek();
   }
   tryResumeAfterSeek() {
     const target = this.resumeAfterSeekTarget;
-    if (target === null) return;
-    if (!this.session || this.closing) {
-      this.resumeAfterSeekTarget = null;
+    if (target == null) return;
+    if (!this.session || this.closing || this.resumeAfterSeekGeneration !== this.generation) {
+      this.clearResumeAfterSeek();
       return;
     }
+    const elapsed = Date.now() - this.resumeAfterSeekQueuedAt;
+    if (elapsed > 9000) {
+      this.clearResumeAfterSeek();
+      return;
+    }
+    const position = this.video.currentTime;
+    const atTarget = !this.pendingStart && Number.isFinite(position) && Math.abs(position - target) <= 1;
+    const ready = this.video.readyState >= 1 && atTarget;
     if (!this.video.paused) {
-      this.resumeAfterSeekTarget = null;
-      return;
+      // Do not forget the resume request immediately: hardware can emit a
+      // delayed pause after currentTime changed or even after seeked.
+      if (ready && !this.video.seeking && elapsed >= 1500) {
+        this.clearResumeAfterSeek();
+        return;
+      }
+    } else if (ready && (!this.video.seeking || elapsed >= 500) && !this.resumeAfterSeekPlayPending) {
+      // Prefer the decoder's real seek completion. If it never arrives while
+      // paused, kick playback after a short grace period so the seek can finish.
+      const token = this.resumeAfterSeekToken;
+      this.resumeAfterSeekPlayPending = true;
+      let request;
+      try {
+        request = this.video.play();
+      } catch (error) {
+        this.resumeAfterSeekPlayPending = false;
+        if (error.name === 'NotAllowedError') {
+          this.clearResumeAfterSeek();
+          this.status.textContent = 'Press Play to resume.';
+          return;
+        }
+        if (error.name !== 'AbortError') this.failed();
+      }
+      if (request && typeof request.then === 'function') {
+        request.then(() => {
+          if (this.resumeAfterSeekToken !== token) return;
+          this.resumeAfterSeekPlayPending = false;
+          this.tryResumeAfterSeek();
+        }).catch(error => {
+          if (this.resumeAfterSeekToken !== token) return;
+          this.resumeAfterSeekPlayPending = false;
+          if (error.name === 'NotAllowedError') {
+            this.clearResumeAfterSeek();
+            this.status.textContent = 'Press Play to resume.';
+          } else if (error.name !== 'AbortError') this.failed();
+        });
+      } else this.resumeAfterSeekPlayPending = false;
     }
-    if (this.pendingStart || this.video.readyState < 1 || this.video.seeking ||
-        !Number.isFinite(this.video.currentTime) || Math.abs(this.video.currentTime - target) > 1) return;
-    this.resumeAfterSeekTarget = null;
-    this.video.play().catch(error => {
-      if (error.name !== 'AbortError') this.failed();
-    });
+    clearTimeout(this.resumeAfterSeekTimer);
+    this.resumeAfterSeekTimer = setTimeout(() => this.tryResumeAfterSeek(), 250);
   }
   timelineDuration() {
     const duration = this.video.duration;
@@ -1122,7 +1183,7 @@ export class Player {
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
-    this.resumeAfterSeekTarget = null;
+    this.clearResumeAfterSeek();
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
     if (this.video.readyState < 1) this.pendingStart = target;
@@ -1164,28 +1225,18 @@ export class Player {
       const direction = {37:'left',38:'up',39:'right',40:'down'}[code];
       if (direction) {
         event.preventDefault();
-        if (current.classList?.contains('sync-offset-slider')) {
-          if (code === 37 || code === 39) {
-            this.adjustSubtitleSync(code === 37 ? -1 : 1);
-          } else {
-            // The slider owns horizontal adjustment, so vertical D-pad keys
-            // provide explicit exits to the adjacent step buttons. Every
-            // control stays reachable even when the slider is at its centre.
-            this.sheet.querySelector(code === 38 ? '[data-sync="minus"]' : '[data-sync="plus"]').focus();
-          }
-          return true;
+        if (code === 38 || code === 40) {
+          // TV UX: Up/Down adjusts the offset and never changes focus.
+          this.adjustSubtitleSync(code === 38 ? 1 : -1);
+        } else {
+          // TV UX: Left/Right is *only* focus traversal, including across
+          // the range input. Never rely on a slider endpoint to exit it.
+          const controls = Array.from(this.sheet.querySelectorAll(
+            '.sync-offset-button, .sync-offset-slider'));
+          const index = controls.indexOf(current);
+          const target = controls[clamp(index + (code === 39 ? 1 : -1), 0, controls.length - 1)];
+          if (index !== -1 && target) target.focus();
         }
-        // As in Plezy's FocusableSlider, horizontal arrows adjust the value
-        // while it has focus. Other controls remain in a spatial focus row.
-        if (code === 37 && current.dataset?.sync === 'close') {
-          this.sheet.querySelector('[data-sync="reset"]').focus();
-          return true;
-        }
-        const candidates = Array.from(this.sheet.querySelectorAll('button, input[type="range"]'))
-          .filter(node => node !== current && node.getClientRects().length && !node.hidden);
-        const next = nextFocus(current.getBoundingClientRect(),
-          candidates.map(value => ({value, rect:value.getBoundingClientRect()})), direction);
-        if (next) next.focus();
         return true;
       }
       if (code === 13) {
@@ -1253,7 +1304,7 @@ export class Player {
       if (code === 412 || code === 34) this.seekChapter(false);
       else if (code === 417 || code === 33) this.seekChapter(true);
       else if (code === 415) this.video.play().catch(() => this.failed());
-      else if (code === 19) this.video.pause();
+      else if (code === 19) { this.clearResumeAfterSeek(); this.video.pause(); }
       else this.toggle();
       return true;
     }
