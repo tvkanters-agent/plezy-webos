@@ -1,3 +1,7 @@
+## 1.11.4
+
+- Fix episode refresh identity/focus, aggregate watch badges and cache state, rapid/paused track changes, Plex XML success responses, subtitle offset isolation, and delayed episode launch races.
+
 ## 1.11.3
 
 - Correct subtitle timing, asynchronous sync changes, and measured clearance above controls.

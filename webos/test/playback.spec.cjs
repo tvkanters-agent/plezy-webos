@@ -1211,9 +1211,14 @@ test('stopping playback cancels an active subtitle-sync long press', async ({pag
   await page.waitForTimeout(650);
   await page.locator('#player video').evaluate(video => video.dispatchEvent(new Event('ended')));
   await expect(page.locator('#player')).toBeHidden();
-  const stored=await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'));
+  const storedOffset=() => page.evaluate(() => Object.keys(localStorage)
+    .filter(key=>key.startsWith('plezy.webos.subtitleSync.'))
+    .map(key=>({key,value:localStorage.getItem(key)})));
+  const stored=await storedOffset();
+  expect(stored).toHaveLength(1);
+  expect(Number(stored[0].value)).toBeGreaterThan(0);
   await page.waitForTimeout(500);
-  expect(await page.evaluate(() => localStorage.getItem('plezy.webos.subtitleSync.movie'))).toBe(stored);
+  expect(await storedOffset()).toEqual(stored);
   await page.keyboard.up('Enter');
 });
 
@@ -1309,4 +1314,77 @@ test('subtitle lift clears the measured controls at different viewport sizes',as
     }));
     expect(geometry.lift).toBe(-geometry.controls);
   }
+});
+
+test('track changes while paused keep the selected position and paused state',async({page})=>{
+  await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
+      {streamType:2,id:12,languageCode:'fra',codec:'aac'}
+    ]}]}]});
+  await page.locator('video').evaluate(video=>{video.currentTime=22;});
+  await page.locator('[data-action="pause"]').click();
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').getByRole('button',{name:/French/}).click();
+  await expect(page.locator('.player-track-column button[aria-pressed="true"]')).toHaveAttribute('data-track-id','12');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.readyState)).toBeGreaterThanOrEqual(2);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(21);
+});
+
+test('rapid audio and subtitle changes during cleanup retain both choices and resume position',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:2,id:11,languageCode:'eng',selected:1,codec:'aac'},
+      {streamType:2,id:12,languageCode:'fra',codec:'aac'},
+      {streamType:3,id:31,languageCode:'eng',codec:'srt'},
+      {streamType:3,id:32,languageCode:'spa',codec:'srt'}
+    ]}]}]});
+  await page.locator('video').evaluate(video=>{video.currentTime=22;});
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.seeking)).toBe(false);
+  let finishCleanup,cleanupRequested=false;
+  const cleanup=new Promise(resolve=>{finishCleanup=resolve;});
+  await page.route('http://plex.test/**/timeline**',async route=>{
+    if (new URL(route.request().url()).searchParams.get('state')==='stopped') {
+      cleanupRequested=true;await cleanup;
+    }
+    await route.fulfill({json:{}});
+  });
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').first().getByRole('button',{name:/French/}).click();
+  await expect.poll(()=>cleanupRequested).toBe(true);
+  await page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}).click();
+  finishCleanup();
+  await expect.poll(()=>calls.some(url=>url.pathname==='/library/parts/part' &&
+    url.searchParams.get('audioStreamID')==='12' &&
+    url.searchParams.get('subtitleStreamID')==='32')).toBe(true);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(21);
+  await expect(page.locator('.player-track-column').first().getByRole('button',{name:/French/}))
+    .toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}))
+    .toHaveAttribute('aria-pressed','true');
+});
+
+test('pointer hover cannot replace the displayed D-pad seek target',async({page})=>{
+  await setup(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  const slider=page.locator('[data-action="seek"]');
+  const expected=Number(await slider.inputValue());
+  await slider.evaluate(input=>{
+    const bounds=input.getBoundingClientRect();
+    input.dispatchEvent(new MouseEvent('pointermove',{bubbles:true,
+      clientX:bounds.left+1,clientY:bounds.top+1}));
+  });
+  await expect(slider).toHaveValue(String(expected));
+  await page.locator('video').evaluate(video=>{
+    const descriptor=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    Object.defineProperty(video,'currentTime',{configurable:true,
+      get(){return descriptor.get.call(video);},
+      set(value){window.confirmedRemoteSeek=value;descriptor.set.call(video,value);}
+    });
+  });
+  await page.keyboard.press('Enter');
+  expect(Math.abs(await page.evaluate(()=>window.confirmedRemoteSeek)-expected)).toBeLessThanOrEqual(1);
 });

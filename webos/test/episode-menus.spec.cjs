@@ -200,3 +200,78 @@ test('subtitle Off carries between episodes and player audio changes update the 
       params.get('audioStreamID')==='12' && params.get('subtitleStreamID')==='0';
   })).toBe(true);
 });
+
+test('marking a season updates every visible episode without replacing rows',async({page})=>{
+  await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  await expect(page.locator('.episode-entry')).toHaveCount(2);
+  await page.evaluate(()=>{window.savedEpisodeRow=document.querySelector('.episode-entry');});
+  await page.getByRole('button',{name:'Mark watched',exact:true}).click();
+  await expect(page.locator('.episode-entry .badge')).toHaveCount(2);
+  await expect(page.locator('.episode-entry .episode-progress')).toHaveCount(0);
+  await page.getByRole('button',{name:'Mark unwatched',exact:true}).click();
+  await expect(page.locator('.episode-entry .badge')).toHaveCount(0);
+  expect(await page.evaluate(()=>document.querySelector('.episode-entry')===window.savedEpisodeRow)).toBe(true);
+});
+
+test('episode refresh retains an unchanged row and its overflow focus',async({page})=>{
+  await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  const more=page.getByRole('button',{name:'More options for 1. The First Episode'});
+  await more.focus();
+  const result=await page.evaluate(async()=>{
+    const grid=document.querySelector('.episode-list');
+    const original=grid.firstElementChild;
+    const focused=document.activeElement;
+    const items=Array.from(grid.children).map(row=>JSON.parse(JSON.stringify(row._catalogItem)));
+    items[1].summary='Changed second episode';
+    await grid._applyCatalogUpdate(0,{changed:true,value:{items,total:items.length}});
+    return {retained:grid.firstElementChild===original,focused:document.activeElement===focused};
+  });
+  expect(result).toEqual({retained:true,focused:true});
+});
+
+test('a newer episode Play request wins when metadata returns out of order',async({page})=>{
+  await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  let finishFirst,requested=false;
+  const delayed=new Promise(resolve=>{finishFirst=resolve;});
+  await page.route('http://plex.test/library/metadata/ep1**',async route=>{
+    requested=true;
+    await delayed;
+    return route.fulfill({json:{MediaContainer:{Metadata:[{
+      ratingKey:'ep1',type:'episode',title:'The First Episode',duration:120000,
+      Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+        Part:[{id:'part',key:'/fixture.mp4',Stream:[]}]}]
+    }]}}});
+  });
+  await page.locator('.episode-row').first().click();
+  await expect.poll(()=>requested).toBe(true);
+  await page.locator('.episode-row').nth(1).click();
+  await expect(page.locator('.player-title')).toHaveText('The Second Episode');
+  finishFirst();
+  await page.waitForTimeout(300);
+  await expect(page.locator('.player-title')).toHaveText('The Second Episode');
+});
+
+test('an explicit episode unwatch survives a refresh after marking its season watched',async({page})=>{
+  await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:/Season 1/}).click();
+  await page.getByRole('button',{name:'Mark watched',exact:true}).click();
+  await expect(page.locator('.episode-entry .badge')).toHaveCount(2);
+  await page.getByRole('button',{name:'More options for 1. The First Episode'}).click();
+  await page.getByRole('button',{name:'Mark as Unwatched',exact:true}).click();
+  await expect(page.locator('.episode-entry').first().locator('.badge')).toHaveCount(0);
+  await page.evaluate(async()=>{
+    const grid=document.querySelector('.episode-list');
+    const items=Array.from(grid.children).map(row=>JSON.parse(JSON.stringify(row._catalogItem)));
+    items.forEach(item=>{item.watched=true;item.raw.viewCount=1;});
+    await grid._applyCatalogUpdate(0,{changed:true,value:{items,total:items.length}});
+  });
+  await expect(page.locator('.episode-entry').first().locator('.badge')).toHaveCount(0);
+  await expect(page.locator('.episode-entry').last().locator('.badge')).toHaveCount(1);
+});

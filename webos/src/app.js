@@ -33,6 +33,7 @@ function tvStorage() {
 }
 let state = readState(tvStorage()), api, route = {type: 'home'}, history = [], revision = 0, authAbort, toastTimer;
 let detailWatchEpoch = 0;
+let playbackLaunch = 0;
 // Sidebar destinations are persistent tabs, not pushed navigator routes.
 // Bounded detached DOM snapshots keep returning to a library instantaneous.
 const rootSnapshots = new Map();
@@ -284,11 +285,17 @@ function refreshDetailAction(control, label, symbol) {
 }
 function updateLocalWatchState(item, watched) {
   item.watched = watched;
+  if (item.unwatchedCount != null) {
+    const leaves = Number(item.raw?.leafCount ?? item.raw?.RecursiveItemCount);
+    item.unwatchedCount = watched ? 0 : (Number.isFinite(leaves) ? leaves : item.unwatchedCount);
+    if (item.raw) item.raw.viewedLeafCount = watched ? leaves || 0 : 0;
+  }
   item.resume = 0;
   if (item.raw) {
     if (item.raw.UserData) {
       item.raw.UserData.Played = watched;
       item.raw.UserData.PlaybackPositionTicks = 0;
+      if (item.unwatchedCount != null) item.raw.UserData.UnplayedItemCount = item.unwatchedCount;
     }
     item.raw.viewCount = watched ? 1 : 0;
     item.raw.viewOffset = 0;
@@ -997,11 +1004,15 @@ function card(item) {
   const node = button('', () => go({type: 'detail', id: item.id, kind: item.type})); node.className = 'card'; node.dataset.focus = item.id;
   node.setAttribute('aria-label', labels.title + (labels.subtitle ? ', ' + labels.subtitle : ''));
   node.append(poster(item), el('strong', labels.title), el('small', labels.subtitle));
-  if (item.unwatchedCount > 0 && ['show','season','Series','Season'].includes(item.type))
-    node.append(el('span', String(item.unwatchedCount), 'badge'));
-  else if (item.watched && !(item.resume > 0 && item.duration > 0))
-    node.append(el('span', '✓', 'badge'));
-  if (item.resume > 0 && item.duration > 0) { const p = el('progress'); p.max = item.duration; p.value = item.resume; node.append(p); }
+  node._refreshWatchState = () => {
+    node.querySelectorAll('.badge,progress').forEach(control => control.remove());
+    if (item.unwatchedCount > 0 && ['show','season','Series','Season'].includes(item.type))
+      node.append(el('span', String(item.unwatchedCount), 'badge'));
+    else if (item.watched && !(item.resume > 0 && item.duration > 0))
+      node.append(el('span', '✓', 'badge'));
+    if (item.resume > 0 && item.duration > 0) { const p = el('progress'); p.max = item.duration; p.value = item.resume; node.append(p); }
+  };
+  node._refreshWatchState();
   return node;
 }
 // Flutter's sliver-based library lists inflate artwork near the viewport.
@@ -1274,9 +1285,10 @@ function cards(items, grid = false) {
 }
 // Source: lib/widgets/episode_card.dart — 16:9 thumb, play overlay,
 // index/title, 3-line synopsis and duration/air-date/quality metadata.
-function episodeCard(item) {
+function episodeCard(item, onChanged = () => {}) {
   const label = (item.raw?.index != null ? item.raw.index + '. ' : '') + item.title;
   const entry = el('div', undefined, 'episode-entry');
+  entry.dataset.catalogId = item.id;
   const node = button('', () => play(item, item.resume), 'episode-row');
   node.dataset.focus = item.id;
   node.setAttribute('aria-label', label);
@@ -1304,7 +1316,7 @@ function episodeCard(item) {
     details.append(meta);
   }
   node.append(image, details);
-  const more = detailMoreOptions(() => episodeMenuActions(item, () => {
+  entry._refreshWatchState = () => {
     Array.from(image.querySelectorAll('.badge,.episode-progress')).forEach(control => control.remove());
     if(item.watched)image.append(el('span','✓','badge'));
     if(item.resume>0 && item.duration>0){
@@ -1312,8 +1324,12 @@ function episodeCard(item) {
       progress.max=item.duration;progress.value=item.resume;image.append(progress);
     }
     entry._catalogSignature=JSON.stringify(item);
-  }), true);
+  };
+  const more = detailMoreOptions(() => episodeMenuActions(item,
+    () => { entry._refreshWatchState(); onChanged(); },
+    () => { ++detailWatchEpoch; }), true);
   more.classList.add('episode-row-more');
+  more.querySelector('.detail-icon').dataset.focus = item.id + ':more';
   more.querySelector('.detail-icon').setAttribute('aria-label','More options for '+label);
   more.querySelector('.detail-icon').setAttribute('title','More options for '+label);
   entry.append(node, more);
@@ -1325,6 +1341,12 @@ async function paginated(loader, currentRevision, options = {}) {
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
   const loadedPages = new Map();
+  let watchedOverride;
+  const watchExceptions = new Map();
+  const applyWatchOverride = item => {
+    const watched = watchExceptions.has(item.id) ? watchExceptions.get(item.id) : watchedOverride;
+    if (watched !== undefined) updateLocalWatchState(item, watched);
+  };
   const grid = options.grouped ? el('div', undefined, 'collection-sections') :
     options.episodes ? el('div', undefined, 'episode-list') : cards([], true);
   const sentinel = el('div', undefined, 'page-sentinel');
@@ -1335,8 +1357,13 @@ async function paginated(loader, currentRevision, options = {}) {
   main.append(grid, sentinel, errorMessage, retry);
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   function makeCard(item) {
-    const node = options.episodes ? episodeCard(item) : card(item);
+    const node = options.episodes ? episodeCard(item,
+      () => {
+        watchExceptions.set(item.id, item.watched);
+        options.onWatchChanged?.(loadedPages);
+      }) : card(item);
     node._catalogSignature = JSON.stringify(item);
+    node._catalogItem = item;
     return node;
   }
   function addPage(target, page) {
@@ -1367,7 +1394,8 @@ async function paginated(loader, currentRevision, options = {}) {
   function reconcileCards(container, items) {
     const existing = new Map();
     Array.from(container.children).forEach(node => {
-      if (node.dataset && node.dataset.focus) existing.set(String(node.dataset.focus), node);
+      const key = node.dataset && (node.dataset.catalogId || node.dataset.focus);
+      if (key) existing.set(String(key), node);
     });
     items.forEach((item, index) => {
       const key = String(item.id), signature = JSON.stringify(item);
@@ -1442,12 +1470,15 @@ async function paginated(loader, currentRevision, options = {}) {
     if (observer) observer.disconnect();
   }
   async function applyFresh(offset, initialPage, update) {
+    const watchEpoch = detailWatchEpoch;
     if (!update || !update.changed || mountedRevision !== revision ||
         !grid.isConnected || !loadedPages.has(offset)) return;
     await prewarmPosters(update.value.items || [], api,
       {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
     if (mountedRevision !== revision || !grid.isConnected ||
-        !loadedPages.has(offset)) return;
+        !loadedPages.has(offset) || detailWatchEpoch !== watchEpoch) return;
+    if (watchedOverride !== undefined)
+      update.value.items.forEach(applyWatchOverride);
     loadedPages.set(offset, update.value);
     // A changed page length invalidates offsets of its successors.
     if (initialPage.items.length !== update.value.items.length) {
@@ -1463,9 +1494,23 @@ async function paginated(loader, currentRevision, options = {}) {
     else { listen(); requestAnimationFrame(check); }
   }
   function watchFresh(offset, initialPage, pending) {
-    if (pending) pending.then(update => applyFresh(offset, initialPage, update))
+    const watchEpoch = detailWatchEpoch;
+    if (pending) pending.then(update => watchEpoch === detailWatchEpoch &&
+      applyFresh(offset, initialPage, update))
       .catch(() => { /* Offline updates keep the saved view usable. */ });
   }
+  grid._markWatched = watched => {
+    watchedOverride = watched;
+    watchExceptions.clear();
+    for (const page of loadedPages.values()) {
+      for (const item of page.items) updateLocalWatchState(item, watched);
+    }
+    for (const node of Array.from(grid.children)) {
+      node._refreshWatchState?.();
+      if (node._catalogItem) node._catalogSignature = JSON.stringify(node._catalogItem);
+    }
+    if (options.onWatchChanged) options.onWatchChanged(loadedPages);
+  };
   grid._applyCatalogUpdate = (offset, update) => {
     const original = loadedPages.get(offset);
     if (original) return applyFresh(offset, original, update);
@@ -1496,8 +1541,11 @@ async function paginated(loader, currentRevision, options = {}) {
         {landscape:!!options.episodes, protectFirst:24});
       if (mountedRevision !== revision || !grid.isConnected) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
+      if (watchedOverride !== undefined)
+        page.items.forEach(applyWatchOverride);
       addPage(grid, page);
       loadedPages.set(offset, page);
+      if (watchedOverride !== undefined) options.onWatchChanged?.(loadedPages);
       start += page.items.length;
       completed = !page.items.length || start >= page.total;
       if (completed) cleanup();
@@ -2099,6 +2147,9 @@ async function render(prepared = null) {
           persistDetailWatchState(item, detailRoute, detailServerScope);
           if (!valid() || currentApi !== api) return;
           refreshDetailWatchActions(actions, item);
+          if (item.folder) {
+            main.querySelectorAll('.episode-list,.grid').forEach(grid => grid._markWatched?.(watched));
+          }
           notify(watched ? 'Marked as watched' : 'Marked as unwatched');
         } finally { watchMutationPending = false; }
       };
@@ -2249,7 +2300,16 @@ async function render(prepared = null) {
         await paginated(start => savedPage('children:' + JSON.stringify([item.id,item.type,grouped,start]),
           () => requestChildren(start), {priority:start===0}), currentRevision, {grouped,
           episodes: item.type === 'season' || item.type === 'Season',
-          startedAt:beginContentEntrance()});
+          startedAt:beginContentEntrance(),
+          onWatchChanged: pages => {
+            for (const [start, page] of pages) {
+              const key = savedCatalog.id(detailServerScope,
+                'children:' + JSON.stringify([item.id,item.type,grouped,start]));
+              savedCatalog.generations.set(key, (savedCatalog.generations.get(key) || 0) + 1);
+              savedCatalog.remember(key, page);
+              savedCatalog.write(key, page, start === 0).catch(() => {});
+            }
+          }});
       }
       // Port CastMemberStrip: one locked-focus D-pad row, internal horizontal
       // scroll with no browser scrollbar, placed AFTER seasons/episodes.
@@ -2333,18 +2393,20 @@ function episodeStreamsComplete(item, mediaIndex) {
 }
 async function play(item, start, transcode = false) {
   const sourceApi = api, sourceRoute = route, mediaIndex = route.mediaIndex || 0;
+  const launch = ++playbackLaunch;
   // Stream IDs are per-episode. Load the target episode's real catalog before
   // carrying the player's semantic audio/subtitle choice from its siblings.
   if (String(item.type).toLowerCase() === 'episode' && !episodeStreamsComplete(item, mediaIndex)) {
     try {
       const detailed = await sourceApi.detail(item.id, 'episode');
-      if (sourceApi !== api || sourceRoute !== route) return;
+      if (sourceApi !== api || sourceRoute !== route || launch !== playbackLaunch) return;
       Object.assign(item, detailed);
     } catch (error) {
       // Metadata lookups should not prevent normal playback when offline.
-      if (sourceApi !== api || sourceRoute !== route) return;
+      if (sourceApi !== api || sourceRoute !== route || launch !== playbackLaunch) return;
     }
   }
+  if (launch !== playbackLaunch) return;
   const tracks = mediaSourceTracks(item, mediaIndex);
   playbackReturn = {
     route, api, item,

@@ -3,6 +3,7 @@ import {clamp, nextFocus, time} from './core.js';
 import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
 import {parseBif, bifFrameAt} from './scrub-preview.js';
 import {SubtitleOverlay} from './subtitles.js';
+import {catalogScope} from './persistent-catalog.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -82,6 +83,14 @@ export class Player {
       if (!this.initialSeekPending) this.hasFirstFrame = true;
       this.update();
       this.focusSkipMarkerIfReady();
+      // Reopening for a track change must retain a deliberately paused title.
+      // LG still needs Play to decode its initial/resume frame before pausing.
+      if (this.pauseAfterOpen && !this.initialSeekPending) {
+        this.pauseAfterOpen = false;
+        this.video.pause();
+        this.update();
+        return;
+      }
       if(!this.initialSeekPending) this.showBuffering(false);
       this.report('playing');
       this.track('start');
@@ -172,7 +181,7 @@ export class Player {
       }
     });
     this.seekBar.addEventListener('pointermove', event => {
-      if (!this.session || !this.timelineDuration()) return;
+      if (!this.session || !this.timelineDuration() || this.remoteSeeking || this.scrubbing) return;
       const bounds = this.seekBar.getBoundingClientRect();
       const fraction = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
       this.renderSeekPreview(fraction * this.timelineDuration());
@@ -198,7 +207,7 @@ export class Player {
     for (const kind of ['audio', 'subtitle']) {
       root.querySelector('[data-track="' + kind + '"]').onchange = event => {
         const id = Number(event.target.value);
-        const track = (this.session?.[kind === 'audio' ? 'audio' : 'subtitles'] || [])
+        const track = ((this.session || this.trackCatalog)?.[kind === 'audio' ? 'audio' : 'subtitles'] || [])
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
@@ -222,6 +231,7 @@ export class Player {
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.session) {
+        this.openIntentPlaying = false; this.pauseAfterOpen = true;
         this.clearResumeAfterSeek(); this.seekWasPlaying = false;
         this.cancelRemoteSeek(); this.video.pause();
       }
@@ -420,7 +430,8 @@ export class Player {
   }
   subtitleSyncStorageKey() {
     const id = this.item?.ratingKey || this.item?.id || this.item?.key;
-    return id ? 'plezy.webos.subtitleSync.' + String(id) : null;
+    return id && this.api?.server
+      ? 'plezy.webos.subtitleSync.' + catalogScope(this.api.server) + '.' + String(id) : null;
   }
   loadSubtitleSyncOffset() {
     this.subtitleSyncOffsetMs = 0;
@@ -704,7 +715,8 @@ export class Player {
     this.root.querySelector('[data-action="' + (this.openSheetAction || 'options') + '"]').focus();
     this.reveal();
   }
-  async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null) {
+  async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null, playing = true) {
+    this.openIntentPlaying = playing;
     const tracking = preserveTracking ? this.playbackTracking : null;
     this.closing = false;
     const cleanup = this.release(false, preserveTracking);
@@ -713,6 +725,7 @@ export class Player {
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
     this.loadSubtitleSyncOffset();
+    this.pauseAfterOpen = !this.openIntentPlaying;
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
@@ -742,6 +755,7 @@ export class Player {
       session = await api.playback(item, {...options, skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
+      this.trackCatalog = session;
       this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;
@@ -925,7 +939,9 @@ export class Player {
     if (session) this.report('stopped');
     // Tracking belongs to the viewing, not a particular decoder session. A
     // failed/replaced decoder must still finish the started Simkl viewing.
-    if (!preserveTracking) { this.track('stop', ended); this.playbackTracking = null; }
+    if (!preserveTracking) {
+      this.track('stop', ended); this.playbackTracking = null; this.trackCatalog = null;
+    }
     this.clearSkipMarker(); this.hasFirstFrame = false;
     this.skippedMarker = null;
     this.session = null; this.pendingStart = 0;
@@ -971,10 +987,17 @@ export class Player {
         trackSheetFocus = {kind:focused.dataset.trackKind, id:focused.dataset.trackId};
       else trackSheetFocus = {kind:'audio', id:this.root.querySelector('[data-track="audio"]').value};
     }
-    const options = {...this.options, ...changes, start: changes.start ?? this.position()};
+    const playing = this.session ? this.resumeAfterSeekTarget != null ||
+      (this.video.error ? this.openIntentPlaying !== false : !this.video.paused)
+      : this.openIntentPlaying !== false;
+    const position = this.session ? this.position() : this.options.start || this.lastPosition || 0;
+    const options = {...this.options, ...changes, start: changes.start ?? position};
     // Empty audio select means the server default, not stream zero.
     if (changes.audio === 0 && this.root.querySelector('[data-track="audio"]').value === '') delete options.audio;
-    return this.open(this.api, this.item, options, true, trackSheetFocus);
+    // Publish the combined choice before cleanup awaits network reporting.
+    // Another selection while the sheet stays open must build on this one.
+    this.options = options;
+    return this.open(this.api, this.item, options, true, trackSheetFocus, playing);
   }
   async subtitleFailed(error, session) {
     if (!this.session || this.session !== session || this.recovering) return;
@@ -999,6 +1022,8 @@ export class Player {
   toggle() {
     if (!this.session) return;
     const pause = this.resumeAfterSeekTarget != null || !this.video.paused;
+    this.openIntentPlaying = !pause;
+    this.pauseAfterOpen = false;
     this.clearResumeAfterSeek();
     this.seekWasPlaying = false;
     this.cancelRemoteSeek();
@@ -1033,7 +1058,7 @@ export class Player {
       const bytes = await this.api.scrubPreview(session, controller.signal);
       if (generation !== this.generation || this.session !== session) return;
       this.previewFrames = parseBif(bytes);
-      if (!this.seekTooltip.hidden) this.renderSeekPreview(this.seekPreview);
+      if (!this.seekTooltip.hidden) this.renderSeekPreview(this.seekTooltipTime ?? this.seekPreview);
     } catch (_) { /* Some Plex servers do not provide BIF indexes. */ }
   }
   renderSeekPreview(seconds) {
@@ -1056,7 +1081,7 @@ export class Player {
       0, Math.max(0, track.clientWidth - width)) + 'px';
     this.seekTooltip.querySelector('span').textContent = time(seconds);
     this.seekTooltip.hidden = false;
-    this.seekPreview = seconds;
+    this.seekTooltipTime = seconds;
   }
   releaseSeekFrameUrl() {
     if (this.seekFrameUrl) URL.revokeObjectURL(this.seekFrameUrl);
@@ -1391,9 +1416,11 @@ export class Player {
       if (code === 412 || code === 34) this.seekChapter(false);
       else if (code === 417 || code === 33) this.seekChapter(true);
       else if (code === 415) {
+        this.openIntentPlaying = true; this.pauseAfterOpen = false;
         this.clearResumeAfterSeek(); this.cancelRemoteSeek();
         this.video.play().catch(() => this.failed());
       } else if (code === 19) {
+        this.openIntentPlaying = false; this.pauseAfterOpen = true;
         this.clearResumeAfterSeek();
         // Cancel preview without replaying its pre-preview play intent.
         this.seekWasPlaying = false; this.cancelRemoteSeek(); this.video.pause();

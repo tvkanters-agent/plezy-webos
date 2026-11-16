@@ -18,6 +18,8 @@ Reviewed master from 6dcec85002c06ae721d8c74368f4bb89ff5671bc through 8aba9b9aa4
 12. In-place season/show watched updates patch only the parent; visible child watched/progress badges stay stale.
 13. Async play metadata loading has no launch generation; two requests on one route can complete in reverse order.
 
+14. Pointer hover reused seekPreview for its tooltip, overwriting a pending D-pad confirmation target while leaving the slider readout unchanged.
+
 ## Validation limits
 
 No local execution runtime or physical LG TV is available in this session. Branch GitHub Actions runs unit, Chromium bundle compatibility, browser tests and IPK packaging. Decoder event-order simulations are regression coverage, not a claim of LG hardware verification.
