@@ -549,7 +549,7 @@ export class Player {
     slider.focus();
   }
   applySubtitleSyncOffset() {
-    this.subtitleOverlay.update(this.subtitleSyncOffsetMs);
+    this.subtitleOverlay?.update(this.subtitleSyncOffsetMs);
     if (!this.video?.textTracks || !this.subtitleCueTimes) return;
     const offset = this.subtitleSyncOffsetMs / 1000;
     for (const track of Array.from(this.video.textTracks)) {
@@ -905,8 +905,8 @@ export class Player {
     this.syncHoldFired = false;
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
-    this.subtitleOverlay.clear();
-    this.root.classList.remove('subtitle-lift');
+    this.subtitleOverlay?.clear();
+    this.root?.classList?.remove('subtitle-lift');
     if (this.previewAbort) this.previewAbort.abort();
     this.previewAbort = null;
     this.previewFrames = null;
