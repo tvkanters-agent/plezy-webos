@@ -1,11 +1,11 @@
 # webOS changelog
 
-## 1.8.10 — Reliable seeking and control-bar timeout
+## 1.9.0 — Subtitle synchronization
 
-- Resume remote seeks only after the webOS decoder has completed the requested seek, both when confirming a seek and when moving focus away from the timeline.
-- Restore the five-second control-bar auto-hide even when playback has restored focus to a transport button; active seeking and open sheets still keep controls visible.
-- Add browser regressions for delayed seek completion, playback resumption and focused-control auto-hide.
-
+- Add a subtitle timing adjustment control to playback settings, covering offsets from −60 to +60 seconds in 50 ms increments.
+- Show the current offset, support reset, and retain each media item's chosen offset between playback sessions.
+- Apply the offset to native WebVTT/TextTrack cues without accumulating repeated adjustments.
+- Add browser regression coverage for both offset extremes and reset behavior.
 
 ## 1.8.9 — Keep episode details mounted after watched changes
 
