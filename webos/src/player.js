@@ -25,6 +25,8 @@ export class Player {
     this.previewAbort = null;
     this.skipControlsHeight = -1;
     this.sheet = root.querySelector('.player-sheet');
+    this.subtitleSyncOffsetMs = 0;
+    this.subtitleCueTimes = new WeakMap();
     this.status = root.querySelector('.player-status');
     this.buffering = root.querySelector('.player-buffering');
     this.seeking = false;
@@ -52,8 +54,11 @@ export class Player {
     });
     this.video.addEventListener('timeupdate', () => {
       if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
+      this.applySubtitleSyncOffset();
       this.update();
     });
+    this.video.textTracks?.addEventListener?.('addtrack', () => this.applySubtitleSyncOffset());
+    this.video.addEventListener('loadedmetadata', () => this.applySubtitleSyncOffset());
     this.video.addEventListener('playing', () => {
       this.status.textContent = '';
       this.resume();
@@ -383,6 +388,51 @@ export class Player {
     if (!this.sheet.hidden && this.openSheetAction === 'chapter-options')
       this.openSheet('chapter-options'); // Refresh a chapter sheet opened before extras arrived.
   }
+  subtitleSyncStorageKey() {
+    const id = this.item?.ratingKey || this.item?.id || this.item?.key;
+    return id ? 'plezy.webos.subtitleSync.' + String(id) : null;
+  }
+  loadSubtitleSyncOffset() {
+    this.subtitleSyncOffsetMs = 0;
+    try {
+      const key = this.subtitleSyncStorageKey();
+      const value = key && Number(localStorage.getItem(key));
+      if (Number.isFinite(value)) this.subtitleSyncOffsetMs = clamp(Math.round(value / 50) * 50, -60000, 60000);
+    } catch (_) {}
+  }
+  setSubtitleSyncOffset(offsetMs) {
+    this.subtitleSyncOffsetMs = clamp(Math.round(Number(offsetMs) / 50) * 50, -60000, 60000);
+    try {
+      const key = this.subtitleSyncStorageKey();
+      if (key) {
+        if (this.subtitleSyncOffsetMs) localStorage.setItem(key, String(this.subtitleSyncOffsetMs));
+        else localStorage.removeItem(key);
+      }
+    } catch (_) {}
+    this.applySubtitleSyncOffset();
+  }
+  applySubtitleSyncOffset() {
+    if (!this.video?.textTracks || !this.subtitleCueTimes) return;
+    const offset = this.subtitleSyncOffsetMs / 1000;
+    for (const track of Array.from(this.video.textTracks)) {
+      let cues;
+      try { cues = track.cues; } catch (_) { continue; }
+      if (!cues) continue;
+      for (const cue of Array.from(cues)) {
+        let original = this.subtitleCueTimes.get(cue);
+        if (!original) {
+          original = {start: cue.startTime, end: cue.endTime};
+          this.subtitleCueTimes.set(cue, original);
+        }
+        try {
+          const start = original.start + offset;
+          const end = Math.max(start + 0.001, original.end + offset);
+          if (cue.startTime !== start) cue.startTime = start;
+          if (cue.endTime !== end) cue.endTime = end;
+        } catch (_) {}
+      }
+    }
+  }
   openSheet(action, preferredTrack = null) {
     const kind = {options:'settings', 'tracks-options':'tracks',
       'chapter-options':'chapter'}[action];
@@ -394,6 +444,31 @@ export class Player {
     list.classList.toggle('player-track-columns', kind === 'tracks');
     this.sheet.classList.toggle('sheet-tracks', kind === 'tracks');
     if (kind === 'settings') {
+      const sync = document.createElement('div');
+      sync.className = 'subtitle-sync-control';
+      const heading = document.createElement('div');
+      heading.className = 'subtitle-sync-heading';
+      const label = document.createElement('label');
+      label.htmlFor = 'subtitle-sync-offset';
+      label.textContent = 'Subtitle sync';
+      const value = document.createElement('output');
+      value.className = 'subtitle-sync-value';
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.id = 'subtitle-sync-offset';
+      slider.min = '-60000'; slider.max = '60000'; slider.step = '50';
+      slider.value = String(this.subtitleSyncOffsetMs);
+      slider.setAttribute('aria-label', 'Subtitle sync offset');
+      const reset = document.createElement('button');
+      reset.type = 'button'; reset.className = 'subtitle-sync-reset'; reset.textContent = 'Reset';
+      const renderValue = () => {
+        const seconds = Math.abs(this.subtitleSyncOffsetMs) / 1000;
+        value.textContent = (this.subtitleSyncOffsetMs > 0 ? '+' : this.subtitleSyncOffsetMs < 0 ? '−' : '') + seconds.toFixed(2) + ' s';
+      };
+      slider.oninput = () => { this.setSubtitleSyncOffset(Number(slider.value)); renderValue(); };
+      reset.onclick = () => { this.setSubtitleSyncOffset(0); slider.value = '0'; renderValue(); };
+      renderValue(); heading.append(label, value); sync.append(heading, slider, reset);
+      list.appendChild(sync);
       const quality = this.root.querySelector('[data-action="transcode"]');
       const button = document.createElement('button');
       button.textContent = quality.textContent;
@@ -501,6 +576,7 @@ export class Player {
     await cleanup;
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
+    this.loadSubtitleSyncOffset();
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
     this.playbackTracking = tracking || (this.tracker ? this.tracker.createPlayback(api, item) : null);
