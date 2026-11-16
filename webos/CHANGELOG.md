@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.9.3 — Match Plezy episode-row metadata
+
+- Use Plezy's normal-weight muted metadata text rather than relying on inherited button typography.
+- Give each episode metadata separator its own spaced bullet, matching Plezy's 6 logical pixels on either side at TV scale.
+- Restore the 6px vertical gap above metadata without the extra inline-text line box.
+- Add a real-browser layout check for episode-row metadata weight, separation, and vertical spacing.
+
 ## 1.9.2 — Plezy subtitle-sync focus and layout
 
 - Replace the incorrectly embedded subtitle slider with Plezy's compact top-centered sync bar, opened from a settings row.
