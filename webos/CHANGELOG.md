@@ -1,5 +1,12 @@
 # webOS changelog
 
+## 1.10.0 — Direct Play compatible Plex formats
+
+- Use the LG webOS 4.x codec/container capabilities instead of transcoding every MKV or HEVC file.
+- Direct Play supported H.264/HEVC MP4 and MKV sources, with compatible AAC/AC3/EAC3 audio and supported HD DTS/PCM audio.
+- Keep HLS for incompatible codecs, selected subtitles, different audio tracks and manual Compatible playback, with automatic fallback if the LG decoder rejects a direct stream.
+- Preserve native `mediaOption` resume and correct source MIME; add codec/profile/bitrate tests and browser fallback coverage.
+
 ## 1.9.2 — Plezy subtitle-sync focus and layout
 
 - Replace the incorrectly embedded subtitle slider with Plezy's compact top-centered sync bar, opened from a settings row.

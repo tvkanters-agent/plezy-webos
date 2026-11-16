@@ -141,6 +141,32 @@ simulate PalmServiceBridge explicitly. This is a transport adaptation, not an
 alternate catalog lookup or title-matching algorithm. LG TV installation, Luna
 permissions and live authenticated scores still require hardware verification.
 
+### Plex native-format Direct Play
+
+Desktop Plezy asks mpv to play the selected Plex part URL unchanged when the
+source is compatible; it does not turn every Matroska or HEVC file into HLS.
+LG's webOS 4.0 AV matrix supports H.264/HEVC in MP4 and Matroska, with AAC,
+AC3/EAC3 and additional audio formats for HD files. On webOS the part is now
+offered to the native video pipeline with the matching source MIME, retaining
+`mediaOption` for fast resume. The bounded resolution, bitrate, profile and
+audio checks are isolated in `src/plex-direct-play.js`. Reference:
+https://webostv.developer.lge.com/develop/specifications/video-audio-40 .
+
+Unlike mpv, the HTML5 player cannot reliably select arbitrary embedded audio
+and subtitle tracks. Explicit changes to a different audio stream and selected
+subtitles therefore retain the existing Plex HLS path. Selecting an audio
+stream that is already marked selected does not need to re-encode video.
+Unsupported codecs, TrueHD, Hi10P H.264 and out-of-profile bitrates also keep
+HLS; the user's Compatible playback action still forces HLS.
+
+LG's codec list covers TV decoding, not a guarantee that every remote MKV can
+be opened through the web app's `<video>` element. On native source/load failure,
+the existing `Player.failed()` restarts with HLS once while preserving the
+playback position and requested tracks. Desktop Chromium tests exercise the
+selection/fallback contracts, but only hardware tests can establish webOS 4.4
+MKV MIME acceptance, DRM/profile restrictions, seek latency and exact fallback
+event ordering.
+
 ### Resume at decoder open
 
 Native Plezy opens `Media(videoUrl, start: timing.mediaStart)` in
