@@ -517,6 +517,7 @@ export class Player {
     const value = document.createElement('output');
     value.className = 'subtitle-sync-value';
     let offset = initialOffset === null ? (Number(track.offset) || 0) : Number(initialOffset);
+    this.subtitleSyncOffset = offset;
     const render = () => {
       const sign = offset > 0 ? '+' : '';
       value.textContent = sign + (offset / 1000).toFixed(2) + ' s';
@@ -525,6 +526,7 @@ export class Player {
     };
     const apply = async next => {
       offset = Math.max(-60000, Math.min(60000, Math.round(next / 50) * 50));
+      this.subtitleSyncOffset = offset;
       render();
       minus.disabled = offset <= -60000;
       plus.disabled = offset >= 60000;
