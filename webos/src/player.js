@@ -1146,8 +1146,15 @@ export class Player {
       const direction = {37:'left',38:'up',39:'right',40:'down'}[code];
       if (direction) {
         event.preventDefault();
-        if (current.classList?.contains('sync-offset-slider') && (code === 37 || code === 39)) {
-          this.adjustSubtitleSync(code === 37 ? -1 : 1);
+        if (current.classList?.contains('sync-offset-slider')) {
+          if (code === 37 || code === 39) {
+            this.adjustSubtitleSync(code === 37 ? -1 : 1);
+          } else {
+            // The slider owns horizontal adjustment, so vertical D-pad keys
+            // provide explicit exits to the adjacent step buttons. Every
+            // control stays reachable even when the slider is at its centre.
+            this.sheet.querySelector(code === 38 ? '[data-sync="minus"]' : '[data-sync="plus"]').focus();
+          }
           return true;
         }
         // As in Plezy's FocusableSlider, horizontal arrows adjust the value

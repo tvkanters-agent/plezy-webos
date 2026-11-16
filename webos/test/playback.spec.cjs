@@ -888,6 +888,48 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
   await expect(page.getByRole('button',{name:'Playback settings'})).toBeFocused();
 });
 
+test('all subtitle-sync buttons are D-pad reachable without moving the slider value', async ({page}) => {
+  await setup(page);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+  const minus=page.getByRole('button',{name:'Decrease subtitle delay'});
+  const plus=page.getByRole('button',{name:'Increase subtitle delay'});
+  const reset=page.getByRole('button',{name:'Reset subtitle sync'});
+  const close=page.getByRole('button',{name:'Close subtitle sync'});
+  await expect(slider).toBeFocused();
+  await expect(slider).toHaveValue('0');
+  await page.keyboard.press('ArrowUp');
+  await expect(minus).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(slider).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(plus).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(reset).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(close).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(reset).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(plus).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(slider).toBeFocused();
+  await expect(slider).toHaveValue('0');
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
+
+  // The minus and plus buttons must be operable with OK as well as focusable.
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect(minus).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('-50ms');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(plus).toBeFocused();
+  await expect(page.locator('.sync-offset-value')).toHaveText('+0ms');
+});
+
 test('subtitle sync reaches both full-minute limits, updates live cues, and resets', async ({page}) => {
   await setup(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
