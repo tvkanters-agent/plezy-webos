@@ -783,7 +783,7 @@ export class Player {
       // pipeline BEFORE load/play. A later currentTime assignment buffers twice.
       const source = document.createElement('source');
       source.setAttribute('src', session.url);
-      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : 'video/mp4') +
+      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : (session.mimeType || 'video/mp4')) +
         ';mediaOption=' + encodeURIComponent(JSON.stringify({option: {
           transmission: {playTime: {start: this.initialSeekTarget * 1000}}
         }})));

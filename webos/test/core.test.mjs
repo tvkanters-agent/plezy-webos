@@ -69,9 +69,17 @@ test('Plex direct play and explicit compatible playback use distinct URLs',async
   assert.equal(hls.transcode,true);const url=new URL(hls.url);assert.match(url.pathname,/start.m3u8/);
   assert.equal(url.searchParams.get('directStream'),'0');assert.equal(url.searchParams.get('audioCodec'),'aac');assert.equal(url.searchParams.has('offset'),false);assert.equal(hls.start,12);
 });
-test('Plex rejects unsupported direct play and selects HLS for HEVC/MKV',async()=>{
-  const item=structuredClone(plexItem);item.raw.Media[0].container='mkv';item.raw.Media[0].videoCodec='hevc';
-  assert.equal((await new Plex(server,'device').playback(item)).transcode,true);
+test('Plex Direct Plays compatible HEVC/MKV but keeps HLS for unsupported audio',async()=>{
+  const item=structuredClone(plexItem);
+  item.raw.Media[0].container='mkv';item.raw.Media[0].videoCodec='hevc';
+  item.raw.Media[0].Part[0].key='/library/parts/2/file.mkv';
+  const direct=await new Plex(server,'device').playback(item);
+  assert.equal(direct.transcode,false);
+  assert.equal(direct.mimeType,'video/x-matroska');
+  item.raw.Media[0].audioCodec='truehd';
+  const hls=await new Plex(server,'device').playback(item);
+  assert.equal(hls.transcode,true);
+  assert.match(hls.url,/start\.m3u8/);
 });
 test('Plex subtitle off is stream id zero, not minus one',async()=>{
   let received;const restore=mock(async(url,options)=>{
