@@ -1,7 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
@@ -16,6 +16,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
+    if (subtitleResponse && url.pathname === '/subtitles.srt')
+      return route.fulfill({contentType:'text/plain',body:await subtitleResponse()});
     if (url.pathname.endsWith('/indexes/sd'))
       return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
         : route.fulfill({status:404,body:''});
@@ -1274,15 +1276,13 @@ test('explicit Pause during preview is not overridden by confirming or cancellin
 test('SRT uses the latest sync adjustment after a delayed subtitle download',async({page})=>{
   let finishDownload;
   const download=new Promise(resolve=>{finishDownload=resolve;});
-  await page.route('http://plex.test/subtitles.srt**',async route=>{
-    await download;
-    return route.fulfill({contentType:'text/plain',
-      body:'1\n00:00:00,000 --> 00:00:01,000\nFIRST CUE\n\n2\n00:00:10,000 --> 00:00:11,000\nOFFSET CUE\n'});
-  });
   await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
     Part:[{id:'part',key:'/video.webm',Stream:[
       {streamType:3,id:31,codec:'srt',key:'/subtitles.srt',selected:1}
-    ]}]}]});
+    ]}]}]},undefined,[],{},null,null,async()=>{
+      await download;
+      return '1\n00:00:00,000 --> 00:00:01,000\nFIRST CUE\n\n2\n00:00:10,000 --> 00:00:11,000\nOFFSET CUE\n';
+    });
   await page.locator('[data-action="pause"]').click();
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
