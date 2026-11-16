@@ -1094,10 +1094,6 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   const close=page.getByRole('button',{name:'Close subtitle sync'});
   await expect(slider).toBeFocused();
   await expect(slider).toHaveValue('0');
-  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
-    const screenshot=await page.locator('.sync-offset-bar').screenshot();
-    console.log('SYNC_SLIDER_QA_IMAGE:'+screenshot.toString('base64'));
-  }
   // Video decoders sometimes drop focus to the page body while a sheet is
   // open. A direction key must restore a reachable focused control.
   await page.evaluate(()=>document.activeElement.blur());
@@ -1120,10 +1116,6 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   await expect(plus).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(reset).toBeFocused();
-  if (process.env.PLEZY_SYNC_VISUAL_QA === '1') {
-    const screenshot=await page.locator('.sync-offset-bar').screenshot();
-    console.log('SYNC_RESET_QA_IMAGE:'+screenshot.toString('base64'));
-  }
   await page.keyboard.press('ArrowRight');
   await expect(close).toBeFocused();
   await page.keyboard.press('ArrowLeft');
