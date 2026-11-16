@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {deepStrictEqual, equal} from 'node:assert/strict';
-import {mediaSourceTracks} from '../src/api.js';
+import {mediaSourceTracks, Plex} from '../src/api.js';
 
 test('uses stream IDs and selected flags from the requested Plex media version', () => {
   const item={raw:{Media:[
@@ -32,4 +32,23 @@ test('uses Jellyfin media stream indices without conflating stream zero with Off
   equal(tracks.audio[0].id,0);
   equal(tracks.subtitles[0].id,0);
   equal(tracks.subtitles[0].selected,true);
+});
+
+test('writes a Plex external subtitle offset in milliseconds', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl, requestedOptions;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    requestedOptions = options;
+    return {ok:true};
+  };
+  try {
+    const plex = new Plex({url:'http://plex.test', token:'token'}, 'device');
+    await plex.setSubtitleOffset({key:'/library/streams/42.srt'}, -1250);
+    equal(requestedOptions.method, 'PUT');
+    equal(new URL(requestedUrl).pathname, '/library/streams/42.srt');
+    equal(new URL(requestedUrl).searchParams.get('offset'), '-1250');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
