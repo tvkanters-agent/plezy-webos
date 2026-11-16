@@ -1,5 +1,14 @@
 # webOS changelog
 
+## 1.11.0 — Local SRT/ASS subtitles and live sync
+
+- Render external Plex SRT subtitles using Media Captions and ASS/SSA with SubtitlesOctopus/libass.
+- Switching the selected subtitle file and changing the existing subtitle sync offset updates the active renderer; positive offset delays subtitles.
+- Lift SRT captions when transport controls appear, preserving authored ASS sign positions.
+- Keep v1.10.2's conservative Direct Play capability rules; an external SRT/ASS track does not by itself require transcoding video. Embedded and unsupported subtitles still use Plex HLS burn-in.
+- Include libass workers and Chromium 53 compatibility in the TV package.
+
+
 ## 1.10.2 — Restore reliable Plex playback
 
 - Revert the expanded HEVC/MKV native Direct Play selection from v1.10.0 after intermittent playback failures on LG webOS.

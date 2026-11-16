@@ -8,6 +8,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 await rm(path.join(root, 'dist'), {recursive: true, force: true});
 await mkdir(path.join(root, 'dist'), {recursive: true});
 await cp(path.join(root, 'public'), path.join(root, 'dist'), {recursive: true});
+// Bundle the local libass workers; TV playback must never depend on a CDN.
+await cp(path.join(root, 'node_modules/libass-wasm/dist/js'),
+  path.join(root, 'dist/libass'), {recursive: true});
 await cp(path.join(root, '../LICENSE'), path.join(root, 'dist/LICENSE.txt'));
 // Prepare LG's native loading image before packaging, not at TV startup.
 await generateSplash(root, path.join(root, 'dist/splash.png'));
