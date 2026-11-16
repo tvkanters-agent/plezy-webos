@@ -1,12 +1,19 @@
 # webOS changelog
 
-## 1.9.1 — Plezy subtitle-sync focus and layout
+## 1.9.2 — Plezy subtitle-sync focus and layout
 
 - Replace the incorrectly embedded subtitle slider with Plezy's compact top-centered sync bar, opened from a settings row.
 - Focus the slider immediately on LG remote activation. Arrow left/right adjust by 50 ms; Up/Down leave the slider for the −/+ buttons without changing its value; OK focuses Close. All buttons use reachable spatial focus, and Back returns to the player.
 - Match Plezy's ±10 s fine-control slider, ±60 s maximum via step buttons, and 1 s long-press acceleration.
 - Use Plezy's signed millisecond/second offset labels and white slider-thumb focus treatment.
 - Add browser tests for remote-key focus, visual geometry, long-press adjustment, minute limits, and cue resets.
+
+## 1.9.1 — Fix remote seek preview and Back dismissal
+
+- Left/Right now move only the timeline/BIF preview; the webOS decoder seeks and buffers only when OK commits the target.
+- Moving focus away or pressing Back cancels an unconfirmed seek instead of implicitly seeking. Resume the original playback state, including staying paused if already paused.
+- Prevent delayed decoder events and spurious focus/mouse events from reopening controls after Back; the next Back exits playback.
+- Cover repeat seek steps, confirmation, cancellation, late playback events, and paused playback in browser regressions.
 
 ## 1.9.0 — Subtitle synchronization
 
