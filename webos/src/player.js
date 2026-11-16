@@ -526,6 +526,7 @@ export class Player {
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.className = 'sync-offset-slider';
+    slider.tabIndex = 0; // Explicitly focusable in older LG webOS Chromium.
     slider.min = '-10000'; slider.max = '10000'; slider.step = '50';
     slider.setAttribute('aria-label', 'Subtitle sync offset');
     slider.addEventListener('input', () => this.setSubtitleSyncOffset(Number(slider.value)));
@@ -1238,8 +1239,12 @@ export class Player {
           const controls = Array.from(this.sheet.querySelectorAll(
             '.sync-offset-button, .sync-offset-slider'));
           const index = controls.indexOf(current);
-          const target = controls[clamp(index + (code === 39 ? 1 : -1), 0, controls.length - 1)];
-          if (index !== -1 && target) target.focus();
+          // Older decoders can steal focus during buffering. Restore the
+          // slider first so the D-pad can navigate again without pointer input.
+          const target = index < 0
+            ? this.sheet.querySelector('.sync-offset-slider')
+            : controls[clamp(index + (code === 39 ? 1 : -1), 0, controls.length - 1)];
+          if (target) target.focus();
         }
         return true;
       }

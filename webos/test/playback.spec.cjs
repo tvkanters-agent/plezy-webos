@@ -1043,6 +1043,11 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
   const close=page.getByRole('button',{name:'Close subtitle sync'});
   await expect(slider).toBeFocused();
   await expect(slider).toHaveValue('0');
+  // Video decoders sometimes drop focus to the page body while a sheet is
+  // open. A direction key must restore a reachable focused control.
+  await page.evaluate(()=>document.activeElement.blur());
+  await page.keyboard.press('ArrowRight');
+  await expect(slider).toBeFocused();
 
   // Icons must be actual SVGs. The previous ↺ character was a missing glyph
   // (an apparent checkbox) on the target LG's browser/font combination.
