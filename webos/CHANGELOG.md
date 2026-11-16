@@ -1,5 +1,11 @@
 # webOS changelog
 
+## 1.10.2 — Restore reliable Plex playback
+
+- Revert the expanded HEVC/MKV native Direct Play selection from v1.10.0 after intermittent playback failures on LG webOS.
+- Restore the conservative MP4/M4V/MOV H.264 Direct Play gate and use Plex HLS for other codecs/containers.
+- Keep the unrelated v1.10.1 seek-resume and subtitle-sync controls fixes.
+
 ## 1.10.1 — Reliable seek resume and TV subtitle sync focus
 
 - Match Plezy's preview behavior: remote seek movements update BIF/timeline only, without pausing the decoder or initiating a seek until OK.
