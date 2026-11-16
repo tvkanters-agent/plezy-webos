@@ -1,12 +1,21 @@
 # webOS changelog
 
-## 1.10.3 — Seek playback recovery and Reset alignment
+## 1.11.1 — Seek playback recovery and Reset alignment
 
 - Keep the automatic-resume request active after confirming a seek until the decoder clock actually advances. LG can report an unpaused state without decoding further frames.
 - Invoke Play within the confirming OK interaction when the decoder has paused, retry stalled Play promises, and recover a frozen-but-unpaused decoder with a bounded pause/play transition after buffering completes.
 - Preserve deliberate Pause, Back dismissal, normal seek preview behavior, and focus when playback recovers.
 - Redraw the subtitle-sync Reset arrow with centered SVG geometry and explicit centering so the control no longer sits off-axis on older webOS Chromium.
 - Add regression coverage for frozen decoder clocks, unresolved Play promises, and Reset icon geometry.
+
+## 1.11.0 — Local SRT/ASS subtitles and live sync
+
+- Render external Plex SRT subtitles using Media Captions and ASS/SSA with SubtitlesOctopus/libass.
+- Switching the selected subtitle file and changing the existing subtitle sync offset updates the active renderer; positive offset delays subtitles.
+- Lift SRT captions when transport controls appear, preserving authored ASS sign positions.
+- Keep v1.10.2's conservative Direct Play capability rules; an external SRT/ASS track does not by itself require transcoding video. Embedded and unsupported subtitles still use Plex HLS burn-in.
+- Include libass workers and Chromium 53 compatibility in the TV package.
+
 
 ## 1.10.2 — Restore reliable Plex playback
 

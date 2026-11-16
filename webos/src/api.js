@@ -76,6 +76,21 @@ export function plexTrackLabel(stream, kind, index = 0) {
 // The same source stream catalog backs the pre-play episode picker and the
 // video player's TrackSheet equivalent. A season listing can omit Part.Stream;
 // callers must fetch full episode metadata before deciding no tracks exist.
+// Only external Plex text streams can be downloaded and rendered separately.
+// Embedded subtitles remain on the server burn-in path.
+export function plexExternalSubtitle(media, options = {}) {
+  const subtitles = (media?.Part?.[0]?.Stream || [])
+    .filter(stream => Number(stream.streamType) === 3);
+  const stream = options.subtitle === undefined
+    ? subtitles.find(entry => entry.selected === true || entry.selected === 1 || entry.selected === '1')
+    : String(options.subtitle) === '-1' ? null
+    : subtitles.find(entry => String(entry.id) === String(options.subtitle));
+  if (!stream?.key) return null;
+  const codec = String(stream.codec || '').toLowerCase();
+  const format = ['srt', 'subrip'].includes(codec) ? 'srt'
+    : ['ass', 'ssa'].includes(codec) ? 'ass' : null;
+  return format ? {id:stream.id, format, key:stream.key} : null;
+}
 export function mediaSourceTracks(item, mediaIndex = 0) {
   const raw = item?.raw || {};
   const plexMedia = (raw.Media || [])[mediaIndex];
@@ -431,9 +446,19 @@ export class Plex {
     if (!part) throw new Error('This version has no playable media.');
     if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
     const sessionId = id();
-    const transcode = options.transcode || !['mp4', 'm4v', 'mov'].includes(media.container)
+    const subtitle = !options.burnSubtitles && plexExternalSubtitle(media, options);
+    const hasSubtitle = options.subtitle === undefined
+      ? (part.Stream || []).some(stream => Number(stream.streamType) === 3 &&
+          (stream.selected === true || stream.selected === 1 || stream.selected === '1'))
+      : String(options.subtitle) !== '-1';
+    // Retain v1.10.2's conservative video codec/container decision. An
+    // independently rendered text subtitle is not a reason to transcode video.
+    const transcode = options.transcode || options.burnSubtitles ||
+      !['mp4', 'm4v', 'mov'].includes(media.container)
       || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
-      || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
+      || options.audio !== undefined || (hasSubtitle && !subtitle);
+    const subtitleAsset = subtitle ? {id:subtitle.id, format:subtitle.format,
+      url:this.url(subtitle.key)} : null;
     // Conservative direct play, with user-accessible HLS fallback for TV-specific limits.
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
@@ -441,7 +466,8 @@ export class Plex {
       // Match Plezy's full-title HLS timeline. The player supplies the
       // resume point to the decoder at open, not to the transcoder URL.
       session: sessionId,
-      subtitleSize: 100, subtitles: 'burn',
+      subtitleSize: 100, subtitles: subtitleAsset ? 'none' : 'burn',
+      ...(subtitleAsset ? {subtitleStreamID:0} : {}),
       'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
@@ -467,7 +493,7 @@ export class Plex {
       options.skipSettings);
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, item,
+      sessionId, sourceId: String(part.id), transcode, item, subtitleAsset,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
       extrasPromise,

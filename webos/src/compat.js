@@ -40,6 +40,33 @@
   if (typeof DocumentFragment !== 'undefined' && !DocumentFragment.prototype.append) DocumentFragment.prototype.append = append;
   if (typeof Document !== 'undefined' && !Document.prototype.append) Document.prototype.append = append;
 
+  // Media Captions observes overlay size. Chromium 53 predates ResizeObserver,
+  // but the TV player changes size on window resize/fullscreen only.
+  if (typeof window.ResizeObserver === 'undefined') {
+    window.ResizeObserver = function (callback) {
+      var observed = null;
+      var resize = function () {
+        if (observed) callback([{target:observed,
+          contentRect:observed.getBoundingClientRect()}]);
+      };
+      this.observe = function (element) {
+        observed = element;
+        window.addEventListener('resize', resize);
+        setTimeout(resize, 0);
+      };
+      this.unobserve = function (element) {
+        if (observed === element) {
+          observed = null;
+          window.removeEventListener('resize', resize);
+        }
+      };
+      this.disconnect = function () {
+        observed = null;
+        window.removeEventListener('resize', resize);
+      };
+    };
+  }
+
   // Chromium 53 lacks AbortController and fetch cancellation. Preserve the
   // same signal contract: aborting rejects the caller immediately. The native
   // network request may finish independently, but its result is ignored.

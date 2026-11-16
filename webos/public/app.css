@@ -860,3 +860,39 @@ main.has-alpha-bar { padding-right:60px; }
   .player-sheet.sheet-sync .sync-offset-value { -webkit-flex-basis:72px; flex-basis:72px; font-size:13px; }
   .player-sheet.sheet-sync .sync-offset-icon { display:none; }
 }
+
+/* Media Captions uses part attributes and CSS variables; avoid modern :where()
+   and numeric calc() multiplication unsupported by the C8's Chromium 53. */
+#player .player-captions {
+  --overlay-padding: 1%;
+  --cue-color: #fff;
+  --cue-bg-color: rgba(0,0,0,.72);
+  --cue-font-size: 40px;
+  --cue-line-height: 1.2;
+  --cue-padding-x: 12px;
+  --cue-padding-y: 4px;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 2; margin: 2%; font-size: 40px; font-family: Arial, sans-serif;
+  pointer-events: none; text-align: center; word-break: break-word;
+  transition: transform .18s ease;
+}
+#player.subtitle-lift .player-captions { transform: translateY(-135px); }
+#player .player-captions [part="cue-display"] {
+  position: absolute; direction: ltr; overflow: visible;
+  top: var(--cue-top); left: var(--cue-left); right: var(--cue-right); bottom: var(--cue-bottom);
+  width: var(--cue-width, auto); height: var(--cue-height, auto);
+  transform: var(--cue-transform); text-align: var(--cue-text-align);
+  writing-mode: var(--cue-writing-mode, unset);
+  white-space: pre-line; unicode-bidi: plaintext; box-sizing: border-box;
+}
+#player .player-captions [part="cue"] {
+  display: inline-block; padding: var(--cue-padding-y) var(--cue-padding-x);
+  line-height: var(--cue-line-height); background: var(--cue-bg-color);
+  color: var(--cue-color); white-space: var(--cue-white-space, pre-wrap);
+  box-shadow: var(--cue-box-shadow); outline: var(--cue-outline);
+  text-shadow: var(--cue-text-shadow); box-sizing: border-box;
+}
+/* SubtitlesOctopus positions signs in native ASS coordinates. Keep its canvas
+   over the video, but below Plezy's controls, without moving signs on reveal. */
+#player .libassjs-canvas-parent { z-index: 2 !important; pointer-events: none; }
+#player .controls { z-index: 5; }

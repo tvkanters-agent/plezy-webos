@@ -19,6 +19,7 @@
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <section id="player" aria-label="Video player" hidden>
     <video tabindex="-1" playsinline></video>
+    <div class="player-captions" aria-hidden="true"></div>
     <div class="player-buffering" role="status" aria-label="Buffering" aria-busy="true" hidden><div class="player-spinner" aria-hidden="true"></div></div>
     <div class="player-status" role="alert"></div>
     <!-- Translated from upstream VideoControlsHeader, VideoTimelineBar and
@@ -121,6 +122,7 @@
       }, 4000);
     })();
   </script>
+  <script src="libass/subtitles-octopus.js" defer></script>
   <script src="app.js" defer onerror="document.getElementById('main').textContent = 'Plezy could not load its application script. Reinstall the package.'"></script>
 </body>
 </html>
