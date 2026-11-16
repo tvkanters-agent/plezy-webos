@@ -1,3 +1,8 @@
+## 1.11.2
+
+- Fix automatic resume across every seek entry point and slow LG buffering; preserve explicit Pause intent.
+- Add full 15–16 November regression review and decoder event-order coverage.
+
 # webOS changelog
 
 ## 1.11.1 — Seek playback recovery and Reset alignment
