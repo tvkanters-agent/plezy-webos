@@ -56,6 +56,27 @@ test('pending native recovery cannot hide HLS errors or duplicate fallback for i
   assert.equal(opens,1,'never loop through another HLS restart');
   finish();await pending;assert.equal(player.recoveringSession,null);
 });
+test('local subtitle failures retry Plex burn-in only once, without toasts or stale restarts',async t=>{
+  t.mock.method(console,'warn',()=>{});
+  let finish;
+  const first={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'},subtitleBurnedIn:false};
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:first,notify(){throw new Error('A subtitle fallback must be silent');},
+    reopen(changes){
+      assert.deepEqual(changes,{burnSubtitles:true});
+      return new Promise(resolve=>{finish=resolve;});
+    }
+  });
+  const pending=player.subtitleFailed(new Error('MKV reader and Plex extraction failed'),first);
+  await player.subtitleFailed(new Error('Late worker error'),first);
+  assert.equal(typeof finish,'function','only one burn-in retry was started');
+  const next={subtitleAsset:null,subtitleBurnedIn:true};
+  player.session=next;
+  await player.subtitleFailed(new Error('stale source error'),first);
+  await player.subtitleFailed(new Error('new session error'),next);
+  finish();await pending;
+  assert.equal(player.recoveringSession,null);
+});
 test('Matroska source passes MIME and native resume; obsolete source errors are ignored',()=>{
   const oldWindow=globalThis.window,oldDocument=globalThis.document;
   const sources=[];globalThis.window={PalmSystem:{}};

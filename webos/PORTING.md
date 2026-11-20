@@ -625,8 +625,11 @@ Media Captions renders text from embedded SRT, including a Plex ASS wrapper
 when supplied. SubtitlesOctopus receives an ASS/SSA payload intact so the
 viewer's delay also applies to the title's styled signs and dialogue. If
 Plex supplies a plain text conversion instead, the client renders that text.
-If the request fails or Plex only has image subtitles, video can still play
-with Plex burn-in. The sync row explains that timing is unavailable then.
+If extraction, subtitle parsing or rendering fails (including a silent ASS
+worker startup failure), retry once with Plex burn-in without an on-screen
+warning. A burn-in encodes the selected subtitle into the video pixels, so
+the subtitle sync row appears grey, stays remote-focusable, and displays the
+requested toast when selected. A new track selection can retry local captions.
 
 Browser tests use the real renderers with Plex-shaped HTTP responses, cover
 subtitle arrival after video starts, and check what is drawn before and after
@@ -665,8 +668,10 @@ The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
 and cancels a full-file response at the header boundary. If the decoder
 fails during extraction, retry the same video route once using only the
-separate Plex subtitle endpoint. When both subtitle sources fail, keep the
-video open and report the subtitle as unavailable, following Plezy's
-`MpvSidecarOpenGuard` behavior for failed sidecars. Source changes abort the
-old range request. The browser tests exercise ordering and failure handling;
-they do not emulate the TV's network or decoder.
+separate Plex subtitle endpoint. When both subtitle sources fail, restart HLS
+once with the selected track burned in, as the HTML decoder cannot expose the
+native MPV subtitle track. The retry retains the playback position and explicit
+track choice. This LG-only fallback is silent on screen; it does not
+claim to recover a failed Plex video burn. Source changes abort the old range
+request. The browser tests exercise ordering and failure handling; they do not
+emulate the TV's network or decoder.
