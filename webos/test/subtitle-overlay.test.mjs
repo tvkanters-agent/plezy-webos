@@ -106,6 +106,27 @@ test('ASS sync restores video time, paused state and rate immediately after seek
   overlay.dispose();
 });
 
+test('ASS video seeking invalidates stale pixels before a paused decoder repaints',()=>{
+  const callbacks=new Map();
+  const video={currentTime:1,paused:true,seeking:false,ended:false,playbackRate:1,
+    addEventListener(name,listener){callbacks.set(name,listener);},
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const clears=[];
+  overlay.kind='ass';
+  overlay.renderer={canvas:{width:640,height:360},
+    ctx:{clearRect(...values){clears.push(values);}},
+    setIsPaused(){},setRate(){},dispose(){}};
+  callbacks.get('timeupdate')();
+  assert.equal(clears.length,0,'ordinary playback must not blank ASS');
+  video.currentTime=6.5;
+  video.seeking=true;
+  callbacks.get('seeking')();
+  assert.deepEqual(clears,[[0,0,640,360]],
+    'seek immediately discards pixels from the previous subtitle timestamp');
+  overlay.dispose();
+});
+
 test('ASS renderer survives repeated playback of an identical track and font set',async t=>{
   const original=globalThis.window;
   const instances=[];

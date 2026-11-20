@@ -1920,6 +1920,19 @@ test('animated ASS sign layers paint together between video time updates', async
   await page.addInitScript(() => {
     window.WebAssembly = undefined;
     document.addEventListener('timeupdate', event => event.stopImmediatePropagation(), true);
+    // Date.now() on an older TV can give two different libass frames the
+    // same millisecond timestamp. Force that collision in every browser run:
+    // animations and paused-seek clears must still reach the canvas.
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(...args) {
+        super(...args);
+        this.addEventListener('message', event => {
+          if (event.data?.target === 'canvas' && event.data.op === 'renderCanvas')
+            event.data.time = 1;
+        });
+      }
+    };
   });
   const script = [
     '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 320', 'PlayResY: 180',
@@ -2069,10 +2082,23 @@ test('reopening ASS and switching episodes reuses the compiled worker and same-s
   await page.addInitScript(()=>{
     window.WebAssembly=undefined;
     window.assWorkerCreations=0;
+    window.assDebugMessages=[];
     const OriginalWorker=window.Worker;
     window.Worker=function(url) {
       window.assWorkerCreations++;
-      return new OriginalWorker(url);
+      const worker=new OriginalWorker(url);
+      window.assDebugWorker=worker;
+      const send=worker.postMessage.bind(worker);
+      worker.postMessage=function(data,...rest){
+        if (['video','set-track','create-events','plezy-force-frame'].includes(data?.target)) {
+          window.assDebugMessages.push({target:data.target,currentTime:data.currentTime,
+            paused:data.isPaused,events:data.events?.length,
+            script:data.content?.match(/Dialogue:/g)?.length});
+          if(window.assDebugMessages.length>40)window.assDebugMessages.shift();
+        }
+        return send(data,...rest);
+      };
+      return worker;
     };
     window.Worker.prototype=OriginalWorker.prototype;
   });
@@ -2133,7 +2159,32 @@ test('reopening ASS and switching episodes reuses the compiled worker and same-s
   await paint();
   await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
   await page.locator('video').evaluate(video=>{video.currentTime=6.5;});
-  await expect.poll(hasGlyph).toBe(false);
+  try {
+    await expect.poll(hasGlyph).toBe(false);
+  } catch (error) {
+    const snapshot=await page.evaluate(()=>{
+      const video=document.querySelector('#player video');
+      return {currentTime:video?.currentTime,duration:video?.duration,
+        paused:video?.paused,seeking:video?.seeking,readyState:video?.readyState,
+        framesCreated:window.assWorkerCreations};
+    });
+    const events=await page.evaluate(()=>new Promise(resolve=>{
+      const worker=window.assDebugWorker;
+      if(!worker)return resolve(null);
+      const timer=setTimeout(()=>{worker.removeEventListener('message',onMessage);resolve('timeout');},3000);
+      function onMessage(event){
+        if(event.data?.target!=='get-events')return;
+        clearTimeout(timer);worker.removeEventListener('message',onMessage);
+        resolve(event.data.events?.map(e=>[e.Start,e.Duration,e.Text?.slice(0,50)]));
+      }
+      worker.addEventListener('message',onMessage);
+      worker.postMessage({target:'get-events'});
+    }));
+    console.error('ASS GAP FAIL SNAPSHOT:',JSON.stringify(snapshot));
+    console.error('ASS GAP EVENTS:',JSON.stringify(events));
+    console.error('ASS GAP MESSAGES:',JSON.stringify(await page.evaluate(()=>window.assDebugMessages)));
+    throw error;
+  }
   await page.locator('video').evaluate(video=>{video.currentTime=7.5;});
   await expect.poll(hasGlyph).toBe(true);
   expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);

@@ -82,6 +82,11 @@ export class AssEventAppender {
     const lines = this.pending.splice(0, 128);
     const events = lines.map(line => parseAssEvent(line, this.styles, ++this.readOrder));
     this.renderer.worker.postMessage({target:'create-events', events});
+    // Changes to a paused track can leave the previous frame painted: libass
+    // does not always report a blend change for a newly empty cue window.
+    // Force the redraw *after* the new events are installed in worker order.
+    if (this.renderer.video.paused || this.renderer.video.seeking)
+      this.renderer.worker.postMessage({target:'plezy-force-frame'});
     if (this.pending.length) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null;

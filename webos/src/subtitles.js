@@ -195,6 +195,12 @@ export class SubtitleOverlay {
     listen('playing', () => { this.assWaiting = false; this.syncAssClock(); this.startAssClock(); this.startClock(); });
     for (const event of ['pause', 'ended', 'seeking']) {
       listen(event, () => {
+        // While the decoder jumps to a different timestamp, the old ASS
+        // canvas is no longer valid. Clear it immediately rather than
+        // leaving the last subtitle visible if libass has no new cue to
+        // paint (especially during a paused seek).
+        if (event === 'seeking' && this.kind === 'ass' && this.renderer?.ctx && this.renderer.canvas)
+          this.renderer.ctx.clearRect(0,0,this.renderer.canvas.width,this.renderer.canvas.height);
         this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
         if (event === 'ended') this.stopAssClock();
         else this.startAssClock();
@@ -447,7 +453,11 @@ export class SubtitleOverlay {
   async renderStyledAss(asset, content, generation) {
     if (this.kind === 'ass') {
       if (this.assAppender) this.assAppender.remember(content);
-      else this.renderer.setTrack(content);
+      else {
+        this.renderer.setTrack(content);
+        if (this.video.paused && this.renderer._plezyFullyReady)
+          this.renderer.worker?.postMessage({target:'plezy-force-frame'});
+      }
       this.renderer._plezyTrackContent = content;
       return;
     }
@@ -462,6 +472,8 @@ export class SubtitleOverlay {
       const time = subtitleTime(this.video.currentTime, this.offsetMs);
       renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting), time);
       renderer.setRate(this.video.playbackRate || 1);
+      if (this.video.paused || this.video.seeking)
+        renderer.worker?.postMessage({target:'plezy-force-frame'});
     };
     const onError = error => {
       if (renderer) renderer.debug = true;
@@ -478,10 +490,22 @@ export class SubtitleOverlay {
       renderer.onErrorEvent = onError;
       renderer.debug = this.preferences()?.diagnosticsEnabled === true;
       renderer.timeOffset = -this.offsetMs / 1000;
-      if (renderer.canvasParent) renderer.canvasParent.style.display = '';
+      // A warm libass worker retains the last painted canvas. It is NOT the
+      // new episode's first frame. Keep that canvas hidden until libass has
+      // rendered a nonempty cue for this session, otherwise a stale frame can
+      // masquerade as successful startup and remain visible after a paused seek.
+      if (renderer.canvasParent) renderer.canvasParent.style.display = 'none';
+      if (renderer.ctx && renderer.canvas)
+        renderer.ctx.clearRect(0,0,renderer.canvas.width,renderer.canvas.height);
       renderer.plezyResumeVideo();
       renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
-      if (renderer._plezyTrackContent !== content) renderer.setTrack(content);
+      if (renderer._plezyTrackContent !== content) {
+        renderer.setTrack(content);
+        // A warm worker can retain its previous ASS bitmap even when the
+        // newly installed track has no cue at the current paused position.
+        if (this.video.paused)
+          renderer.worker?.postMessage({target:'plezy-force-frame'});
+      }
       ready = true;
     } else {
       parked?.dispose();
@@ -565,6 +589,7 @@ export class SubtitleOverlay {
         for (let i = 3; i < pixels.length; i += 4) {
           if (!pixels[i]) continue;
           this.assPainted = true;
+          if (renderer.canvasParent) renderer.canvasParent.style.display = '';
           clearTimeout(this.dialogueTimer);
           renderer.worker.removeEventListener('message', onFrame);
           if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
