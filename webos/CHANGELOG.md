@@ -1,3 +1,8 @@
+## 1.14.2
+
+- Start MKV subtitle reads after the video decoder opens. Keep video playing if the selected embedded subtitle is unavailable.
+- Cancel MKV range transfers on webOS and retry playback once with the separate Plex subtitle endpoint if the decoder fails during a range read.
+
 ## 1.14.1
 
 - Render indexed MKV subtitles near the playback position as they arrive. Read compressed ASS/SRT and cue indexes without relative block offsets.

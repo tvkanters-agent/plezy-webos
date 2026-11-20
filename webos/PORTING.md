@@ -637,8 +637,8 @@ The reader requires partial HTTP responses, bounds total bytes and concurrency,
 and aborts on track changes or player close. It retains full-title timestamps
 and ASS script styles. ASS uses the bundled fallback font.
 
-Plex extraction and burn-in remain fallbacks when byte ranges, the selected
-subtitle index, or the container encoding cannot be used. The committed test
+Plex extraction remains the fallback when byte ranges, the selected subtitle
+index, or the container encoding cannot be used. The committed test
 fixture was muxed with FFmpeg from synthetic black video, a sine wave, and
 known SRT and styled ASS cues. Tests compare decoded cue times and track IDs,
 then render the actual MKV subtitle bytes in the browser while the Plex
@@ -652,3 +652,13 @@ and styles. It reads and renders indexed clusters nearest the resume position
 first, then adds the rest to the same overlay. The MKV range deadline measures
 inactivity and the Plex subtitle endpoint has its own deadline. This lets
 longer subtitle tracks load while playback and the timing control stay active.
+
+The webOS range reader now waits for playback to advance or for a requested
+paused frame, including when resuming. It sends one abortable XHR at a time
+and cancels a full-file response at the header boundary. If the decoder
+fails during extraction, retry the same video route once using only the
+separate Plex subtitle endpoint. When both subtitle sources fail, keep the
+video open and report the subtitle as unavailable, following Plezy's
+`MpvSidecarOpenGuard` behavior for failed sidecars. Source changes abort the
+old range request. The browser tests exercise ordering and failure handling;
+they do not emulate the TV's network or decoder.
