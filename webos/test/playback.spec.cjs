@@ -1659,7 +1659,7 @@ test('SRT playback applies saved Plezy text and border styling, including letter
   await page.locator('video').evaluate(video=>{video.pause();video.currentTime=10.5;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('STYLE CUE');
-  await page.screenshot({path:testInfo.outputPath('srt-border-composited.png')});
+  await page.screenshot({path:testInfo.outputPath('srt-vector-border.png')});
   await expect.poll(()=>captions.locator('[part="cue-display"]').evaluate(node=>
     node.style.getPropertyValue('--cue-top'))).not.toBe('NaN%');
   const style=await captions.evaluate(node=>{
@@ -1668,27 +1668,29 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
       italic:computed.fontStyle,bg:computed.backgroundColor,
       shadow:computed.textShadow,strokeWidth:computed.webkitTextStrokeWidth,
-      filter:computed.filter,
       top:parseFloat(node.style.top),
       cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
       cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
         node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
   });
   assertStyle(style);
-  const filter=await captions.evaluate(node=>{
-    const filter=document.querySelector('#player svg filter[id^="plezy-srt-outline-"]');
-    return {sigma:filter.querySelector('feGaussianBlur').getAttribute('stdDeviation'),
-      color:filter.querySelector('feFlood').getAttribute('flood-color')};
-  });
-  expect(filter).toEqual({sigma:'1.50',color:'#00FF00'});
-  // Compare actual rendered pixels: the composed outline must not replace
-  // foreground glyph pixels or draw black strokes across W/V intersections.
-  const originalFilter=await captions.evaluate(node=>node.style.getPropertyValue('--cue-outline-filter'));
+  const strokes=await captions.locator('svg.plezy-srt-vector-outline text').evaluateAll(nodes=>
+    nodes.map(node=>({join:node.getAttribute('stroke-linejoin'),
+      stroke:node.getAttribute('stroke'),width:node.getAttribute('stroke-width'),
+      text:node.textContent})));
+  expect(strokes).toHaveLength(2);
+  expect(strokes.map(s=>s.text)).toEqual(['STYLE CUE WAVY V','SECOND LINE']);
+  for(const stroke of strokes){
+    expect(stroke).toMatchObject({join:'round',stroke:'#00FF00',width:'6.00'});
+  }
+  // The SVG paths provide a real vector stroke with rounded outer joins;
+  // unchanged HTML glyphs are composited above it, retaining sharp valleys.
   const outlined=(await captions.screenshot()).toString('base64');
-  await captions.evaluate(()=>document.querySelector('#player feGaussianBlur').setAttribute('stdDeviation','3.75'));
+  await captions.evaluate(()=>document.querySelectorAll('.plezy-srt-vector-outline text')
+    .forEach(node=>node.setAttribute('stroke-width','12.00')));
   const thick=(await captions.screenshot()).toString('base64');
-  await captions.evaluate(()=>document.querySelector('#player feGaussianBlur').setAttribute('stdDeviation','1.50'));
-  await captions.evaluate(node=>node.style.setProperty('--cue-outline-filter','none'));
+  await captions.evaluate(()=>document.querySelectorAll('.plezy-srt-vector-outline text')
+    .forEach(node=>node.setAttribute('stroke','none')));
   const plain=(await captions.screenshot()).toString('base64');
   const counts=await page.evaluate(async images=>{
     const results=[];
@@ -1714,16 +1716,31 @@ test('SRT playback applies saved Plezy text and border styling, including letter
   expect(counts[1].green).toBeGreaterThan(counts[0].green*1.3);
   expect(counts[2].green).toBe(0);
   // Save a readable black-on-grey multiline example for visual review.
-  await captions.evaluate((node,filterValue)=>{
+  await captions.evaluate(node=>{
     node.style.setProperty('--cue-color','#FFFFFF');
-    node.style.setProperty('--cue-outline-filter',filterValue);
-    node.parentElement.querySelector('feFlood').setAttribute('flood-color','#000000');
+    node.querySelectorAll('.plezy-srt-vector-outline text').forEach(text=>{
+      text.setAttribute('stroke-width','6');text.setAttribute('stroke','#000000');
+    });
     node.parentElement.style.backgroundColor='#777777';
     node.parentElement.querySelector('video').style.opacity='0';
-  },originalFilter);
+  });
   await page.screenshot({path:testInfo.outputPath('srt-rounded-wavy-outline.png')});
+  // Cue HTML can change without a new track (inline emphasis and timed VTT
+  // spans). The observer redraws only on mutations, preserving each run's
+  // font and the original HTML layout across an explicit line break.
+  await captions.locator('.plezy-srt-foreground').evaluate(node=>{
+    node.innerHTML='<b>WAVY</b> <i>VISUAL</i><br>SECOND';
+  });
+  await expect.poll(()=>captions.locator('svg.plezy-srt-vector-outline text')
+    .evaluateAll(nodes=>nodes.map(n=>n.textContent).join('|')))
+    .toBe('WAVY| |VISUAL|SECOND');
+  const inlineRuns=await captions.locator('svg.plezy-srt-vector-outline text').evaluateAll(nodes=>
+    nodes.map(n=>({text:n.textContent,style:n.getAttribute('font-style'),
+      y:parseFloat(n.getAttribute('y'))})));
+  expect(inlineRuns[2].style).toBe('italic');
+  expect(inlineRuns[3].y).toBeGreaterThan(inlineRuns[0].y+30);
   await page.locator('[data-action="stop"]').click();
-  await expect(page.locator('svg filter[id^="plezy-srt-outline-"]')).toHaveCount(0);
+  await expect(page.locator('svg.plezy-srt-vector-outline')).toHaveCount(0);
   function assertStyle(actual){
     expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
     expect(actual.color).toBe('rgb(170, 51, 17)');
@@ -1732,7 +1749,6 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
     expect(actual.shadow).toBe('none');
     expect(parseFloat(actual.strokeWidth)).toBe(0);
-    expect(actual.filter).toContain('plezy-srt-outline-');
     expect(actual.top).toBeGreaterThan(12);
     expect(actual.cuePosition).not.toBe('');
     expect(actual.cueTopFraction).toBeGreaterThan(0.35);

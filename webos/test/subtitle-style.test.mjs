@@ -38,7 +38,6 @@ test('SRT style matches MPV 720p units, colors and flags, without a background b
   assert.equal(element.style.bottom,element.style.top);
   applySrtStyle(element,{offsetWidth:1920,offsetHeight:1080},{subtitleBorderSize:0});
   assert.equal(values['--cue-border-radius'],'0.00px');
-  assert.equal(values['--cue-outline-filter'],'none');
   assert.equal(values['--cue-text-shadow'],'none');
   assert.equal(element.style.top,'0%');
   assert.equal(element.style.fontSize,'57.00px');
@@ -48,33 +47,17 @@ test('SRT style matches MPV 720p units, colors and flags, without a background b
   assert.equal(values['--cue-text-shadow'],'none');
 });
 
-test('subtitle outline filter is reused, scales with border size and cleans up for ASS',()=>{
-  const nodes=[];
-  const createElementNS=(_,tag)=>({tag,attributes:{},children:[],style:{},
-    setAttribute(name,value){this.attributes[name]=value;},
-    append(...children){this.children.push(...children);},
-    remove(){this.removed=true;}});
+test('subtitle border values scale with video height and reset for ASS',()=>{
   const properties={};
-  const element={ownerDocument:{createElementNS},parentNode:{append(node){nodes.push(node);}},
-    offsetHeight:720,style:{setProperty(name,value){properties[name]=value;},
+  const element={offsetHeight:720,style:{setProperty(name,value){properties[name]=value;},
       removeProperty(name){delete properties[name];}}};
   applySrtStyle(element,{offsetHeight:720},{subtitleBorderSize:3,subtitleBorderColor:'#112233'});
-  assert.equal(nodes.length,1);
-  const filter=nodes[0].children[0];
-  assert.equal(filter.tag,'filter');
-  const blur=filter.children[0],flood=filter.children[2];
-  assert.equal(blur.attributes.stdDeviation,'1.50');
-  assert.equal(flood.attributes['flood-color'],'#112233');
-  assert.match(properties['--cue-outline-filter'],/^url\(#plezy-srt-outline-\d+\)$/);
+  assert.equal(properties['--cue-border-radius'],'3.00px');
   applySrtStyle(element,{offsetHeight:1080},{subtitleBorderSize:5,subtitleBorderColor:'#AABBCC'});
-  assert.equal(nodes.length,1,'one reusable filter instead of one per cue or style update');
-  assert.equal(blur.attributes.stdDeviation,'3.75');
-  assert.equal(flood.attributes['flood-color'],'#AABBCC');
+  assert.equal(properties['--cue-border-radius'],'7.50px');
   applySrtStyle(element,{offsetHeight:1080},{subtitleBorderSize:0});
-  assert.equal(properties['--cue-outline-filter'],'none');
+  assert.equal(properties['--cue-border-radius'],'0.00px');
   resetSrtStyle(element);
-  assert.equal(nodes[0].removed,true);
-  assert.equal(element._plezyOutlineFilter,null);
   assert.equal(properties['--cue-border-radius'],undefined);
 });
 
@@ -91,7 +74,7 @@ test('margins switch uses actual fitted video dimensions, with safe unknown meta
 
 test('switching to ASS dialogue removes SRT-only styles and restores its original background',()=>{
   const variables={'--cue-color':'#FF0000','--cue-bg-color':'transparent',
-    '--cue-text-shadow':'none','--cue-border-radius':'3px','--cue-outline-filter':'url(#test)'};
+    '--cue-text-shadow':'none','--cue-border-radius':'3px'};
   const node={style:{fontSize:'60px',fontWeight:'700',fontStyle:'italic',top:'12%',
     right:'0%',bottom:'12%',left:'0%',removeProperty(name){delete variables[name];}}};
   resetSrtStyle(node);
