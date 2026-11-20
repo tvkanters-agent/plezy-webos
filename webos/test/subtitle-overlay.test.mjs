@@ -372,10 +372,10 @@ test('cached ASS fonts and opening cues load before the decoder network gate at 
   const scope='resume-cache-test';
   const fontName='resume-sign.ttf';
   const cacheKey='resume-cache-test-track';
-  const script='[Script Info]\\nScriptType: v4.00+\\n'+
-    '[Events]\\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\\n'+
-    'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Past cue\\n'+
-    'Dialogue: 0,0:02:05.00,0:02:07.00,Default,,0,0,0,,Resume cue\\n';
+  const script='[Script Info]\nScriptType: v4.00+\n'+
+    '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
+    'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Past cue\n'+
+    'Dialogue: 0,0:02:05.00,0:02:07.00,Default,,0,0,0,,Resume cue\n';
   assFontCache.put(scope,fontName,font);
   assTrackCache.put(cacheKey,script,[{name:fontName,length:font.byteLength}]);
   const video={currentTime:0,paused:true,ended:false,seeking:false,
