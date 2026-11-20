@@ -102,7 +102,7 @@ for (const legacy of [false, true]) {
   // Update the worker's playback rate and paused state before the timestamp.
   // The original order renders one frame using the previous seek state/rate.
   const originalClockOrder = /if\s*\(message\.data\.currentTime\s*!==\s*undefined\)\s*\{\s*self\.setCurrentTime\(message\.data\.currentTime\);\s*\}\s*if\s*\(message\.data\.isPaused\s*!==\s*undefined\)\s*\{\s*self\.setIsPaused\(message\.data\.isPaused\);\s*\}\s*if\s*\(message\.data\.rate\)\s*\{\s*self\.rate\s*=\s*message\.data\.rate;\s*\}/;
-  if (!originalClockOrder.test(source)) throw new Error('libass video update order changed');
+  if (!originalClockOrder.test(source)) { const at=source.indexOf('self.setCurrentTime(message.data.currentTime)'); throw new Error('libass video update order context: '+JSON.stringify(source.slice(at-250,at+500))); }
   source = source.replace(originalClockOrder, [
     'if (message.data.rate) {',
     '                self.rate = message.data.rate;',
