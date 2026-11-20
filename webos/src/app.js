@@ -2864,7 +2864,9 @@ function settingsSubpage(page,serverId) {
     ]);
     settingsGroup('Subtitles',[
       settingsTile('Subtitle Styling','Customize subtitle appearance','subtitles',
-        ()=>go({type:'settings-page',page:'subtitle-styling'}),'subtitle-styling')
+        ()=>go({type:'settings-page',page:'subtitle-styling'}),'subtitle-styling'),
+      settingsToggle('subtitleDiagnostics','Subtitle diagnostics',
+        'Off by default. Show on-screen timing for embedded SRT while playing; applies to the next playback.','info')
     ]);
     const skipModes=[['off','Off'],['button','Show skip button'],['auto','Automatic skip']];
     settingsGroup('Auto-play & Skip',[

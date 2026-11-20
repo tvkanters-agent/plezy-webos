@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {subtitleStyle} from './subtitle-style.js';
-export const VERSION = '1.17.7';
+export const VERSION = '1.18.0';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -92,6 +92,7 @@ export function readState(storage) {
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
       // Existing installs start on the known pre-Direct-Play Plex pipeline.
       enhancedPlayback: state.enhancedPlayback === true,
+      subtitleDiagnostics: state.subtitleDiagnostics === true,
       skipIntroMode: ['off','button','auto'].includes(state.skipIntroMode) ? state.skipIntroMode : 'button',
       skipCreditsMode: ['off','button','auto'].includes(state.skipCreditsMode) ? state.skipCreditsMode : 'button',
       autoSkipDelay: Number.isInteger(state.autoSkipDelay) && state.autoSkipDelay >= 1 && state.autoSkipDelay <= 30
@@ -107,6 +108,7 @@ export function readState(storage) {
         ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : [],
       ...subtitleStyle(state)};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', enhancedPlayback: false,
+    subtitleDiagnostics: false,
     skipIntroMode: 'button', skipCreditsMode: 'button',
     autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
     simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: [],

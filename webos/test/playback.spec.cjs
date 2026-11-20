@@ -1860,6 +1860,30 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
   });
 }
 
+for (const enabled of [false,true]) {
+  test('embedded SRT diagnostics ' + (enabled ? 'show on the TV when opted in' : 'do not exist when off'),
+    async({page})=>{
+      await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+        Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+          {streamType:3,id:31,codec:'srt',index:2,selected:1}
+        ]}]}]},undefined,[],{subtitleDiagnostics:enabled});
+      const panel=page.locator('.player-subtitle-diagnostics');
+      if (!enabled) await expect(panel).toHaveCount(0);
+      await page.locator('[data-action="pause"]').click();
+      await page.locator('video').evaluate(video=>{video.currentTime=2.5;});
+      await expect(page.locator('.player-captions')).toContainText('Embedded SRT');
+      if (!enabled) {
+        await expect(panel).toHaveCount(0);
+      } else {
+        await expect(panel).toContainText(/MKV index: \d+ ms/);
+        await expect(panel).toContainText(/First render: \d+ ms from subtitle request/);
+        await expect(panel).toContainText(/Ranges: \d+ · network/);
+        await expect(panel).toBeVisible();
+        await expect(panel).toHaveCSS('pointer-events','none');
+      }
+    });
+}
+
 for (const blocked of [false,true]) {
   test('selected MKV ASS dialogue survives a ' + (blocked ? 'blocked' : 'ready but blank') + ' worker', async ({page}) => {
     await page.addInitScript(blocked => {

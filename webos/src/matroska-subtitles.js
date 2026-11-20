@@ -91,7 +91,7 @@ function uint(bytes, entry, id) {
   return integer(field(bytes, entry, id));
 }
 
-function rangeReader(url, statedSize, signal, onRead, native) {
+function rangeReader(url, statedSize, signal, onRead, native, onTiming) {
   let size = Number(statedSize) || 0;
   let read = 0;
   let prefix;
@@ -117,11 +117,13 @@ function rangeReader(url, statedSize, signal, onRead, native) {
       return length;
     }
     const range = 'bytes=' + start + '-' + (start + length - 1);
+    const startedAt = onTiming ? Date.now() : 0;
     const bytes = native ? await xhrRange(url, range, signal, checkHeaders)
       : await fetchRange(url, range, signal, checkHeaders);
     if (signal.aborted) throw abortError();
     if (bytes.length !== length) throw invalid('Plex returned a truncated byte range');
     if (start === 0) prefix = bytes;
+    if (onTiming) onTiming('range', Date.now() - startedAt);
     onRead?.();
     return bytes;
   };
@@ -395,9 +397,10 @@ function formatCaptions(frames, track, ass) {
   return header + '\n' + events.sort((a,b) => a.order - b.order).map(event => event.line).join('\n') + '\n';
 }
 
-export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead} = {}) {
+export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead, onTiming} = {}) {
+  const startedAt = onTiming ? Date.now() : 0;
   const native = nativeWebOS();
-  const request = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native);
+  const request = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native, onTiming);
   // The TV shares its connection with the video decoder. Its fetch shim
   // cannot cancel the actual network request, so use serial, abortable XHR.
   let pending = Promise.resolve();
@@ -437,6 +440,7 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
   if (!scale) throw invalid('invalid timestamp scale');
   const track = selectedTrack(tracks, asset.streamIndex, asset.format);
   const cues = subtitleCues(index, track.number, segment.start);
+  if (onTiming) onTiming('index', Date.now() - startedAt);
   const groups = new Map();
   for (const cue of cues) {
     if (!groups.has(cue.cluster)) groups.set(cue.cluster, []);
@@ -482,5 +486,6 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
     if (preview && start < ordered.length) await preview(formatCaptions(frames, track, ass));
     batch = !ass && start === 1 ? 12 : Math.max(48, batch * 2);
   }
+  if (onTiming) onTiming('complete', Date.now() - startedAt);
   return formatCaptions(frames, track, ass);
 }

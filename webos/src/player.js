@@ -3,6 +3,7 @@ import {clamp, nextFocus, time} from './core.js';
 import {chapterIndexAtPosition, chapterSeekTarget} from './chapters.js';
 import {parseBif, bifFrameAt} from './scrub-preview.js';
 import {SubtitleOverlay} from './subtitles.js';
+import {SubtitleDiagnostics} from './subtitle-diagnostics.js';
 import {catalogScope} from './persistent-catalog.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
@@ -31,6 +32,7 @@ export class Player {
     this.subtitleCueTimes = new WeakMap();
     // Compatibility mode must not instantiate a custom subtitle renderer.
     this.subtitleOverlay = null;
+    this.subtitleDiagnostics = null;
     this.enhancedPlaybackActive = false;
     this.status = root.querySelector('.player-status');
     this.buffering = root.querySelector('.player-buffering');
@@ -760,7 +762,9 @@ export class Player {
     await cleanup;
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
-    this.enhancedPlaybackActive = this.preferences()?.enhancedPlayback === true;
+    const playbackPreferences = this.preferences();
+    this.enhancedPlaybackActive = playbackPreferences?.enhancedPlayback === true;
+    const diagnosticOpenedAt = playbackPreferences?.subtitleDiagnostics === true ? Date.now() : 0;
     if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
       this.subtitleOverlay.dispose();
       this.subtitleOverlay = null;
@@ -804,6 +808,9 @@ export class Player {
       }
       this.session = session;
       this.trackCatalog = session;
+      if (diagnosticOpenedAt && this.enhancedPlaybackActive &&
+          session.subtitleAsset?.partUrl && session.subtitleAsset.format === 'srt')
+        this.subtitleDiagnostics = new SubtitleDiagnostics(this.root, diagnosticOpenedAt);
       if (this.enhancedPlaybackActive && session.subtitleAsset && !this.subtitleOverlay)
         this.subtitleOverlay = new SubtitleOverlay(this.video, this.root.querySelector('.player-captions'),this.preferences);
       this.loadSeekFrames(session, generation);
@@ -872,7 +879,11 @@ export class Player {
     };
     if (asset.partUrl) this.matroskaSubtitleSession = session;
     try {
-      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position());
+      const diagnostics = this.subtitleDiagnostics;
+      const onTiming = diagnostics ? (event, duration) => {
+        if (alive()) diagnostics.record(event, duration);
+      } : null;
+      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position(), onTiming);
     } catch (error) {
       if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
     } finally {
@@ -978,6 +989,7 @@ export class Player {
         this.openIntentPlaying === false && this.hasFirstFrame) {
       this.startupComplete = true;
       clearTimeout(this.startTimeout);
+      if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('video', Date.now() - this.subtitleDiagnostics.openedAt);
       if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl)
         this.loadSubtitleAsset(this.session, this.generation);
     }
@@ -1031,6 +1043,8 @@ export class Player {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
+    this.subtitleDiagnostics?.dispose();
+    this.subtitleDiagnostics = null;
     this.matroskaSubtitleSession = null;
     this.root?.classList?.remove('subtitle-lift');
     if (this.previewAbort) this.previewAbort.abort();
