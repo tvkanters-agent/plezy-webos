@@ -279,3 +279,44 @@ test('an ASS worker signals runtime ready before the startup timeout',async t=>{
   assert.equal(errors,0);
   overlay.clear();
 });
+
+test('tiny ASS signs reveal the styled canvas without lossy downsampled alpha probing',async t=>{
+  const previousWindow=globalThis.window, previousRaf=globalThis.requestAnimationFrame;
+  let worker;
+  class FakeOctopus {
+    constructor() {
+      this.fonts=[];
+      this.canvasParent={style:{display:'none'}};
+      this.canvas={style:{visibility:'hidden'}};
+      this.worker=worker={
+        handlers:new Set(),
+        addEventListener(type,cb){if(type==='message')this.handlers.add(cb);},
+        removeEventListener(type,cb){if(type==='message')this.handlers.delete(cb);},
+        postMessage(){},
+        emit(data){for(const cb of [...this.handlers])cb({data});}
+      };
+    }
+    setIsPaused(){}
+    setRate(){}
+    dispose(){}
+  }
+  globalThis.window={SubtitlesOctopus:FakeOctopus};
+  globalThis.requestAnimationFrame=cb=>{cb();return 1;};
+  t.after(()=>{globalThis.window=previousWindow;globalThis.requestAnimationFrame=previousRaf;});
+  const overlay=new SubtitleOverlay(
+    {currentTime:10,paused:true,ended:false,seeking:false,playbackRate:1,videoWidth:1920,videoHeight:1080},
+    {textContent:''});
+  const script='[Events]\\nDialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,{\\\\pos(300,75)}Small sign';
+  await overlay.renderStyledAss({fonts:[]},script,overlay.generation);
+  const renderer=overlay.renderer;
+  worker.emit({target:'canvas',op:'renderCanvas',canvases:[]});
+  assert.equal(overlay.assPainted,undefined);
+  const pixel=Uint8Array.of(255,255,255,255);
+  worker.emit({target:'canvas',op:'renderCanvas',
+    canvases:[{x:1,y:1,w:1,h:1,buffer:pixel.buffer}]});
+  assert.equal(overlay.assPainted,true);
+  assert.equal(renderer.canvasParent.style.display,'');
+  assert.equal(renderer.canvas.style.visibility,'visible');
+  assert.equal(worker.handlers.size,1,'stop observing frames after first valid render');
+  overlay.dispose();
+});
