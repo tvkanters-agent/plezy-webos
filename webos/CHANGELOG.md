@@ -1,3 +1,8 @@
+## 1.22.2 — Restore carried audio selection in Plex HLS playback
+
+- Pass the matched episode-specific audio stream ID to both compatibility HLS and enhanced SRT/ASS HLS URLs, mirroring upstream Plezy's Plex transcode selection and preserving the existing part-level stream selection.
+- Keep subtitle matching and the independent enhanced text subtitle asset unchanged. Add regression coverage for selections carried across seasons where the old stream IDs have been reused by different languages, for both SRT and ASS.
+
 ## 1.22.1 — Fix permanent missing ASS fonts on cached MKV tracks
 
 - Do not save completed ASS tracks without a verified, nonempty font manifest. Existing 1.22.0 records with missing verification or no attached fonts are re-extracted rather than replayed permanently with fallback fonts.
