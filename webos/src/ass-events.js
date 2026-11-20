@@ -75,17 +75,29 @@ export class AssEventAppender {
   }
 
   flush() {
-    if (!this.styles || !this.pending.length || this.disposed) return;
-    const events = this.pending.map(line => parseAssEvent(line, this.styles, ++this.readOrder));
-    this.pending.length = 0;
-    // One message for the entire cluster batch, rather than hundreds of
-    // postMessage calls and independent libass repaint opportunities.
+    if (!this.styles || !this.pending.length || this.disposed || this.flushTimer != null) return;
+    // A cached full-season track may contain thousands of vector-heavy
+    // events. Yield between worker batches so clock/seek messages can pass
+    // through instead of being delayed behind one giant libass allocation.
+    const lines = this.pending.splice(0, 128);
+    const events = lines.map(line => parseAssEvent(line, this.styles, ++this.readOrder));
     this.renderer.worker.postMessage({target:'create-events', events});
-    this.renderer.setCurrentTime(this.renderer.video.currentTime + this.renderer.timeOffset);
+    if (this.pending.length) {
+      this.flushTimer = setTimeout(() => {
+        this.flushTimer = null;
+        this.flush();
+      }, 8);
+    }
+    // The worker normally repaints on its own. Force one update for the
+    // first newly installed events and the final batch while paused.
+    if (!this.pending.length || this.readOrder === 1000000 + lines.length)
+      this.renderer.setCurrentTime(this.renderer.video.currentTime + this.renderer.timeOffset);
   }
 
   dispose() {
     this.disposed = true;
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
     this.pending.length = 0;
     if (this.onStyles) this.renderer.worker.removeEventListener('message', this.onStyles);
     this.onStyles = null;
