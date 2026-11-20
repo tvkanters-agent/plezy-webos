@@ -949,3 +949,18 @@ paths. Worker pieces are loaded sequentially and checked for gaps before
 assembling the Blob. This is narrowly scoped to ASS worker script assets;
 no IndexedDB databases or keys are modified, and the 1.22.4 clock, first-
 frame, and earlier extraction fixes are retained.
+
+### Cached ASS startup and seek priorities (v1.22.6)
+
+The embedded ASS path can warm verified persistent ASS scripts/fonts before the
+video finishes its initial native resume seek. The optional decoder-network
+gate applies only after a cache miss, preserving the original ordering of MKV
+range requests after the video first decodes a frame. This gate is abortable;
+closing/switching tracks cannot resurrect a stale subtitle download.
+
+Incremental ASS event import now prioritizes the current timestamp and the
+following eight seconds (preserving original order inside that window).
+Subtitle clock updates are sent before forced redraws on pause/seek, so the
+worker cannot render the old time after installing newly available sign events.
+
+This does not modify cached font databases or the versioned ASS worker loader.
