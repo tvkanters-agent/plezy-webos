@@ -611,6 +611,11 @@ and subtitle track with its own session, using the Web profile for ASS
 output and maintaining full-title timestamps. Compatible video can Direct
 Play, and HLS tells Plex to omit subtitles from the video.
 
+Both transcode requests follow Plex's playback decision flow. Request the
+decision with the exact source, profile and session params before opening
+the video playlist or standalone subtitle. Plex can resolve the media and
+still deny the start when a decision did not authorize that session.
+
 Video transcodes follow Plezy's Generic profile with the MPEG-TS HLS target
 used by its compatibility path. The TV target specifies H.264 and AAC.
 Chrome already inherits an HLS target from the Plex Web profile, so adding

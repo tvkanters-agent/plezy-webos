@@ -485,11 +485,13 @@ export class Plex {
       // Plex Web requests a standalone HTTP subtitle file. The video may
       // need HLS, but applying that protocol to this request can be rejected.
       const subtitleSession = id();
-      const url = this.url('/subtitles/:/transcode/universal/start', {...source,
+      const subtitleParams = {...source,
         session:subtitleSession, context:'streaming', protocol:'http', fastSeek:1, copyts:1,
         directPlay:1, directStream:1, directStreamAudio:1, subtitles:'sidecar', advancedSubtitles:'text',
-        subtitleStreamID:subtitle.id, 'X-Plex-Platform':'Chrome', 'X-Plex-Session-Identifier':subtitleSession});
-      subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true, url};
+        subtitleStreamID:subtitle.id, 'X-Plex-Platform':'Chrome', 'X-Plex-Session-Identifier':subtitleSession};
+      subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true,
+        decisionUrl:this.url('/video/:/transcode/universal/decision', subtitleParams),
+        url:this.url('/subtitles/:/transcode/universal/start', subtitleParams)};
       const container = String(part.container || media.container || '').toLowerCase();
       if (part.key && ['mkv','matroska'].includes(container)) {
         subtitleAsset.partUrl = this.url(part.key);
@@ -501,6 +503,8 @@ export class Plex {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
         subtitleStreamID: String(options.subtitle) === '-1' ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
     }
+    // Plex's decision authorizes the selected item for this transcode session.
+    if (transcode) await this.get('/video/:/transcode/universal/decision', params, {responseType:'none'});
     // Native PlexClient.getPlaybackExtras reads the current metadata with
     // includeChapters/includeMarkers. Home shelves and cached detail pages can
     // contain only a thin item, so their embedded Marker/Chapter arrays are

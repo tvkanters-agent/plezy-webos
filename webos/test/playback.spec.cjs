@@ -25,6 +25,10 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
         url.searchParams.get('X-Plex-Client-Profile-Extra')?.includes('add-transcode-target')) {
       return route.fulfill({status:400,body:'ClientProfileExtra: video transcode target already exists for streaming hls'});
     }
+    if ((url.pathname === plexSubtitlePath || url.pathname.endsWith('/start.m3u8')) && !calls.some(call =>
+      call.pathname.endsWith('/transcode/universal/decision') && call.search === url.search)) {
+      return route.fulfill({status:400,body:'Transcode session has no playback decision'});
+    }
     if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/') ||
         url.pathname === plexSubtitlePath))
       return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});

@@ -51,6 +51,9 @@ test('local SRT/ASS follows Plex subtitle selection with conservative Direct Pla
   assert.equal(session.subtitleAsset.embedded,true);
   const extraction = new URL(session.subtitleAsset.url);
   assert.equal(extraction.pathname,'/subtitles/:/transcode/universal/start');
+  const subtitleDecision = new URL(session.subtitleAsset.decisionUrl);
+  assert.equal(subtitleDecision.pathname,'/video/:/transcode/universal/decision');
+  assert.equal(subtitleDecision.search,extraction.search);
   assert.equal(extraction.searchParams.get('subtitleStreamID'),'92');
   assert.equal(extraction.searchParams.get('directPlay'),'1');
   assert.equal(extraction.searchParams.get('protocol'),'http');
@@ -111,13 +114,20 @@ test('real Plex sidecar keys request the codec extension and UTF-8, including SS
 
 test('embedded text extraction keeps the chosen media version, stream and timeline separate from HLS', async () => {
   const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
-  api.get = async () => ({MediaContainer:{Metadata:[{}]}});
+  const requests = [];
+  api.get = async (path, params) => {
+    requests.push(api.url(path,params));
+    return {MediaContainer:{Metadata:[{}]}};
+  };
   const media = makeMedia('mkv');
   media.Part[0].Stream = [{streamType:3,id:94,codec:'srt',selected:'1'}];
   const session = await api.playback({id:'456',raw:{Media:[makeMedia(),media]}},{mediaIndex:1,start:60});
   assert.equal(session.subtitleBurnedIn,false);
   assert.equal(session.start,60);
   const video = new URL(session.url);
+  const decision = new URL(requests[0]);
+  assert.equal(decision.pathname,'/video/:/transcode/universal/decision');
+  assert.equal(decision.search,video.search);
   const extraction = new URL(session.subtitleAsset.url);
   assert.equal(extraction.pathname,'/subtitles/:/transcode/universal/start');
   assert.equal(extraction.searchParams.get('path'),'/library/metadata/456');

@@ -62,6 +62,11 @@ async function downloadSubtitle(asset, signal, position, preview) {
     }
   }
   return subtitleRequest(signal, async requestSignal => {
+    if (asset.decisionUrl) {
+      const decision = await fetch(asset.decisionUrl, {signal:requestSignal});
+      if (!decision.ok) throw new Error('Plex subtitle decision returned HTTP ' + decision.status);
+      await decision.text();
+    }
     const response = await fetch(asset.url, {signal:requestSignal});
     if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
     return response.text();

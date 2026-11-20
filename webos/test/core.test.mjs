@@ -63,15 +63,19 @@ test('Jellyfin reporting preserves milliseconds as ticks and stop releases encod
   }finally{restore();}
 });
 const plexItem={id:'1',duration:100,raw:{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:2,key:'/library/parts/2/file.mp4',Stream:[]}]}]}};
-test('Plex direct play and explicit compatible playback use distinct URLs',async()=>{
-  const api=new Plex(server,'device');const direct=await api.playback(plexItem),hls=await api.playback(plexItem,{transcode:true,start:12});
+test('Plex direct play and explicit compatible playback use distinct URLs',async t=>{
+  const api=new Plex(server,'device');
+  t.mock.method(api,'get',async()=>({MediaContainer:{}}));
+  const direct=await api.playback(plexItem),hls=await api.playback(plexItem,{transcode:true,start:12});
   assert.equal(direct.transcode,false);assert.match(direct.url,/file.mp4/);
   assert.equal(hls.transcode,true);const url=new URL(hls.url);assert.match(url.pathname,/start.m3u8/);
   assert.equal(url.searchParams.get('directStream'),'0');assert.equal(url.searchParams.get('audioCodec'),'aac');assert.equal(url.searchParams.has('offset'),false);assert.equal(hls.start,12);
 });
-test('Plex rejects unsupported direct play and selects HLS for HEVC/MKV',async()=>{
+test('Plex rejects unsupported direct play and selects HLS for HEVC/MKV',async t=>{
   const item=structuredClone(plexItem);item.raw.Media[0].container='mkv';item.raw.Media[0].videoCodec='hevc';
-  assert.equal((await new Plex(server,'device').playback(item)).transcode,true);
+  const api=new Plex(server,'device');
+  t.mock.method(api,'get',async()=>({MediaContainer:{}}));
+  assert.equal((await api.playback(item)).transcode,true);
 });
 test('Plex subtitle off is stream id zero, not minus one',async()=>{
   let received;const restore=mock(async(url,options)=>{
