@@ -36,6 +36,28 @@ portrait clipping is retained.
 | D-pad focus, cards and scrolling | `lib/focus/focus_theme.dart`, `lib/widgets/focusable_media_card.dart`, `lib/widgets/horizontal_scroll_with_arrows.dart` |
 | Player transport, chapter and track controls | `lib/widgets/video_controls/desktop_video_controls.dart`, `lib/widgets/video_controls/widgets/`, `lib/screens/video_player/` |
 | Colors, shapes and typography | `lib/theme/mono_tokens.dart`, `lib/theme/mono_theme.dart` |
+| Settings hierarchy, grouped rows and subpages | `lib/screens/settings/settings_screen.dart`, `playback_settings_screen.dart`, `services_settings_screen.dart`, `about_screen.dart`, `lib/widgets/settings_section.dart`, `setting_tile.dart`, `settings_page.dart` |
+
+### Settings screens on webOS
+
+The webOS settings hub follows the original `SettingsScreen`: a top group of
+navigation rows, a separate **Connections** group, and **About** at the bottom.
+Rows use `SettingsGroup`'s 20px outer / 5px inner corners with 2px gaps,
+leading symbols, title/subtitle, and a trailing chevron or switch. The native
+`SettingsPage`/`SettingSelectionTile`/`SettingNumberTile` pattern is preserved:
+subpages use a Back header, selection and text/numeric values are edited in
+focusable dialogs, and Back restores the originating row and scroll position.
+
+Only currently implemented webOS options appear: Video Playback (Player and
+Auto-play & Skip), Manage Libraries, Services (Simkl and MDBList), Connections,
+and About. The original General and Appearance pages, and native-only playback
+preferences, are omitted rather than populated with invented settings. Server
+connection details and the Enhanced playback switch are existing webOS-only
+controls placed in the closest original group. First-run server connection and
+standalone Simkl linking remain available. Flutter's Material rows are rendered
+as grouped HTML/CSS and inline SVGs because webOS Chromium 53 cannot run Flutter
+widgets or load the Material Symbols font. TV remote, focus, Back, form error and
+persistence cases have browser tests; physical LG TV validation is outstanding.
 
 These are pointers, not claims of completed porting. The current HTML frontend still has parity gaps and must not be described as faithful merely because a similarly named feature exists.
 

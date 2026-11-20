@@ -39,6 +39,7 @@ let playbackLaunch = 0;
 // Bounded detached DOM snapshots keep returning to a library instantaneous.
 const rootSnapshots = new Map();
 let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
+let settingsDialogReturnFocus = null;
 let episodeTrackReturnFocus = null;
 let episodeTrackGeneration = 0;
 const episodeTrackChoices = new EpisodeTrackPreferences();
@@ -973,6 +974,7 @@ function back() {
   ++navigationIntent;
   if (detailMenu) { closeDetailMenu(); return; }
   if (!dialog.hidden) {
+    if (settingsDialogReturnFocus) { closeSettingsDialog(); return; }
     if(episodeTrackReturnFocus){closeEpisodeTrackSheet();return;}
     if(ratingDialogReturnFocus){closeRatingSheet();return;}
     if (dialog.classList.contains('exit-dialog')) { dismissExitDialog(); return; }
@@ -1618,14 +1620,17 @@ async function render(prepared = null) {
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
   main.textContent = ''; main.scrollTop = 0; navigation();
+  main.classList.toggle('settings-view', route.type === 'settings' || route.type === 'settings-page');
   const valid = () => currentRevision === revision;
   try {
-    if (!api && !['settings', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
+    if (!api && !['settings', 'settings-page', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
     if (route.type === 'settings') {
       settings();
-      // First-run remote onboarding must still start on Plex sign-in, even
-      // though the playback compatibility switch is displayed above it.
-      if (!api) preferredFocus = main.querySelector('.actions .primary');
+      if (!api) preferredFocus = main.querySelector('[data-focus="setting:plex-sign-in"]');
+    }
+    else if (route.type === 'settings-page') {
+      settingsSubpage(route.page, route.serverId);
+      preferredFocus = main.querySelector('.settings-tile:not(:disabled)');
     }
     else if (route.type === 'add') addForm(route.kind);
     else if (route.type === 'plex') { await plexSignIn(); return; }
@@ -2535,149 +2540,286 @@ async function play(item, start, transcode = false) {
     ...(playable ? episodeTrackChoices.resolve(item, mediaIndex, tracks) : {})});
 }
 function settings() {
-  title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');
-  const compatibility = el('section', undefined, 'panel');
-  compatibility.append(el('h2', 'Playback mode'));
-  compatibility.append(button('Enhanced playback (Direct Play + subtitle renderers): ' +
-    (state.enhancedPlayback ? 'On' : 'Off'), () => {
-    state.enhancedPlayback = !state.enhancedPlayback; persist(); render();
-  }));
-  compatibility.append(el('p', 'Off (recommended): use the original Plex playback and burned-in subtitle path. On: try newer Direct Play and local SRT/ASS rendering. Changes apply when starting or restarting playback.', 'muted'));
-  main.append(compatibility);
-  state.servers.forEach(server => {
-    const panel = el('section', undefined, 'panel'); panel.append(el('h2', server.name), el('p', server.kind.toUpperCase() + ' · ' + server.url, 'muted'));
-    const actions = el('div', undefined, 'actions');
-    actions.append(button(server.id === (activeServer() || {}).id ? 'Open server' : 'Switch to server', () => {
-      state.active = server.id; persist(); setClient(); go({type: 'home'}, false);
-    }), button('Remove from this TV', () => {
-      // Keep each connection's saved catalog isolated and erase it on removal.
-      savedCatalog.removeScope(catalogScope(server)).catch(() => {});
-      state.servers = state.servers.filter(s => s.id !== server.id); persist(); setClient(); render();
-    })); panel.append(actions); main.append(panel);
-  });
-  const actions = el('div', undefined, 'actions');
-  actions.append(button('Sign in with Plex', () => go({type: 'plex'}), 'primary'),
-    button('Add Jellyfin', () => go({type: 'add', kind: 'jellyfin'})),
-    button('Add Emby', () => go({type: 'add', kind: 'emby'})),
-    button('Manual Plex server', () => go({type: 'add', kind: 'plex'})));
-  main.append(actions);
-  const panel = el('section', undefined, 'panel'); panel.append(el('h2', 'Playback'));
-  panel.append(button('Quality: ' + (state.quality === 'auto' ? 'Automatic' : 'Compatible H.264 / AAC'), () => {
-    state.quality = state.quality === 'auto' ? 'transcode' : 'auto'; persist(); render();
-  }));
-  panel.append(el('p', 'Automatic follows the selected playback mode: the original path uses Plex transcoding for MKV and other incompatible files; Enhanced playback can try more formats directly. Compatible playback requires permission to transcode on your server.', 'muted'));
-
-  // Native PlaybackSettingsScreen: independent off/button/auto modes for
-  // intros and credits, plus countdown and chapter-pattern preferences.
-  for (const [field, label] of [['skipIntroMode','Skip intro'],['skipCreditsMode','Skip credits']]) {
-    const row = el('label', label + ': ', 'skip-pref-row');
-    const select = el('select'); select.setAttribute('aria-label', label + ' mode');
-    for (const [value, text] of [['off','Off'],['button','Show skip button'],['auto','Automatic skip']]) {
-      const option = el('option', text); option.value = value; select.append(option);
-    }
-    select.value = state[field]; select.onchange = () => { state[field] = select.value; persist(); };
-    row.append(select); panel.append(row);
-  }
-  const delay = el('label', 'Automatic skip delay (seconds): ', 'skip-pref-row');
-  const delayInput = el('input'); delayInput.type = 'number'; delayInput.min = '1'; delayInput.max = '30';
-  delayInput.value = String(state.autoSkipDelay); delayInput.setAttribute('aria-label','Automatic skip delay');
-  delayInput.onchange = () => {
-    const value = Number(delayInput.value);
-    if (Number.isInteger(value) && value >= 1 && value <= 30) { state.autoSkipDelay = value; persist(); }
-    else { delayInput.value = String(state.autoSkipDelay); notify('Use a delay between 1 and 30 seconds.'); }
-  };
-  delay.append(delayInput); panel.append(delay);
-  panel.append(button('Prefer chapter markers: ' + (state.forceSkipMarkerFallback ? 'On' : 'Off'), () => {
-    state.forceSkipMarkerFallback = !state.forceSkipMarkerFallback; persist(); render();
-  }));
-  for (const [field, label, fallback] of [
-    ['introPattern','Intro chapter pattern',DEFAULT_INTRO_PATTERN],
-    ['creditsPattern','Credits chapter pattern',DEFAULT_CREDITS_PATTERN]]) {
-    const row = el('label', label, 'skip-pref-row');
-    const input = el('input'); input.type = 'text'; input.value = state[field] || fallback;
-    input.setAttribute('aria-label', label);
-    input.onchange = () => {
-      try { if (!input.value.trim()) throw new Error(); new RegExp(input.value, 'i'); }
-      catch (_) { notify('Enter a nonempty valid regular expression.'); input.value = state[field] || fallback; return; }
-      state[field] = input.value; persist();
-    };
-    row.append(input); panel.append(row);
-  }
-  main.append(panel);
-  const simklPanel = el('section', undefined, 'panel');
-  simklPanel.append(el('h2', 'Simkl tracking'));
-  if (validSession(state.simkl)) {
-    simklPanel.append(el('p', 'Connected. Plex movies and episodes are tracked on Simkl automatically when playback starts, pauses, or stops. Manual watched changes also sync. Plex resume tracking remains independent.', 'muted'));
-    const pendingStops = simklTracker.pendingStops().length;
-    if (pendingStops) simklPanel.append(button('Retry saved Simkl stops (' + pendingStops + ')', async () => {
-      await simklTracker.retryPending();
-      if (route.type === 'settings') render();
-    }));
-    simklPanel.append(button('Disconnect Simkl', () => {
-      simklTracker.reset();
-      state.simkl = null; persist(); render();
-    }));
+  title(api ? 'Settings' : 'Welcome to Plezy');
+  if (api) {
+    settingsGroup(null, [
+      settingsTile('Video Playback', 'Configure playback quality, subtitles and skipping.', 'play',
+        () => go({type:'settings-page',page:'playback'}), 'playback'),
+      ...(libraryCacheFor === api && libraryCache && libraryCache.length ? [
+        settingsTile('Manage Libraries', 'Choose which libraries appear in the sidebar.', 'libraries',
+          () => go({type:'settings-page',page:'libraries'}), 'libraries')] : []),
+      settingsTile('Services', [validSession(state.simkl) ? 'Simkl' : '', state.mdblistApiKey ? 'MDBList' : '']
+        .filter(Boolean).join(' · ') || 'Connect tracking and community ratings services.', 'sync',
+        () => go({type:'settings-page',page:'services'}), 'services')
+    ]);
+    settingsGroup('Connections', [
+      settingsTile('Add Connection', 'Connect another media server.', 'link',
+        () => go({type:'settings-page',page:'add-connection'}), 'add-connection'),
+      ...state.servers.map(server => settingsTile(server.name,
+        server.kind.toUpperCase() + (server.id === activeServer()?.id ? ' · Active' : ''),
+        'server', () => go({type:'settings-page',page:'server',serverId:server.id}), 'server:' + server.id))
+    ]);
+    settingsGroup(null, [settingsTile('About', 'Plezy for webOS · ' + VERSION, 'info',
+      () => go({type:'settings-page',page:'about'}), 'about')]);
   } else {
-    simklPanel.append(el('p', 'Optional: automatically sync Plex movie and episode playback to your Simkl account. Link with a code on your phone.', 'muted'));
-    simklPanel.append(button('Connect Simkl', () => go({type: 'simkl'}), 'primary'));
+    main.append(el('p', 'Connect a media server to get started.', 'settings-description'));
+    settingsGroup('Connections', connectionChoices());
+    settingsGroup(null,[settingsTile('Services','Connect Simkl or MDBList.','sync',
+      ()=>go({type:'settings-page',page:'services'}),'services')]);
   }
-  main.append(simklPanel);
-  // Upstream Plezy's MDBList catalog source contributes IMDB, RT critic/
-  // audience, TMDB, Metacritic, Letterboxd, Trakt, and MAL ratings. The
-  // remote is used only after the account owner opts in with an API key.
-  const ratingsPanel=el('section',undefined,'panel');
-  ratingsPanel.append(el('h2','MDBList community ratings'));
-  ratingsPanel.append(el('p','Optional: provide an MDBList API key to show additional source ratings in the same Plezy score pill. Ratings require a connected account; Plex and Simkl ratings work independently.','muted'));
-  if(state.mdblistApiKey){
-    ratingsPanel.append(el('p','MDBList connected. Scores are fetched with your own account quota.','muted'));
-    ratingsPanel.append(button('Disconnect MDBList',()=>{
-      state.mdblistApiKey='';persist();render();
-    }));
-  }else{
-    const form=el('form');
-    const keyInput=el('input');
-    keyInput.type='password';keyInput.required=true;
-    keyInput.placeholder='MDBList API key';
-    keyInput.setAttribute('aria-label','MDBList API key');
-    keyInput.autocomplete='off';
-    const submit=el('button','Connect MDBList');submit.type='submit';
-    const message=el('p','','muted');message.setAttribute('role','status');
-    form.append(keyInput,submit,message);
-    form.onsubmit=async event=>{
-      event.preventDefault();
-      const key=keyInput.value.trim(),expected=revision;
-      if(!key)return;
-      submit.disabled=true;message.textContent='Checking MDBList key…';
-      try{
-        const url=new URL('https://api.mdblist.com/user');
-        url.searchParams.set('apikey',key);
-        const response=await fetch(url.href,{headers:{Accept:'application/json'}});
-        if(!response.ok)throw new Error('MDBList verification failed (HTTP '+response.status+').');
-        if(expected!==revision)return;
-        state.mdblistApiKey=key;persist();keyInput.value='';render();
-      }catch(error){
-        if(expected===revision)message.textContent=error.message;
-      }finally{submit.disabled=false;}
-    };
-    ratingsPanel.append(form);
-  }
-  main.append(ratingsPanel);
-  if (api && libraryCacheFor === api && libraryCache) {
-    const manager = el('section', undefined, 'panel');
-    manager.append(el('h2', 'Library visibility'),
-      el('p', 'Choose which libraries appear in Plezy’s navigation rail.', 'muted'));
-    libraryCache.forEach(library => {
-      const key = activeServer().id + ':' + library.id;
-      const hidden = state.hiddenLibraryIds.includes(key);
-      manager.append(button((hidden ? 'Show ' : 'Hide ') + library.title + ' in sidebar', () => {
-        state.hiddenLibraryIds = hidden
-          ? state.hiddenLibraryIds.filter(x => x !== key) : state.hiddenLibraryIds.concat(key);
-        persist(); navigation(); render();
-      }));
+}
+
+// Port of SettingsGroup, SettingNavigationTile, SettingSwitchTile and
+// SettingSelectionTile. Flutter's rounded Materials and symbol font become
+// individual shaped DOM rows and bundled SVGs on Chromium 53. No new prefs.
+function settingsIcon(name) {
+  const paths = {
+    play:'M8 5v14l11-7z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
+    libraries:'M4 4h16v3H4zm0 5h16v3H4zm0 5h16v3H4zm0 5h16v2H4z',
+    sync:'M12 4a8 8 0 0 1 7.5 5H22l-4-5-4 5h3a5.5 5.5 0 0 0-9.5-1L6 6.5A8 8 0 0 1 12 4zm0 16a8 8 0 0 1-7.5-5H2l4 5 4-5H7a5.5 5.5 0 0 0 9.5 1l1.5 1.5A8 8 0 0 1 12 20z',
+    link:'M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.5 1.5 1.6 1.6 1.5-1.5a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0z M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21l1.5-1.5-1.6-1.6-1.5 1.5a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0z',
+    server:'M4 3h16v8H4zm3 3v2h2V6zm-3 7h16v8H4zm3 3v2h2v-2z',
+    info:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 4h2v2h-2zm0 4h2v8h-2z',
+    quality:'M3 5h18v14H3zm3 3v8h12V8z',
+    intro:'M4 4h3v16H4zm5 0 11 8-11 8z',
+    timer:'M10 2h4v2h-4zm2 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm1 2v5l-4 3-1-1.5 3-2.5V8z',
+    tune:'M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z',
+    pattern:'M3 4h18v3H3zm0 6h10v3H3zm0 6h18v3H3z',
+    hidden:'M2 4l18 17 1.5-1.5-18-17z M12 7c5 0 9 5 10 5-.6 1.5-2 3.1-4 4.2l-2-2a5 5 0 0 0-6.2-6.2L8 6.7c1.3-.5 2.7-.7 4-.7z',
+    plex:'M7 3h4l6 9-6 9H7l6-9z',
+    service:'M4 4h16v16H4zm3 3v10h10V7z'
+  };
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24'); svg.setAttribute('aria-hidden','true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d',paths[name] || paths.info); path.setAttribute('fill','currentColor');
+  if(name==='play') path.setAttribute('fill-rule','evenodd');
+  svg.append(path); return svg;
+}
+function settingsGroup(heading, rows) {
+  if (!rows.length) return;
+  const group = el('section', undefined, 'settings-group');
+  if (heading) group.append(el('h2',heading,'settings-group-heading'));
+  const items = el('div',undefined,'settings-group-items');
+  rows.forEach(row => items.append(row)); group.append(items); main.append(group);
+}
+function settingsTile(label, description, icon, action, key, kind = 'chevron') {
+  const row = button('',action,'settings-tile');
+  row.setAttribute('aria-label',label);
+  row.dataset.focus='setting:' + key;
+  const stack=el('span',undefined,'settings-tile-copy');
+  stack.append(el('span',label,'settings-tile-title'));
+  const summary=el('span',description,'settings-tile-subtitle');
+  if (description) stack.append(summary);
+  row.append(settingsIcon(icon),stack);
+  if (kind==='switch') row.append(el('span',undefined,'settings-switch'));
+  else row.append(el('span','›','settings-chevron'));
+  return row;
+}
+function settingsPage(titleText, description) {
+  const heading=el('header',undefined,'settings-page-header');
+  const backButton=button('‹',back,'settings-back');
+  backButton.setAttribute('aria-label','Back to Settings');
+  heading.append(backButton,el('h1',titleText)); main.append(heading);
+  if (description) main.append(el('p',description,'settings-description'));
+}
+function settingsToggle(field,label,description,icon) {
+  const row=settingsTile(label,description,icon,() => {
+    state[field]=!state[field];persist();reflect();
+  },field,'switch');
+  const reflect=() => {
+    row.setAttribute('aria-pressed',String(!!state[field]));
+    row.querySelector('.settings-switch').classList.toggle('on',!!state[field]);
+  };
+  reflect(); return row;
+}
+function closeSettingsDialog() {
+  dialog.hidden=true;dialog.classList.remove('settings-dialog');
+  const target=settingsDialogReturnFocus;
+  settingsDialogReturnFocus=null;
+  if (target && target.isConnected) focusWithoutJump(target,false);
+  else focusFirst();
+}
+function openSettingsDialog(origin,heading) {
+  dialog.classList.remove('exit-dialog');dialog.classList.add('settings-dialog');
+  dialog.textContent='';dialog.setAttribute('aria-label',heading);
+  dialog.append(el('h2',heading)); settingsDialogReturnFocus=origin;
+  dialog.hidden=false;
+}
+function settingsSelection(field,label,description,icon,options) {
+  const summary=() => options.find(item=>item[0]===state[field])?.[1] || '';
+  const row=settingsTile(label,summary() + (description?' · '+description:''),icon,() => {
+    openSettingsDialog(row,label);
+    const choices=el('div',undefined,'settings-dialog-options');
+    let selected=null;
+    options.forEach(([value,text]) => {
+      const choice=button(text,() => {
+        state[field]=value;persist();
+        row.querySelector('.settings-tile-subtitle').textContent=summary()+(description?' · '+description:'');
+        closeSettingsDialog();
+      },'settings-choice');
+      choice.setAttribute('aria-pressed',String(value===state[field]));
+      choices.append(choice);
+      if(value===state[field])selected=choice;
     });
-    main.append(manager);
+    dialog.append(choices,button('Cancel',closeSettingsDialog,'settings-cancel'));
+    focusWithoutJump(selected || choices.firstChild,false);
+  },field);
+  return row;
+}
+function settingsTextInput(field,label,description,icon,{pattern=false}={}) {
+  const summary=() => pattern?(state[field] || (field==='introPattern'?DEFAULT_INTRO_PATTERN:DEFAULT_CREDITS_PATTERN)) : state[field]+' seconds';
+  const row=settingsTile(label,summary(),icon,() => {
+    openSettingsDialog(row,label);
+    dialog.append(el('p',description,'settings-dialog-description'));
+    const form=el('form',undefined,'settings-dialog-form');form.noValidate=true;
+    const input=el('input');input.type=pattern?'text':'number';input.value=String(summary());
+    if(!pattern){input.value=String(state[field]);input.min='1';input.max='30';}
+    input.setAttribute('aria-label',label);input.spellcheck=false;
+    const error=el('p','','error');error.setAttribute('role','status');
+    const actions=el('div',undefined,'settings-dialog-actions');
+    const cancel=button('Cancel',closeSettingsDialog,'settings-cancel');
+    const save=el('button','Save','primary');save.type='submit';
+    actions.append(cancel,save);form.append(input,error,actions);
+    form.addEventListener('submit',event => {
+      event.preventDefault();
+      const value=pattern?input.value:Number(input.value);
+      try {
+        if(pattern){if(!value.trim())throw Error();new RegExp(value,'i');}
+        else if(!Number.isInteger(value)||value<1||value>30)throw Error();
+      }catch(_){error.textContent=pattern?'Enter a nonempty valid regular expression.':'Use a delay between 1 and 30 seconds.';return;}
+      state[field]=value;persist();
+      row.querySelector('.settings-tile-subtitle').textContent=summary();
+      closeSettingsDialog();
+    });
+    dialog.append(form);focusWithoutJump(input,false);
+  },field);
+  return row;
+}
+function connectionChoices() {
+  return [
+    settingsTile('Sign in with Plex','Connect your Plex account.','plex',()=>go({type:'plex'}),'plex-sign-in'),
+    settingsTile('Add Jellyfin','Connect a Jellyfin server.','server',()=>go({type:'add',kind:'jellyfin'}),'jellyfin'),
+    settingsTile('Add Emby','Connect an Emby server.','server',()=>go({type:'add',kind:'emby'}),'emby'),
+    settingsTile('Manual Plex server','Connect by server URL.','plex',()=>go({type:'add',kind:'plex'}),'plex-manual')
+  ];
+}
+function settingsSubpage(page,serverId) {
+  if(page==='playback') {
+    settingsPage('Video Playback');
+    settingsGroup('Player',[
+      settingsToggle('enhancedPlayback','Enhanced playback (Direct Play + subtitle renderers)',
+        'Off uses original playback and burned-in subtitles. On enables Direct Play and local SRT/ASS rendering. Applies to the next playback.','play'),
+      settingsSelection('quality','Quality','Compatible playback requires server transcoding permission.',
+        'quality',[['auto','Automatic'],['transcode','Compatible H.264 / AAC']])
+    ]);
+    const skipModes=[['off','Off'],['button','Show skip button'],['auto','Automatic skip']];
+    settingsGroup('Auto-play & Skip',[
+      settingsSelection('skipIntroMode','Skip intro','', 'intro',skipModes),
+      settingsSelection('skipCreditsMode','Skip credits','', 'intro',skipModes),
+      settingsToggle('forceSkipMarkerFallback','Prefer chapter markers',
+        'Use chapter titles as skip markers instead of server markers.','tune'),
+      settingsTextInput('autoSkipDelay','Automatic skip delay','Seconds before automatic skipping (1–30).','timer'),
+      settingsTextInput('introPattern','Intro chapter pattern','Regular expression for matching intro chapters.','pattern',{pattern:true}),
+      settingsTextInput('creditsPattern','Credits chapter pattern','Regular expression for matching credits chapters.','pattern',{pattern:true})
+    ]);
+  } else if(page==='libraries') {
+    settingsPage('Manage Libraries','Choose which libraries appear in Plezy’s navigation rail.');
+    if(libraryCacheFor!==api || !libraryCache) return;
+    settingsGroup('Navigation',libraryCache.map(library=>{
+      const key=activeServer().id+':'+library.id;
+      const label=()=> (state.hiddenLibraryIds.includes(key)?'Show ':'Hide ')+library.title+' in sidebar';
+      const row=settingsTile(label(),library.title,'libraries',()=>{
+        const hidden=state.hiddenLibraryIds.includes(key);
+        state.hiddenLibraryIds=hidden?state.hiddenLibraryIds.filter(x=>x!==key):state.hiddenLibraryIds.concat(key);
+        persist();navigation();
+        row.setAttribute('aria-label',label());row.querySelector('.settings-tile-title').textContent=label();
+        row.setAttribute('aria-pressed',String(!state.hiddenLibraryIds.includes(key)));
+        row.querySelector('.settings-switch').classList.toggle('on',!state.hiddenLibraryIds.includes(key));
+      },'library:'+library.id,'switch');
+      row.setAttribute('aria-pressed',String(!state.hiddenLibraryIds.includes(key)));
+      row.querySelector('.settings-switch').classList.toggle('on',!state.hiddenLibraryIds.includes(key));
+      return row;
+    }));
+  } else if(page==='services') {
+    settingsPage('Services','Connect services for viewing progress and community ratings.');
+    settingsGroup(null,[
+      settingsTile('Simkl',validSession(state.simkl)?'Connected':'Not connected','service',
+        ()=>go({type:'settings-page',page:'simkl-settings'}),'simkl'),
+      settingsTile('MDBList',state.mdblistApiKey?'Connected':'Not connected','service',
+        ()=>go({type:'settings-page',page:'mdblist-settings'}),'mdblist')
+    ]);
+  } else if(page==='simkl-settings') {
+    settingsPage('Simkl');
+    if(validSession(state.simkl)) {
+      settingsGroup('Account',[
+        ...(simklTracker.pendingStops().length ? [settingsTile('Retry saved Simkl stops ('+simklTracker.pendingStops().length+')',
+          'Retry tracking updates that could not be sent.','sync',async()=>{
+            await simklTracker.retryPending();if(route.page==='simkl-settings')render();
+          },'simkl-retry')] : []),
+        settingsTile('Disconnect Simkl','Stop synchronizing playback history.','service',()=>{
+          simklTracker.reset();state.simkl=null;persist();render();
+        },'simkl-disconnect')
+      ]);
+      main.append(el('p','Plex movies and episodes are tracked when playback starts, pauses, or stops. Manual watched changes also sync. Plex resume tracking remains independent.','settings-description'));
+    } else settingsGroup('Account',[
+      settingsTile('Connect Simkl','Link with a code on your phone.','link',()=>go({type:'simkl'}),'simkl-connect')
+    ]);
+  } else if(page==='mdblist-settings') {
+    settingsPage('MDBList','Additional IMDb, Rotten Tomatoes, TMDB, Metacritic, Letterboxd, Trakt and MAL scores for the Plezy ratings pill.');
+    if(state.mdblistApiKey) settingsGroup('Account',[
+      settingsTile('Disconnect MDBList','Remove your API key from this TV.','service',()=>{
+        state.mdblistApiKey='';persist();render();
+      },'mdblist-disconnect')
+    ]);
+    else {
+      const group=el('section',undefined,'settings-group');
+      group.append(el('h2','Account','settings-group-heading'));
+      const form=el('form',undefined,'settings-connect-form');
+      const keyInput=el('input');keyInput.type='password';keyInput.required=true;
+      keyInput.placeholder='MDBList API key';keyInput.setAttribute('aria-label','MDBList API key');keyInput.autocomplete='off';
+      const submit=el('button','Connect MDBList','primary');submit.type='submit';
+      const message=el('p','','muted');message.setAttribute('role','status');
+      form.append(keyInput,submit,message);
+      form.onsubmit=async event=>{
+        event.preventDefault();const key=keyInput.value.trim(),expected=revision;
+        if(!key)return;
+        submit.disabled=true;message.textContent='Checking MDBList key…';
+        try{
+          const url=new URL('https://api.mdblist.com/user');url.searchParams.set('apikey',key);
+          const response=await fetch(url.href,{headers:{Accept:'application/json'}});
+          if(!response.ok)throw new Error('MDBList verification failed (HTTP '+response.status+').');
+          if(expected!==revision)return;
+          state.mdblistApiKey=key;persist();keyInput.value='';render();
+        }catch(error){if(expected===revision)message.textContent=error.message;}
+        finally{submit.disabled=false;}
+      };
+      group.append(form);main.append(group);
+    }
+  } else if(page==='add-connection') {
+    settingsPage('Add Connection');settingsGroup(null,connectionChoices());
+  } else if(page==='server') {
+    const server=state.servers.find(s=>s.id===serverId);
+    if(!server){go({type:'settings'},false);return;}
+    settingsPage(server.name,server.kind.toUpperCase()+' · '+server.url);
+    settingsGroup('Connection',[
+      settingsTile(server.id===activeServer()?.id?'Open server':'Switch to server',
+        'Browse this server’s libraries and recommendations.','server',()=>{
+          state.active=server.id;persist();setClient();go({type:'home'},false);
+        },'server-open'),
+      settingsTile('Remove from this TV','Removes the saved account token and catalog.','hidden',()=>{
+        savedCatalog.removeScope(catalogScope(server)).catch(()=>{});
+        state.servers=state.servers.filter(s=>s.id!==server.id);persist();setClient();go({type:'settings'},false);
+      },'server-remove')
+    ]);
+  } else if(page==='about') {
+    settingsPage('About');
+    const about=el('section',undefined,'settings-about');
+    const logo=el('img');logo.src='icon.png';logo.alt='Plezy';
+    about.append(logo,el('h2','Plezy'),el('p','Version '+VERSION,'muted'),
+      el('p','Community port for webOS 4.x and newer. Account tokens are stored on this TV; passwords are not. Removing a connection clears its token.'));
+    main.append(about);
   }
-  main.append(el('p', 'Community port · ' + VERSION + ' alpha · webOS 4.x+ target. Account tokens are saved on this TV; passwords are not. Removing a server clears its saved token.', 'muted'));
 }
 function field(form, text, type = 'text', value = '') {
   const label = el('label', text), input = el('input'); input.type = type; input.value = value; input.autocomplete = type === 'password' ? 'current-password' : 'off';
