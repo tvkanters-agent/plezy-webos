@@ -966,7 +966,12 @@ export class Player {
       }
       return;
     }
-    if (!(this.video.videoWidth > 0)) return;
+    // A hardware video plane may expose decoded frames before its dimensions.
+    // An advancing audio clock alone still cannot start MKV extraction.
+    if (!(this.video.videoWidth > 0 || this.video.webkitDecodedFrameCount > 0)) {
+      const quality = this.video.getVideoPlaybackQuality?.();
+      if (!(quality && quality.totalVideoFrames > quality.droppedVideoFrames)) return;
+    }
     // loadedmetadata/loadeddata/canplay (and even a resolved Play) are not
     // proof the video clock advances. Paused reopens need just one frame.
     if (this.video.currentTime > this.initialSeekTarget + 0.1 ||
