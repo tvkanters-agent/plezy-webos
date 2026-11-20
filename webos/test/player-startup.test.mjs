@@ -29,6 +29,48 @@ test('paused reopen needs one decoded frame while a resume target stays gated',(
   player.checkStartupProgress();assert.notEqual(player.startupComplete,true);
   player.initialSeekPending=false;player.checkStartupProgress();assert.equal(player.startupComplete,true);
 });
+test('an active LG decoder schedules MKV subtitles before the later clock gate, only once', t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const session={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'}};
+  let reads=0;
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,generation:2,enhancedPlaybackActive:true,options:{},
+    initialSeekPending:false,pendingStart:0,startupComplete:false,
+    loadSubtitleAsset(asset,generation){
+      assert.equal(asset,session);assert.equal(generation,2);reads++;
+      this.subtitleLoadSession=session;
+    }
+  });
+  player.scheduleEmbeddedSubtitle();
+  player.scheduleEmbeddedSubtitle();
+  t.mock.timers.tick(199);assert.equal(reads,0);
+  t.mock.timers.tick(1);assert.equal(reads,1);
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  assert.equal(reads,1,'never read the same track twice after the clock gate');
+  player.subtitleLoadSession=null;
+  player.scheduleEmbeddedSubtitle();
+  player.generation++;
+  t.mock.timers.tick(200);assert.equal(reads,1,'old sessions cannot restart extraction');
+});
+test('early MKV subtitle reads do not bypass resume seeks or compatibility playback',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let reads=0;
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:{subtitleAsset:{partUrl:'http://plex.test/movie.mkv'}},generation:1,
+    enhancedPlaybackActive:true,options:{},initialSeekPending:true,pendingStart:0,
+    loadSubtitleAsset(){reads++;}
+  });
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  player.initialSeekPending=false;player.pendingStart=125;
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  player.pendingStart=0;player.enhancedPlaybackActive=false;
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  player.enhancedPlaybackActive=true;player.options.skipMatroskaSubtitles=true;
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  player.options.skipMatroskaSubtitles=false;player.pauseAfterOpen=true;
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
+  assert.equal(reads,0);
+});
 test('Play rejection without a media error invokes recovery, while autoplay denial waits for a gesture',async()=>{
   for(const name of ['NotSupportedError','NotAllowedError','AbortError']) {
     let failures=0;

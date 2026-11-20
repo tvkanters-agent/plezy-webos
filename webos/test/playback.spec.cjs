@@ -1848,6 +1848,7 @@ for (const enabled of [false,true]) {
         await expect(panel).toHaveCount(0);
       } else {
         await expect(panel).toContainText(/MKV index: \d+ ms/);
+        await expect(panel).toContainText(/Decoder playing: \d+ ms from Play/);
         await expect(panel).toContainText(/First render: \d+ ms from subtitle request/);
         await expect(panel).toContainText(/Ranges: \d+ · network/);
         await expect(panel).toBeVisible();
@@ -1960,6 +1961,34 @@ const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
   Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
     {streamType:3,id:31,codec:'srt',index:2,selected:1}
   ]}]}]};
+
+test('embedded SRT reads start after playing even when LG never reports video-ready dimensions or clock', async ({page}) => {
+  await page.addInitScript(() => {
+    const original=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime');
+    Object.defineProperty(HTMLMediaElement.prototype,'currentTime',{
+      configurable:true,get(){return 0;},set(value){original.set.call(this,value);}
+    });
+    for (const key of ['videoWidth','videoHeight'])
+      Object.defineProperty(HTMLVideoElement.prototype,key,{get:()=>0});
+    window.playingSeen=false;
+    window.earlyRange=false;
+    document.addEventListener('playing',()=>{window.playingSeen=true;},true);
+    const fetch=window.fetch;
+    window.fetch=(url,options)=>{
+      if (options?.headers?.Range && String(url).includes('/file.mkv') && !window.playingSeen)
+        window.earlyRange=true;
+      return fetch(url,options);
+    };
+  });
+  const {calls}=await setup(page,embeddedMkv,undefined,[],{diagnosticsEnabled:true});
+  const panel=page.locator('.player-subtitle-diagnostics');
+  await expect(panel).toContainText(/Decoder playing: \d+ ms from Play/);
+  await expect(panel).toContainText(/MKV index: \d+ ms from subtitle request/);
+  await expect(panel).toContainText(/First render: \d+ ms from subtitle request/);
+  await expect(panel).toContainText('Video ready: waiting');
+  expect(await page.evaluate(()=>window.earlyRange)).toBe(false);
+  expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
+});
 
 test('MKV range requests wait for playback and failed extraction silently restarts with burn-in', async ({page}) => {
   await page.addInitScript(() => {

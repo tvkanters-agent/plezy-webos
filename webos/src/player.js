@@ -88,6 +88,12 @@ export class Player {
       // behind an unreliable HAVE_CURRENT_DATA gate.
       this.startAfterInitialSeek(true);
       if (!this.initialSeekPending) this.hasFirstFrame = true;
+      // LG's hardware video plane can already be playing while the web view
+      // still reports zero dimensions or an unchanged media clock. Give its
+      // decoder a short head start, then read nearby MKV subtitles instead of
+      // waiting for the later video-dimension/clock confirmation.
+      if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('playing', Date.now() - this.subtitleDiagnostics.openedAt);
+      this.scheduleEmbeddedSubtitle();
       this.update();
       this.focusSkipMarkerIfReady();
       // Reopening for a track change must retain a deliberately paused title.
@@ -783,6 +789,7 @@ export class Player {
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.startupComplete = false;
+    this.subtitleLoadSession = null;
     this.scrubbing = false;
     if (!trackSheetFocus) this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
@@ -875,7 +882,12 @@ export class Player {
     }
   }
   async loadSubtitleAsset(session, generation) {
-    if (!this.enhancedPlaybackActive || !this.subtitleOverlay) return;
+    if (!this.enhancedPlaybackActive || !this.subtitleOverlay ||
+        generation !== this.generation || this.session !== session ||
+        this.subtitleLoadSession === session) return;
+    this.subtitleLoadSession = session;
+    clearTimeout(this.embeddedSubtitleTimer);
+    this.embeddedSubtitleTimer = null;
     const asset = this.options.skipMatroskaSubtitles ? {...session.subtitleAsset, partUrl:null} : session.subtitleAsset;
     const alive = () => generation === this.generation && this.session === session;
     this.subtitleOverlay.onError = error => {
@@ -895,6 +907,19 @@ export class Player {
     } finally {
       if (this.matroskaSubtitleSession === session) this.matroskaSubtitleSession = null;
     }
+  }
+  scheduleEmbeddedSubtitle() {
+    if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset?.partUrl ||
+        this.options?.skipMatroskaSubtitles || this.pauseAfterOpen ||
+        this.initialSeekPending || this.pendingStart ||
+        this.subtitleLoadSession === this.session || this.embeddedSubtitleTimer != null) return;
+    const session=this.session, generation=this.generation;
+    this.embeddedSubtitleTimer=setTimeout(() => {
+      this.embeddedSubtitleTimer=null;
+      if (this.session === session && this.generation === generation &&
+          !this.initialSeekPending && !this.pendingStart)
+        this.loadSubtitleAsset(session, generation);
+    }, 200);
   }
   loadSource(session) {
     const nativeResume = typeof window.PalmSystem !== 'undefined' ||
@@ -1048,6 +1073,9 @@ export class Player {
     this.stopSyncHold();
     this.syncHoldFired = false;
     ++this.generation;
+    clearTimeout(this.embeddedSubtitleTimer);
+    this.embeddedSubtitleTimer = null;
+    this.subtitleLoadSession = null;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
     this.subtitleDiagnostics?.dispose();
