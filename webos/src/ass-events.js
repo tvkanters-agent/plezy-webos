@@ -109,6 +109,12 @@ export class AssEventAppender {
     const events = lines.map(line => parseAssEvent(line, this.styles, ++this.readOrder));
     this.renderer.worker.postMessage({target:'create-events', events});
     const paused = this.renderer.video.paused || this.renderer.video.seeking;
+    const first = this.readOrder === 1000000 + lines.length;
+    // Repaint relevant new cues immediately; avoid forcing libass to redraw
+    // the same paused frame for every unrelated 128-event batch.
+    const near = this.priorityTime !== null &&
+      lines.some(line => nearPlayhead(line, this.priorityTime));
+    const force = paused && (first || near || !this.pending.length);
     if (this.pending.length) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null;
@@ -118,9 +124,9 @@ export class AssEventAppender {
     // Set the *current* subtitle clock before forcing a paused redraw.
     // Previously force-frame ran first, sometimes repainting the old seek
     // position just after installing a newly available sign.
-    if (paused || !this.pending.length || this.readOrder === 1000000 + lines.length)
+    if (force || first || !this.pending.length)
       this.renderer.setCurrentTime(this.renderer.video.currentTime + this.renderer.timeOffset);
-    if (paused) this.renderer.worker.postMessage({target:'plezy-force-frame'});
+    if (force) this.renderer.worker.postMessage({target:'plezy-force-frame'});
   }
 
   dispose() {
