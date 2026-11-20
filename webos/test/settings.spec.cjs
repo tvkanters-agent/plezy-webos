@@ -88,20 +88,26 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   })).toEqual([true,'transcode',12,'']);
 });
 
-test('Subtitle diagnostics stays off by default and persists only when enabled',async({page})=>{
+test('general Diagnostics lives under About, defaults off and persists only when enabled',async({page})=>{
   await connected(page);
-  await page.getByRole('button',{name:'Video Playback',exact:true}).click();
-  const diagnostics=page.getByRole('button',{name:'Subtitle diagnostics',exact:true});
+  await page.getByRole('button',{name:'About',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
+  await expect(page.getByText('Version 1.19.1')).toBeVisible();
+  const diagnostics=page.getByRole('button',{name:'Enable diagnostics',exact:true});
   await expect(diagnostics).toHaveAttribute('aria-pressed','false');
   await diagnostics.click();
   await expect(diagnostics).toHaveAttribute('aria-pressed','true');
   await expect(diagnostics).toBeFocused();
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).subtitleDiagnostics)).toBe(true);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).diagnosticsEnabled)).toBe(true);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'About',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Enable diagnostics',exact:true}))
+    .toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Enable diagnostics',exact:true}).click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).diagnosticsEnabled)).toBe(false);
   await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Subtitle diagnostics',exact:true}))
-    .toHaveAttribute('aria-pressed','true');
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).subtitleDiagnostics)).toBe(true);
+  await expect(page.getByRole('button',{name:'Subtitle diagnostics',exact:true})).toHaveCount(0);
 });
 
 test('Subtitle Styling matches native Text/Border groups with TV-friendly editors and persists choices',async({page},testInfo)=>{
@@ -246,7 +252,7 @@ test('TV remote reaches lower settings rows by scrolling without losing focus',a
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
   const first=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
   await expect(first).toBeFocused();
-  for(let i=0;i<9;i++)await page.keyboard.press('ArrowDown');
+  for(let i=0;i<8;i++)await page.keyboard.press('ArrowDown');
   const last=page.getByRole('button',{name:'Credits chapter pattern',exact:true});
   await expect(last).toBeFocused();
   expect(await last.evaluate(node=>{

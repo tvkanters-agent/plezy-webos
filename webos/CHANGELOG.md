@@ -1,3 +1,8 @@
+## 1.19.1 — General Diagnostics setting
+
+- Place the opt-in diagnostics switch under Settings → About, where it can gate SRT timing and future diagnostic features. Remove the SRT-specific playback-setting toggle.
+- Keep diagnostics inactive by default, and preserve the old preference for users who explicitly enabled it in v1.18.0.
+
 ## 1.19.0 — PixiJS 4 SRT rendering
 
 - Render enhanced SRT/VTT subtitles with PixiJS 4.8.9 CanvasRenderer. Rasterize text and rounded outlines at 2× resolution for sharp boundaries, preserving Plezy's font, color, border, positioning, margins, bold and italic preferences.

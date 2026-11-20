@@ -783,15 +783,17 @@ The diagnostic console logging added in v1.17.5 was removed in v1.17.7 at the
 user's request after the legacy webOS inspector proved unusable on their PC.
 The extraction and playback behavior remains the same as before the logging.
 
-Starting in v1.18.0, **Video Playback → Subtitles → Subtitle diagnostics** is
-an opt-in, persistent switch (default off). When enabled, an on-TV text panel
-appears only while playing an embedded SRT from an MKV through Enhanced
-playback. It reports video startup, MKV index acquisition, first caption
-render, full extraction and number/elapsed time of Plex byte-range requests.
-The panel can be photographed with a phone; no developer inspector is needed.
-All diagnostic clock reads, callbacks, aggregation and DOM creation are guarded
-behind the switch. Disabling it and starting the next playback leaves the
-regular extraction pipeline unchanged, without diagnostic work or visuals.
+Since v1.19.1, **Settings → About → Diagnostics → Enable diagnostics** is a
+general, persistent opt-in switch (default off). It replaces the SRT-specific
+switch briefly exposed under Video Playback in v1.18.0; an enabled preference
+from that version is migrated. Its first consumer is an on-TV text panel while
+playing embedded SRT from an MKV through Enhanced playback. The panel reports
+video startup, MKV index acquisition, first caption render, full extraction
+and number/elapsed time of Plex byte-range requests. It can be photographed
+with a phone; no developer inspector is needed. Future diagnostic features
+should use the same `diagnosticsEnabled` switch. All diagnostic clock reads,
+callbacks, aggregation and DOM creation are guarded behind the switch. Off
+leaves normal playback without diagnostic work or visuals.
 
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
