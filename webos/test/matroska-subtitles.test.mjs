@@ -69,8 +69,10 @@ test('embedded SRT previews the resume cue before reading distant clusters', asy
   let firstPreview;
   const visible = new Promise(resolve => { firstPreview = resolve; });
   const timings = [];
+  const stages = [];
   const reading = extractMatroskaSubtitle({...asset, partSize:source.length, streamIndex:0, format:'srt'},
-    new AbortController().signal, {position:160, preview:firstPreview, onRead:timing => timings.push(timing)});
+    new AbortController().signal, {position:160, preview:firstPreview,
+      onRead:timing => timings.push(timing), onTiming:stage => stages.push(stage)});
   try {
     const captions = await Promise.race([visible, reading.then(() => {
       throw new Error('SRT finished without publishing nearby cues');
@@ -81,12 +83,18 @@ test('embedded SRT previews the resume cue before reading distant clusters', asy
       'the first preview should not request a distant cluster');
     assert.ok(timings.length > 0 && timings.every(read => read.elapsedMs >= 0 && read.length > 0),
       'range timing can be measured without logging authenticated URLs');
+    assert.deepEqual(stages.map(stage => stage.phase), ['index','firstCues']);
+    assert.ok(stages[1].elapsedMs >= stages[0].elapsedMs);
+    assert.ok(stages[1].requests > 0 && stages[1].requestMs >= 0);
+    assert.doesNotMatch(JSON.stringify(stages), /plex\.test|library\/parts/);
   } finally {
     release();
   }
   const captions = await reading;
   assert.match(captions, /00:00:00,010 --> 00:00:01,010\nSubtitle 0/);
   assert.match(captions, /00:02:40,010 --> 00:02:41,010\nSubtitle 16/);
+  assert.deepEqual(stages.map(stage => stage.phase), ['index','firstCues','complete']);
+  assert.ok(stages[2].requests > stages[1].requests);
 });
 
 test('refuses mismatched track IDs, ignored ranges and cancellation', async t => {
