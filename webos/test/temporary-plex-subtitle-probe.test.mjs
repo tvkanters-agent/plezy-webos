@@ -96,12 +96,18 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
       sub.searchParams.set(key,value);
     for (const key of ['videoQuality','videoCodec','audioCodec','videoResolution','maxVideoBitrate',
         'subtitleSize','X-Plex-Client-Profile-Extra']) sub.searchParams.delete(key);
-    for (const variant of ['http','loopback-http']) {
+    for (const variant of ['video-decision', 'subtitle-decision', 'authenticated-video-decision']) {
       const url = new URL(sub);
       const subtitleSession = crypto.randomUUID().replaceAll('-','');
       url.searchParams.set('session',subtitleSession);
       url.searchParams.set('X-Plex-Session-Identifier',subtitleSession);
-      if (variant === 'loopback-http') url.searchParams.delete('X-Plex-Token');
+      if (variant !== 'authenticated-video-decision') url.searchParams.delete('X-Plex-Token');
+      const decision = new URL(url);
+      decision.pathname = (variant === 'subtitle-decision' ? '/subtitles' : '/video') + '/:/transcode/universal/decision';
+      const report = await fetch(decision,{signal:AbortSignal.timeout(10000)});
+      const xml = await report.text();
+      console.log('Sidecar decision:',track.codec,variant,report.status,xml.match(/generalDecisionCode="[^"]+"/)?.[0],
+        xml.match(/transcodeDecisionCode="[^"]+"/)?.[0]);
       try {
         const response = await fetch(url,{signal:AbortSignal.timeout(8000)});
         const content = await response.text();
@@ -123,13 +129,11 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
       video.searchParams.set('fastSeek','1');
       const decision = new URL(video);
       decision.pathname = '/video/:/transcode/universal/decision';
-      decision.searchParams.delete('X-Plex-Token');
       const policy = await fetch(decision,{signal:AbortSignal.timeout(12000)});
       const reply = await policy.text();
       console.log('Generic HLS decision:',policy.status,
         reply.match(/generalDecisionCode="[^"]+"/)?.[0], reply.match(/transcodeDecisionCode="[^"]+"/)?.[0],
         /container="mpegts"/.test(reply) || /container="mpegts"/.test(reply.replaceAll('&quot;','"')));
-      video.searchParams.delete('X-Plex-Token');
       const master = await fetch(video,{signal:AbortSignal.timeout(25000)});
       const masterText = await master.text();
       const videoLogs = await readFile(join(profile,'Logs','Plex Media Server.log'),'utf8');
