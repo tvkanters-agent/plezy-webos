@@ -644,3 +644,11 @@ known SRT and styled ASS cues. Tests compare decoded cue times and track IDs,
 then render the actual MKV subtitle bytes in the browser while the Plex
 subtitle endpoint returns an error. Physical TV networking remains a
 separate validation step.
+
+The reader also handles Matroska zlib and header-removal compression and
+walks cluster headers when subtitle Cues omit `CueRelativePosition`. It
+rebuilds the ASS/SSA event format when CodecPrivate only includes the script
+and styles. It reads and renders indexed clusters nearest the resume position
+first, then adds the rest to the same overlay. The MKV range deadline measures
+inactivity and the Plex subtitle endpoint has its own deadline. This lets
+longer subtitle tracks load while playback and the timing control stay active.

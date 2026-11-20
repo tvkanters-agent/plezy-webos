@@ -1,7 +1,8 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true) {
+const {assFixture} = require('./fixtures/matroska.cjs');
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
@@ -20,10 +21,11 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
         url.pathname === '/subtitles/:/transcode/universal/start' || url.pathname === '/video/:/transcode/universal/subtitles'))
       return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});
     if (url.pathname === '/library/parts/embedded/file.mkv') {
-      const mkv = await readFile(path.join(__dirname,'fixtures/embedded-subtitles.mkv'));
+      const mkv = mkvFixture?.source || await readFile(path.join(__dirname,'fixtures/embedded-subtitles.mkv'));
       const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range || '');
       if (!range) return route.fulfill({status:416,body:''});
       const start = +range[1], end = Math.min(+range[2], mkv.length - 1);
+      if (mkvFixture) await mkvFixture.beforeRead(start);
       return route.fulfill({status:206,contentType:'video/x-matroska',
         headers:{'Content-Range':`bytes ${start}-${end}/${mkv.length}`},
         body:mkv.subarray(start,end + 1)});
@@ -1640,3 +1642,43 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
       .toEqual(['none']);
   });
 }
+
+test('compressed MKV ASS draws before the final ranges arrive and keeps the applied sync', async ({page}) => {
+  await page.addInitScript(() => { window.WebAssembly = undefined; });
+  const fixture = assFixture(6000);
+  let releaseTail;
+  const tail = new Promise(resolve => { releaseTail = resolve; });
+  const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
+      {streamType:3,id:32,codec:'ass',index:0,selected:1}
+    ]}]}]}, undefined, [], {}, null, null, null, true, {
+    source:fixture.source, beforeRead:start => start === fixture.lastCluster ? tail : undefined
+  });
+  const video = page.locator('video');
+  const canvas = page.locator('#player canvas.libassjs-canvas');
+  const cueDrawn = () => canvas.evaluate(element => {
+    const pixels = element.getContext('2d').getImageData(0,0,element.width,element.height).data;
+    for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) return true;
+    return false;
+  });
+  try {
+    await page.locator('[data-action="pause"]').click();
+    await video.evaluate(element => { element.currentTime = 0.5; });
+    await expect.poll(cueDrawn).toBe(true);
+    await page.getByRole('button',{name:'Playback settings'}).click();
+    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+    await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(input => {
+      input.value = '1000';
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await expect.poll(cueDrawn).toBe(false);
+    await video.evaluate(element => { element.currentTime = 103.5; });
+    await expect.poll(cueDrawn).toBe(false);
+  } finally {
+    releaseTail();
+  }
+  await expect.poll(cueDrawn).toBe(true);
+  expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
+    .toEqual(['none']);
+  expect(calls.some(url => url.pathname.endsWith('/transcode/universal/subtitles'))).toBe(false);
+});
