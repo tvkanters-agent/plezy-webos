@@ -47,7 +47,17 @@ async function ensureAssRenderer() {
         await loadAssScript(prefix + '-assets.js');
         window.plezyAssParts = [];
         try {
-          for (let i = 0; i < window.plezyAssPartCount; i++) await loadAssScript(prefix + '-' + i + '.js');
+          // Independent local chunks can load concurrently. Each writes its
+          // fixed array index so out-of-order script completion is safe.
+          for (let i = 0; i < window.plezyAssPartCount; i += 3) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + 3, window.plezyAssPartCount); j++)
+              batch.push(loadAssScript(prefix + '-' + j + '.js'));
+            await Promise.all(batch);
+          }
+          if (window.plezyAssParts.length !== window.plezyAssPartCount ||
+              window.plezyAssParts.some(part => !part))
+            throw new Error('Incomplete ASS worker asset bundle.');
           const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});
           window.plezyAssAssets = {workerUrl:URL.createObjectURL(blob)};
         } finally {
