@@ -241,10 +241,13 @@ function subtitleDecoder(bytes, track) {
   const algorithm = uint(compression, record(compression), 0x4254) ?? 0;
   const settings = field(compression, record(compression), 0x4255);
   if (algorithm !== 0 && (algorithm !== 3 || !settings)) throw invalid('unsupported subtitle compression');
+  // Decoding is synchronous. Reuse the bounded scratch space across packets
+  // so a track with thousands of sign events does not churn the TV heap.
+  const inflateBuffer = algorithm === 0 ? new Uint8Array(MAX_BLOCK + 1) : null;
   return (kind, data) => {
     if (!data || !(kind & scope)) return decodeText(data);
     if (algorithm === 0) {
-      const output = unzlibSync(data, {out:new Uint8Array(MAX_BLOCK + 1)});
+      const output = unzlibSync(data, {out:inflateBuffer});
       if (output.length > MAX_BLOCK) throw invalid('decompressed subtitle exceeds the size limit');
       return decodeText(output);
     }
