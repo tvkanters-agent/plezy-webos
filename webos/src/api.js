@@ -460,7 +460,8 @@ export class Plex {
     const sessionId = id();
     const selectedSubtitle = selectedPlexSubtitle(media, options);
     const subtitle = options.burnSubtitles ? null : plexTextSubtitle(selectedSubtitle);
-    const hasSubtitle = options.subtitle === undefined ? !!selectedSubtitle : String(options.subtitle) !== '-1';
+    // An explicit stream ID is not proof that it exists in this media part.
+    const hasSubtitle = !!selectedSubtitle;
     const mimeType = plexDirectPlayMime(media, {...options, localSubtitle:!!subtitle});
     const transcode = !mimeType;
     const subtitleBurnedIn = transcode && hasSubtitle && !subtitle;
@@ -499,9 +500,19 @@ export class Plex {
         subtitleAsset.streamIndex = selectedSubtitle.index;
       }
     }
-    if (options.audio !== undefined || options.subtitle !== undefined) {
+    // Plezy's PlexClient.selectSubtitleStreamForBurn does this before its
+    // transcode decision: the universal transcoder ignores subtitleStreamID
+    // on the HLS URL and burns the part's *stored* selected stream instead.
+    // Also select an implicit server-default subtitle when burning, otherwise
+    // a successful HLS restart can contain no subtitle pixels at all.
+    if (subtitleBurnedIn && (part.id == null || selectedSubtitle?.id == null))
+      throw new Error('Cannot select the Plex subtitle track for burn-in.');
+    const chosenSubtitleId = subtitleBurnedIn ? selectedSubtitle.id
+      : options.subtitle === undefined ? undefined
+      : String(options.subtitle) === '-1' ? 0 : options.subtitle;
+    if (options.audio !== undefined || chosenSubtitleId !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
-        subtitleStreamID: String(options.subtitle) === '-1' ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
+        subtitleStreamID: chosenSubtitleId, allParts: 1}, {method: 'PUT', responseType:'none'});
     }
     // Plex's decision authorizes the selected item for this transcode session.
     if (transcode) await this.get('/video/:/transcode/universal/decision', params, {responseType:'none'});

@@ -153,3 +153,69 @@ test('embedded text extraction keeps the chosen media version, stream and timeli
   assert.equal(video.searchParams.get('subtitleStreamID'),'0');
   await session.extrasPromise;
 });
+
+test('Plex burn-in selects the exact embedded SRT/ASS track on the part before the decision',async()=>{
+  for (const [codec,id] of [['srt',92],['ass',93]]) {
+    const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+    const media=makeMedia('mkv');
+    media.Part[0].Stream=[{streamType:3,id,codec,selected:1}];
+    const item={id:'123',title:'Test',duration:120,raw:{Media:[media]}};
+    const requests=[];
+    // PMS burns the stored selection, not a subtitleStreamID from HLS.
+    // Simulate a stale/no server selection despite metadata's selected flag.
+    let serverSelected=null;
+    api.get=async(path,params,options)=>{
+      requests.push({path,params,method:options?.method});
+      if (options?.method==='PUT') serverSelected=params.subtitleStreamID;
+      if (path==='/video/:/transcode/universal/decision') {
+        assert.equal(params.subtitles,'burn');
+        assert.equal(params.subtitleStreamID,undefined);
+        assert.equal(serverSelected,id,'PMS must be told which stream to paint first');
+      }
+      return {MediaContainer:{Metadata:[{}]}};
+    };
+    const session=await api.playback(item,{burnSubtitles:true,start:35});
+    assert.equal(session.subtitleBurnedIn,true);
+    assert.equal(session.start,35);
+    assert.deepEqual(requests.slice(0,2).map(call=>[call.path,call.method]),[
+      ['/library/parts/55','PUT'],['/video/:/transcode/universal/decision',undefined]
+    ]);
+    assert.equal(requests[0].params.subtitleStreamID,id);
+    assert.equal(requests[0].params.allParts,1);
+    await session.extrasPromise;
+  }
+});
+
+test('Plex burn-in changes a stale or different server selection to the explicit chosen subtitle',async()=>{
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+  const media=makeMedia('mkv');
+  media.Part[0].Stream=[
+    {streamType:3,id:92,codec:'ass',selected:0},
+    {streamType:3,id:93,codec:'pgs',selected:1}
+  ];
+  let selected=93;
+  api.get=async(path,params,options)=>{
+    if (options?.method==='PUT') selected=params.subtitleStreamID;
+    if (path==='/video/:/transcode/universal/decision') assert.equal(selected,92);
+    return {MediaContainer:{Metadata:[{}]}};
+  };
+  const session=await api.playback({id:'123',raw:{Media:[media]}},
+    {subtitle:92,burnSubtitles:true});
+  assert.equal(session.subtitleBurnedIn,true);
+  await session.extrasPromise;
+});
+
+test('a failed Plex part-selection request must prevent an unconfirmed burn-in decision',async()=>{
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+  const media=makeMedia('mkv');
+  media.Part[0].Stream=[{streamType:3,id:92,codec:'srt',selected:1}];
+  const requests=[];
+  api.get=async(path,params,options)=>{
+    requests.push(path);
+    if(options?.method==='PUT') throw new Error('The server returned HTTP 503.');
+    return {};
+  };
+  await assert.rejects(api.playback({id:'123',raw:{Media:[media]}},
+    {burnSubtitles:true}),/HTTP 503/);
+  assert.deepEqual(requests,['/library/parts/55']);
+});
