@@ -144,6 +144,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
     setRate(){}
     plezySuspendVideo(){this.suspended=true;}
     plezyResumeVideo(){this.suspended=false;}
+    plezyUseExternalClock(){this.externalClockCount=(this.externalClockCount||0)+1;}
     dispose(){this.destroyed=true;}
   }
   globalThis.window={SubtitlesOctopus:FakeOctopus};
@@ -154,6 +155,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
   const content='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,A';
   await overlay.renderStyledAss({fonts:[font]},content,overlay.generation);
   const first=overlay.renderer;
+  assert.equal(first.externalClockCount,1,'built-in Octopus time listeners are disabled');
   first._plezyFullyReady=true;
   overlay.clear();
   assert.equal(first.suspended,true);
@@ -162,6 +164,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
   assert.equal(overlay.renderer,first);
   assert.deepEqual(first.setTrackCalls,[]);
   assert.equal(first.suspended,false);
+  assert.equal(first.externalClockCount,2,'resume must re-disable native clock listeners');
   overlay.clear();
   await overlay.renderStyledAss({fonts:[font]},content+'\n',overlay.generation);
   assert.equal(overlay.renderer,first);
