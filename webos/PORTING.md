@@ -604,14 +604,22 @@ and build-checked, so ASS never depends on downloading a font from a CDN.
 
 Original Plezy's MPV player reads embedded subtitles locally on Direct Play.
 LG webOS 4.4's HTML player cannot reliably expose and select them. The port
-uses Plex Web's separate subtitle URLs for embedded SRT and ASS/SSA:
-`/subtitles/:/transcode/universal/start` on Direct Play and
-`/video/:/transcode/universal/subtitles` on compatible playback. The latter is
-Plex Media Server's documented subtitle-only transcode endpoint. These requests
-use the selected media version, part and subtitle stream with their own
-session, leaving the video route and full-title timeline independent. Video
-starts while the subtitle request is in flight. Compatible video can Direct
+uses Plex Web's standalone HTTP subtitle route for embedded SRT and ASS/SSA,
+`/subtitles/:/transcode/universal/start`. Plex rejected HLS on this route
+with an invalid protocol error. The request selects the media version, part
+and subtitle track with its own session, using the Web profile for ASS
+output and maintaining full-title timestamps. Compatible video can Direct
 Play, and HLS tells Plex to omit subtitles from the video.
+
+Both transcode requests follow Plex's playback decision flow. Request the
+decision with the exact source, profile and session params before opening
+the video playlist or standalone subtitle. Plex can resolve the media and
+still deny the start when a decision did not authorize that session.
+
+Video transcodes follow Plezy's Generic profile with the MPEG-TS HLS target
+used by its compatibility path. The TV target specifies H.264 and AAC.
+Chrome already inherits an HLS target from the Plex Web profile, so adding
+another one to Chrome produced a duplicate-target error in Plex Media Server.
 
 Media Captions renders text from embedded SRT, including a Plex ASS wrapper
 when supplied. SubtitlesOctopus receives an ASS/SSA payload intact so the

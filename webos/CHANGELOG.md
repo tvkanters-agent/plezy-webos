@@ -1,3 +1,8 @@
+## 1.14.3
+
+- Use Plezy's Generic Plex profile for the MPEG-TS HLS target to avoid a duplicate target in the Chrome profile.
+- Request an independent HTTP sidecar for embedded text subtitles in both Direct Play and HLS playback.
+
 ## 1.14.2
 
 - Start MKV subtitle reads after the video decoder opens. Keep video playing if the selected embedded subtitle is unavailable.

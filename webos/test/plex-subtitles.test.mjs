@@ -51,8 +51,12 @@ test('local SRT/ASS follows Plex subtitle selection with conservative Direct Pla
   assert.equal(session.subtitleAsset.embedded,true);
   const extraction = new URL(session.subtitleAsset.url);
   assert.equal(extraction.pathname,'/subtitles/:/transcode/universal/start');
+  const subtitleDecision = new URL(session.subtitleAsset.decisionUrl);
+  assert.equal(subtitleDecision.pathname,'/video/:/transcode/universal/decision');
+  assert.equal(subtitleDecision.search,extraction.search);
   assert.equal(extraction.searchParams.get('subtitleStreamID'),'92');
   assert.equal(extraction.searchParams.get('directPlay'),'1');
+  assert.equal(extraction.searchParams.get('protocol'),'http');
   assert.equal(extraction.searchParams.get('X-Plex-Token'),'token');
   assert.equal(extraction.searchParams.has('offset'),false);
   assert.equal(requests.filter(r=>r.method==='PUT').at(-1).params.subtitleStreamID,92);
@@ -110,21 +114,41 @@ test('real Plex sidecar keys request the codec extension and UTF-8, including SS
 
 test('embedded text extraction keeps the chosen media version, stream and timeline separate from HLS', async () => {
   const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
-  api.get = async () => ({MediaContainer:{Metadata:[{}]}});
+  const requests = [];
+  api.get = async (path, params) => {
+    requests.push(api.url(path,params));
+    return {MediaContainer:{Metadata:[{}]}};
+  };
   const media = makeMedia('mkv');
   media.Part[0].Stream = [{streamType:3,id:94,codec:'srt',selected:'1'}];
   const session = await api.playback({id:'456',raw:{Media:[makeMedia(),media]}},{mediaIndex:1,start:60});
   assert.equal(session.subtitleBurnedIn,false);
   assert.equal(session.start,60);
   const video = new URL(session.url);
+  const decision = new URL(requests[0]);
+  assert.equal(decision.pathname,'/video/:/transcode/universal/decision');
+  assert.equal(decision.search,video.search);
   const extraction = new URL(session.subtitleAsset.url);
-  assert.equal(extraction.pathname,'/video/:/transcode/universal/subtitles');
+  assert.equal(extraction.pathname,'/subtitles/:/transcode/universal/start');
   assert.equal(extraction.searchParams.get('path'),'/library/metadata/456');
   assert.equal(extraction.searchParams.get('mediaIndex'),'1');
   assert.equal(extraction.searchParams.get('partIndex'),'0');
   assert.equal(extraction.searchParams.get('subtitleStreamID'),'94');
+  assert.equal(extraction.searchParams.get('protocol'),'http');
+  assert.equal(extraction.searchParams.get('subtitles'),'sidecar');
+  assert.equal(extraction.searchParams.get('copyts'),'1');
+  assert.equal(extraction.searchParams.get('hasMDE'),'1');
+  assert.equal(extraction.searchParams.get('X-Plex-Platform'),'Chrome');
+  assert.equal(extraction.searchParams.get('X-Plex-Session-Identifier'),extraction.searchParams.get('session'));
+  assert.equal(extraction.searchParams.has('X-Plex-Client-Profile-Extra'),false);
+  assert.equal(extraction.searchParams.has('videoResolution'),false);
   assert.equal(extraction.searchParams.has('offset'),false);
   assert.notEqual(extraction.searchParams.get('session'),video.searchParams.get('session'));
+  assert.equal(video.searchParams.get('protocol'),'hls');
+  assert.equal(video.searchParams.get('X-Plex-Platform'),'Generic');
+  assert.equal(video.searchParams.get('X-Plex-Client-Profile-Name'),'Generic');
+  assert.match(video.searchParams.get('X-Plex-Client-Profile-Extra'),/protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac/);
+  assert.equal(video.searchParams.get('X-Plex-Session-Identifier'),video.searchParams.get('session'));
   assert.equal(video.searchParams.get('subtitles'),'none');
   assert.equal(video.searchParams.get('subtitleStreamID'),'0');
   await session.extrasPromise;

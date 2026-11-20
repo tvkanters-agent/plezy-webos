@@ -464,28 +464,34 @@ export class Plex {
     const mimeType = plexDirectPlayMime(media, {...options, localSubtitle:!!subtitle});
     const transcode = !mimeType;
     const subtitleBurnedIn = transcode && hasSubtitle && !subtitle;
+    const source = {path:'/library/metadata/' + enc(item.id), mediaIndex, partIndex:0, hasMDE:1};
     // Full-title HLS timeline. The player passes the resume point to the
-    // decoder. Keep extracted subtitles out of the video transcode.
-    const params = {path: '/library/metadata/' + enc(item.id), mediaIndex, partIndex: 0,
-      protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
+    // decoder. Plezy's Generic profile lets us declare exactly one HLS
+    // target. Chrome inherits Web's existing MPEG-TS HLS target.
+    const params = {...source, protocol:'hls', fastSeek:1, directPlay:0, directStream:0,
+      videoCodec:'h264', audioCodec:'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId,
       subtitleSize: 100, subtitles: subtitleBurnedIn ? 'burn' : 'none',
       ...(subtitleBurnedIn ? {} : {subtitleStreamID:0}),
-      'X-Plex-Platform': 'Chrome', 'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
+      'X-Plex-Platform':'Generic', 'X-Plex-Client-Profile-Name':'Generic',
+      'X-Plex-Session-Identifier':sessionId,
+      'X-Plex-Client-Profile-Extra':'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     let subtitleAsset = null;
     if (subtitle?.key) {
       subtitleAsset = {id:subtitle.id, format:subtitle.format,
         url:this.url(subtitle.key, {encoding:'utf-8'})};
     } else if (subtitle) {
-      // Match Plex Web's subtitle endpoints. Give extraction its own session
-      // so its soft subtitle decision cannot override the TV's HLS settings.
-      const endpoint = transcode ? '/video/:/transcode/universal/subtitles' : '/subtitles/:/transcode/universal/start';
-      const url = this.url(endpoint, {...params, session:id(), context:'streaming',
-        directPlay:transcode ? 0 : 1, directStream:1,
-        subtitles:transcode ? 'auto' : 'sidecar', advancedSubtitles:'text',
-        subtitleStreamID:subtitle.id});
-      subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true, url};
+      // Plex Web requests a standalone HTTP subtitle file. The video may
+      // need HLS, but applying that protocol to this request can be rejected.
+      const subtitleSession = id();
+      const subtitleParams = {...source,
+        session:subtitleSession, context:'streaming', protocol:'http', fastSeek:1, copyts:1,
+        directPlay:1, directStream:1, directStreamAudio:1, subtitles:'sidecar', advancedSubtitles:'text',
+        subtitleStreamID:subtitle.id, 'X-Plex-Platform':'Chrome', 'X-Plex-Session-Identifier':subtitleSession};
+      subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true,
+        decisionUrl:this.url('/video/:/transcode/universal/decision', subtitleParams),
+        url:this.url('/subtitles/:/transcode/universal/start', subtitleParams)};
       const container = String(part.container || media.container || '').toLowerCase();
       if (part.key && ['mkv','matroska'].includes(container)) {
         subtitleAsset.partUrl = this.url(part.key);
@@ -497,6 +503,8 @@ export class Plex {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
         subtitleStreamID: String(options.subtitle) === '-1' ? 0 : options.subtitle, allParts: 1}, {method: 'PUT', responseType:'none'});
     }
+    // Plex's decision authorizes the selected item for this transcode session.
+    if (transcode) await this.get('/video/:/transcode/universal/decision', params, {responseType:'none'});
     // Native PlexClient.getPlaybackExtras reads the current metadata with
     // includeChapters/includeMarkers. Home shelves and cached detail pages can
     // contain only a thin item, so their embedded Marker/Chapter arrays are
