@@ -366,9 +366,10 @@ test('a hung Plex timeline cannot indefinitely block release and native fallback
   assert.equal(aborted,true);
 });
 
-test('a dimensionless LG video with a known first frame can finish subtitle startup',()=>{
+test('a dimensionless LG video with a known first frame can finish subtitle startup',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
   const player=Object.assign(Object.create(Player.prototype),{
-    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv'}},
+    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv',format:'ass'}},
     video:{videoWidth:0,webkitDecodedFrameCount:0,currentTime:0,readyState:2},
     initialSeekTarget:0,initialSeekPending:false,pendingStart:0,hasFirstFrame:true,
     openIntentPlaying:false,enhancedPlaybackActive:true,options:{},
@@ -377,5 +378,6 @@ test('a dimensionless LG video with a known first frame can finish subtitle star
   });
   player.checkStartupProgress();
   assert.equal(player.startupComplete,true);
+  t.mock.timers.tick(0);
   assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
 });
