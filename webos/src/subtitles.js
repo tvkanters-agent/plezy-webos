@@ -498,6 +498,7 @@ export class SubtitleOverlay {
       if (renderer.ctx && renderer.canvas)
         renderer.ctx.clearRect(0,0,renderer.canvas.width,renderer.canvas.height);
       renderer.plezyResumeVideo();
+      renderer.plezyUseExternalClock?.();
       renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
       if (renderer._plezyTrackContent !== content) {
         renderer.setTrack(content);
@@ -517,6 +518,7 @@ export class SubtitleOverlay {
         timeOffset: -this.offsetMs / 1000,
         onError
       });
+      renderer.plezyUseExternalClock?.();
       const onRuntimeReady = event => {
         // Upstream emits 'ready' immediately after releasing the worker-init
         // dependency, *before* libass has finished initializing. Requesting
@@ -529,6 +531,9 @@ export class SubtitleOverlay {
         renderer.worker?.removeEventListener('message',onRuntimeReady);
         renderer._plezyFullyReady = true;
         ready = true;
+        // A fresh worker must not receive incremental events or style
+        // queries before its track has initialized. Reuse this reply.
+        this.assAppender?.ready(event.data.styles);
         showReady();
       };
       renderer.worker?.addEventListener('message',onRuntimeReady);
@@ -610,7 +615,7 @@ export class SubtitleOverlay {
       if (generation === this.generation && this.renderer === renderer)
         this.assFailure(new Error('ASS subtitle renderer did not become ready.'), generation);
     }, 20000);
-    this.assAppender?.ready();
+    if (ready) this.assAppender?.ready();
   }
 
   syncAssClock(force = false) {
