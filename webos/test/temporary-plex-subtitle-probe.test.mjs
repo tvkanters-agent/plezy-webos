@@ -52,14 +52,14 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
   const token = (await readFile(join(profile,'.LocalAdminToken'),'utf8')).trim();
   async function get(path, options = {}) {
     return fetch(origin + path,{...options,headers:{...client,'X-Plex-Token':token,...options.headers},
-      signal:AbortSignal.timeout(14000)});
+      signal:AbortSignal.timeout(options.method === 'POST' ? 70000 : 14000)});
   }
   await waitFor('Plex never finished starting',async () => (await get('/library/sections')).ok);
   const params = new URLSearchParams({name:'Plezy Subtitle Fixture',type:'movie',
-    agent:'tv.plex.agents.movie',scanner:'Plex Movie',language:'en-US',location:library});
+    agent:'com.plexapp.agents.none',scanner:'Plex Video Files Scanner',language:'xn',location:library});
   await waitFor('Plex did not become ready to create the fixture library',async () => {
     const added = await get('/library/sections?' + params,{method:'POST'});
-    if (added.ok) return true;
+    if (added.ok) { console.log('Plex fixture library created'); return true; }
     const details = (await added.text()).replaceAll(token,'[fixture token]').slice(0,350);
     if (details.includes('still starting up')) return false;
     throw Error('Could not create a fixture library: HTTP ' + added.status + ' ' + details);
@@ -87,17 +87,27 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
     const text = await extractMatroskaSubtitle(session.subtitleAsset,AbortSignal.timeout(10000));
     console.log('MKV range extraction:',track.codec,text.includes('Embedded'));
     const current = new URL(session.subtitleAsset.url);
-    for (const variant of ['current','sidecar','plex-web-contract']) {
+    for (const variant of ['current','sidecar','plex-web-contract','direct-sidecar','decision-sidecar']) {
       const url = new URL(current);
       url.searchParams.set('session',crypto.randomUUID());
       if (variant !== 'current') url.searchParams.set('subtitles','sidecar');
-      if (variant === 'plex-web-contract') {
+      if (['plex-web-contract','direct-sidecar','decision-sidecar'].includes(variant)) {
         url.searchParams.set('hasMDE','1');
         url.searchParams.set('fastSeek','1');
         url.searchParams.set('directStreamAudio','1');
         url.searchParams.set('X-Plex-Session-Identifier',crypto.randomUUID());
         for (const key of ['videoQuality','videoCodec','audioCodec','videoResolution','maxVideoBitrate','X-Plex-Client-Profile-Extra'])
           url.searchParams.delete(key);
+      }
+      if (variant === 'direct-sidecar') {
+        url.pathname = '/subtitles/:/transcode/universal/start';
+        url.searchParams.set('directPlay','1');
+      }
+      if (variant === 'decision-sidecar') {
+        const decision = new URL(url);
+        decision.pathname = '/video/:/transcode/universal/decision';
+        const response = await fetch(decision,{signal:AbortSignal.timeout(12000)}).catch(()=>null);
+        console.log('Plex subtitle decision:', track.codec, response?.status);
       }
       try {
         const response = await fetch(url,{signal:AbortSignal.timeout(12000)});
