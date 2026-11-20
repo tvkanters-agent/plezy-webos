@@ -320,3 +320,26 @@ test('tiny ASS signs reveal the styled canvas without lossy downsampled alpha pr
   assert.equal(worker.handlers.size,1,'stop observing frames after first valid render');
   overlay.dispose();
 });
+
+test('ASS clock stays at the seek target until the decoder advances after an underbuffered seek',()=>{
+  const callbacks=new Map();
+  const video={currentTime:10,paused:false,readyState:4,seeking:false,ended:false,playbackRate:1,
+    addEventListener(name,handler){callbacks.set(name,handler);},
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const updates=[];
+  overlay.kind='ass';
+  overlay.renderer={timeOffset:0,setIsPaused:(paused,time)=>updates.push({paused,time}),
+    setRate(){},dispose(){}};
+  video.currentTime=180;video.seeking=true;
+  callbacks.get('seeking')();
+  video.seeking=false;video.readyState=1;
+  callbacks.get('seeked')();
+  assert.equal(overlay.assWaiting,true);
+  assert.deepEqual(updates[updates.length-1],{paused:true,time:180});
+  video.currentTime=180.125;
+  callbacks.get('timeupdate')();
+  assert.equal(overlay.assWaiting,false);
+  assert.deepEqual(updates[updates.length-1],{paused:false,time:180.125});
+  overlay.dispose();
+});
