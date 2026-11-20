@@ -803,6 +803,13 @@ panel also identifies whether the SRT came from MKV ranges, a decoder retry,
 or an MKV read failure, including its error. This avoids ambiguous zero-range
 readouts without introducing any measurements in normal (diagnostics-off) mode.
 
+In v1.19.3, a valid `206 Content-Range` is authoritative even when a Plex
+proxy incorrectly advertises the complete media size as `Content-Length`.
+The webOS XHR reader still rejects and aborts actual oversized transfers,
+checks the returned byte count exactly, and never buffers a whole-file `200`.
+The optional failure readout distinguishes bad header length from actual
+oversized body transfer so TV-only reports can identify the remaining issue.
+
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
 and cancels a full-file response at the header boundary. If the decoder
