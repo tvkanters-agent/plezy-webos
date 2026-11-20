@@ -18,6 +18,10 @@ await cp(path.join(root, 'node_modules/pixi.js/LICENSE'),path.join(root,'dist/pi
 const vendor = path.join(root, 'node_modules/libass-wasm/dist/js');
 const libass = path.join(root, 'dist/libass');
 await cp(path.join(vendor, 'COPYRIGHT'),path.join(libass,'COPYRIGHT'));
+// Version the runtime filenames: webOS can retain the *old* classic script
+// cache across IPK upgrades, and stale chunks must never enter a new worker.
+const versionedLibass = path.join(libass, 'v' + VERSION);
+await mkdir(versionedLibass, {recursive:true});
 // Preserve the full libass runtime across playback without leaving an idle
 // worker subscribed to subsequent videos. The upstream wrapper's handlers
 // are closures, so expose narrowly scoped suspend/resume hooks at build time.
@@ -81,7 +85,7 @@ octopus = octopus.replace(disposeAnchor, `    // Plezy supplies its own authorit
         self.resize();
     };
 ` + disposeAnchor);
-await writeFile(path.join(libass,'subtitles-octopus.js'),octopus);
+await writeFile(path.join(versionedLibass,'subtitles-octopus.js'),octopus);
 const fallbackFont = await readFile(path.join(libass, 'default.woff2'));
 if (fallbackFont.toString('ascii', 0, 4) !== 'wOF2')
   throw new Error('The bundled libass fallback font is missing or invalid.');
@@ -140,12 +144,12 @@ for (const legacy of [false, true]) {
     let end = Math.min(start + 256 * 1024, source.length);
     if (end < source.length && /[\uD800-\uDBFF]/.test(source[end - 1])) end--;
     const piece = JSON.stringify(source.slice(start, end));
-    await writeFile(path.join(libass, worker + '-' + count + '.js'),
+    await writeFile(path.join(versionedLibass, worker + '-' + count + '.js'),
       'window.plezyAssParts[' + count + '] = new Blob([' + piece + ']);\n');
     count++;
     start = end;
   }
-  await writeFile(path.join(libass, worker + '-assets.js'), 'window.plezyAssPartCount = ' + count + ';\n');
+  await writeFile(path.join(versionedLibass, worker + '-assets.js'), 'window.plezyAssPartCount = ' + count + ';\n');
 }
 await cp(path.join(root, '../LICENSE'), path.join(root, 'dist/LICENSE.txt'));
 // Prepare LG's native loading image before packaging, not at TV startup.
