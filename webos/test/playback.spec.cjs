@@ -2012,3 +2012,36 @@ test('an HLS decoder error during an MKV range read retries video once using Ple
     releaseRange();
   }
 });
+
+test('a stalled decoder retry requests Plex subtitles before video-ready', async ({page}) => {
+  let releaseRange;
+  const range = new Promise(resolve => { releaseRange = resolve; });
+  const {calls} = await setup(page, embeddedMkv, undefined, [], {diagnosticsEnabled:true}, null, null,
+    async () => '1\n00:00:00,000 --> 00:00:12,000\nEARLY SIDECAR\n', true,
+    {beforeRead:() => range});
+  try {
+    await expect.poll(() => calls.filter(url => url.pathname.endsWith('/file.mkv')).length).toBe(1);
+    await page.locator('video').evaluate(video => {
+      // The new decoder has not yet advanced its clock. The sidecar must
+      // download anyway; it does not share the expensive MKV range reader.
+      Object.defineProperty(video, 'currentTime', {configurable:true,get:() => 0});
+      video.dispatchEvent(new Event('error'));
+    });
+    await expect(page.locator('.player-captions')).toContainText('EARLY SIDECAR', {timeout:5000});
+    await expect(page.locator('.player-subtitle-diagnostics'))
+      .toContainText('Source: Plex sidecar (decoder retry)');
+    await expect(page.locator('.player-subtitle-diagnostics')).toContainText('Video ready: waiting');
+  } finally {
+    releaseRange();
+  }
+});
+
+test('diagnostics reveal why the MKV reader used the Plex subtitle endpoint', async ({page}) => {
+  await setup(page, embeddedMkv, undefined, [], {diagnosticsEnabled:true}, null, null,
+    async () => '1\n00:00:00,000 --> 00:00:12,000\nFALLBACK SRT\n', true,
+    {beforeRead:() => 200});
+  await expect(page.locator('.player-captions')).toContainText('FALLBACK SRT');
+  const panel=page.locator('.player-subtitle-diagnostics');
+  await expect(panel).toContainText('Source: Plex sidecar (MKV failed)');
+  await expect(panel).toContainText('MKV failed: MKV subtitles: Plex did not serve a byte range (HTTP 200)');
+});

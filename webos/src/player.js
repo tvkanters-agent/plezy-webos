@@ -858,7 +858,11 @@ export class Player {
       if (generation !== this.generation || this.session !== session) return;
       // Embedded MKV is loaded from the same Plex part as the video. Let the
       // decoder secure its first frame before opening that second read.
-      if (this.enhancedPlaybackActive && session.subtitleAsset && !session.subtitleAsset.partUrl)
+      // A decoder retry can deliberately disable MKV range reads while the
+      // session still exposes its original partUrl. Its Plex sidecar is an
+      // independent request and must not wait for the new video-ready gate.
+      if (this.enhancedPlaybackActive && session.subtitleAsset &&
+          (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles))
         this.loadSubtitleAsset(session, generation);
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
@@ -883,6 +887,8 @@ export class Player {
       const onTiming = diagnostics ? (event, duration) => {
         if (alive()) diagnostics.record(event, duration);
       } : null;
+      if (onTiming) onTiming('source', asset.partUrl ? 'MKV byte ranges' :
+        this.options.skipMatroskaSubtitles ? 'Plex sidecar (decoder retry)' : 'Plex sidecar');
       await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position(), onTiming);
     } catch (error) {
       if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
@@ -990,7 +996,8 @@ export class Player {
       this.startupComplete = true;
       clearTimeout(this.startTimeout);
       if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('video', Date.now() - this.subtitleDiagnostics.openedAt);
-      if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl)
+      if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl &&
+          !this.options.skipMatroskaSubtitles)
         this.loadSubtitleAsset(this.session, this.generation);
     }
   }

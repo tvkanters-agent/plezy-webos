@@ -103,6 +103,7 @@ async function downloadSubtitle(asset, signal, position, preview, onTiming) {
         }}));
     } catch (error) {
       if (signal.aborted) throw error;
+      if (onTiming) onTiming('fallback', error.message);
       console.info('Could not read embedded subtitle from MKV:', error.message);
     }
   }
