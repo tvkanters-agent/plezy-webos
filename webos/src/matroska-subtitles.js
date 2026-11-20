@@ -106,14 +106,20 @@ function rangeReader(url, statedSize, signal, onRead, native, onTiming) {
     function checkHeaders(status, getHeader) {
       if (status !== 206) throw invalid('Plex did not serve a byte range (HTTP ' + status + ')');
       const header = getHeader('Content-Range');
+      let verifiedRange = false;
       if (header) {
         const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header);
         if (!range || Number(range[1]) !== start || Number(range[2]) !== Math.min(start + length, Number(range[3])) - 1)
           throw invalid('Plex returned a different byte range');
         size = Number(range[3]);
         length = Number(range[2]) - start + 1;
+        verifiedRange = true;
       }
-      if (Number(getHeader('Content-Length')) > length) throw invalid('Plex returned an oversized byte range');
+      // Some Plex proxies advertise the file's full Content-Length even for
+      // a valid 206 response. A verified Content-Range is authoritative;
+      // onprogress and the final byte count still enforce the actual limit.
+      if (!verifiedRange && Number(getHeader('Content-Length')) > length)
+        throw invalid('Plex Content-Length exceeds the requested byte range');
       return length;
     }
     const range = 'bytes=' + start + '-' + (start + length - 1);
@@ -121,7 +127,8 @@ function rangeReader(url, statedSize, signal, onRead, native, onTiming) {
     const bytes = native ? await xhrRange(url, range, signal, checkHeaders)
       : await fetchRange(url, range, signal, checkHeaders);
     if (signal.aborted) throw abortError();
-    if (bytes.length !== length) throw invalid('Plex returned a truncated byte range');
+    if (bytes.length !== length) throw invalid(bytes.length > length
+      ? 'Plex body exceeded the requested byte range' : 'Plex returned a truncated byte range');
     if (start === 0) prefix = bytes;
     if (onTiming) onTiming('range', Date.now() - startedAt);
     onRead?.();
@@ -163,7 +170,7 @@ function xhrRange(url, range, signal, checkHeaders) {
       catch (error) { finish(error); }
     };
     request.onprogress = event => {
-      if (event.loaded > length) finish(invalid('Plex returned an oversized byte range'));
+      if (event.loaded > length) finish(invalid('Plex transferred more bytes than requested'));
     };
     request.onload = () => finish();
     request.onerror = () => finish(invalid('the Plex byte range request failed'));

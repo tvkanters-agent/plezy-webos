@@ -147,16 +147,22 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
       this.end = Math.min(Number(end), movie.length - 1);
     }
     getResponseHeader(name) {
-      return name === 'Content-Range' ? `bytes ${this.start}-${this.end}/${movie.length}` : null;
+      if (name === 'Content-Range') return `bytes ${this.start}-${this.end}/${movie.length}`;
+      if (name === 'Content-Length' && mode === 'inflated length') return String(movie.length);
+      return null;
     }
     send() {
       maximum = Math.max(maximum, ++active);
       if (mode === 'pending') return;
       queueMicrotask(() => {
         this.readyState = 2;
-        this.status = mode === 'partial' ? 206 : 200;
+        this.status = mode === 'whole file' ? 200 : 206;
         this.onreadystatechange();
         if (!this.onload) return;
+        if (mode === 'oversized body') {
+          this.onprogress({loaded:this.end - this.start + 2});
+          return;
+        }
         assert.equal(this.responseType,'arraybuffer');
         this.response = Uint8Array.from(movie.subarray(this.start,this.end + 1)).buffer;
         --active;
@@ -169,14 +175,20 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
   const controller = new AbortController();
   assert.match(await extractMatroskaSubtitle(track,controller.signal), /Embedded SRT/);
   assert.equal(maximum,1);
+  mode = 'inflated length';
+  assert.match(await extractMatroskaSubtitle(track,controller.signal), /Embedded SRT/,
+    'a validated Content-Range must override a misleading Content-Length');
   mode = 'whole file';
   await assert.rejects(extractMatroskaSubtitle(track,controller.signal), /HTTP 200/);
   assert.equal(aborted,1,'abort an ignored Range as soon as response headers arrive');
+  mode = 'oversized body';
+  await assert.rejects(extractMatroskaSubtitle(track,controller.signal), /transferred more bytes than requested/);
+  assert.equal(aborted,2,'abort an actually oversized transfer before buffering the file');
   mode = 'pending';
   const reading = extractMatroskaSubtitle(track,controller.signal);
   await Promise.resolve();
   controller.abort();
   await assert.rejects(reading,{name:'AbortError'});
-  assert.equal(aborted,2);
+  assert.equal(aborted,3);
   assert.equal(active,0);
 });

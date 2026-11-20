@@ -1,3 +1,8 @@
+## 1.19.3 — Validate Plex byte ranges by actual payload size
+
+- Trust a verified Content-Range over an inflated Content-Length on Plex partial responses. Native webOS still aborts transfers whose actual payload exceeds the requested range.
+- Distinguish inflated header lengths from oversized transfer bodies in opt-in diagnostics, so future failures identify the relevant layer.
+
 ## 1.19.2 — Early Plex sidecar after MKV decoder retry
 
 - When the decoder restarts with MKV range reads disabled, begin the Plex subtitle sidecar immediately instead of waiting for the replacement video's first-frame gate.
