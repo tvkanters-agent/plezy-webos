@@ -2146,7 +2146,18 @@ test('reopening ASS and switching episodes reuses the compiled worker and same-s
   await paint();
   await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
   await page.locator('video').evaluate(video=>{video.currentTime=6.5;});
-  await expect.poll(hasGlyph).toBe(false);
+  try {
+    await expect.poll(hasGlyph).toBe(false);
+  } catch (error) {
+    const snapshot=await page.evaluate(()=>{
+      const video=document.querySelector('#player video');
+      return {currentTime:video?.currentTime,duration:video?.duration,
+        paused:video?.paused,seeking:video?.seeking,readyState:video?.readyState,
+        framesCreated:window.assWorkerCreations};
+    });
+    console.error('ASS GAP FAIL SNAPSHOT:',JSON.stringify(snapshot));
+    throw error;
+  }
   await page.locator('video').evaluate(video=>{video.currentTime=7.5;});
   await expect.poll(hasGlyph).toBe(true);
   expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
