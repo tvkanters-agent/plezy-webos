@@ -67,9 +67,13 @@ test('early MKV subtitle reads do not bypass resume seeks or compatibility playb
   player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
   player.enhancedPlaybackActive=true;player.options.skipMatroskaSubtitles=true;
   player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
-  player.options.skipMatroskaSubtitles=false;player.pauseAfterOpen=true;
-  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
   assert.equal(reads,0);
+  // The first decoded frame also exists on an intentionally paused reopen.
+  // Don't depend on another 'playing' event that may never arrive.
+  player.options.skipMatroskaSubtitles=false;player.pauseAfterOpen=true;
+  player.session.subtitleAsset.format='ass';
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(0);
+  assert.equal(reads,1,'ASS starts on the first frame without a 200ms deferral');
 });
 test('switching enabled SRT and ASS replaces only the overlay; burn-in requires reopening',()=>{
   const api=new Plex({url:'http://plex.test',token:'fixture'},'tv');
@@ -330,4 +334,18 @@ test('a hung Plex timeline cannot indefinitely block release and native fallback
   t.mock.timers.tick(15000);
   await assert.rejects(reporting,/timed out/);
   assert.equal(aborted,true);
+});
+
+test('a dimensionless LG video with a known first frame can finish subtitle startup',()=>{
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv'}},
+    video:{videoWidth:0,webkitDecodedFrameCount:0,currentTime:0,readyState:2},
+    initialSeekTarget:0,initialSeekPending:false,pendingStart:0,hasFirstFrame:true,
+    openIntentPlaying:false,enhancedPlaybackActive:true,options:{},
+    loadSubtitleAsset(){this.loaded=true;},
+    generation:1
+  });
+  player.checkStartupProgress();
+  assert.equal(player.startupComplete,true);
+  assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
 });
