@@ -2576,7 +2576,7 @@ function settingsIcon(name) {
   const paths = {
     play:'M8 5v14l11-7z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
     libraries:'M4 4h16v3H4zm0 5h16v3H4zm0 5h16v3H4zm0 5h16v2H4z',
-    sync:'M12 4a8 8 0 0 1 7.5 5H22l-4-5-4 5h3a5.5 5.5 0 0 0-9.5-1L6 6.5A8 8 0 0 1 12 4zm0 16a8 8 0 0 1-7.5-5H2l4 5 4-5H7a5.5 5.5 0 0 0 9.5 1l1.5 1.5A8 8 0 0 1 12 20z',
+    sync:'M12 4V1L8 5l4 4V6a6 6 0 0 1 5.7 4h2.1A8 8 0 0 0 12 4zm0 16v3l4-4-4-4v3a6 6 0 0 1-5.7-4H4.2A8 8 0 0 0 12 20z',
     link:'M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.5 1.5 1.6 1.6 1.5-1.5a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0z M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21l1.5-1.5-1.6-1.6-1.5 1.5a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0z',
     server:'M4 3h16v8H4zm3 3v2h2V6zm-3 7h16v8H4zm3 3v2h2v-2z',
     info:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 4h2v2h-2zm0 4h2v8h-2z',
@@ -2619,7 +2619,7 @@ function settingsTile(label, description, icon, action, key, kind = 'chevron') {
 function settingsPage(titleText, description) {
   const heading=el('header',undefined,'settings-page-header');
   const backButton=button('‹',back,'settings-back');
-  backButton.setAttribute('aria-label','Back to Settings');
+  backButton.setAttribute('aria-label','Back');
   heading.append(backButton,el('h1',titleText)); main.append(heading);
   if (description) main.append(el('p',description,'settings-description'));
 }
@@ -2635,6 +2635,7 @@ function settingsToggle(field,label,description,icon) {
 }
 function closeSettingsDialog() {
   dialog.hidden=true;dialog.classList.remove('settings-dialog');
+  dialog.removeAttribute('aria-label');
   const target=settingsDialogReturnFocus;
   settingsDialogReturnFocus=null;
   if (target && target.isConnected) focusWithoutJump(target,false);
