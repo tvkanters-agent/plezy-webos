@@ -762,6 +762,17 @@ first, then adds the rest to the same overlay. The MKV range deadline measures
 inactivity and the Plex subtitle endpoint has its own deadline. This lets
 longer subtitle tracks load while playback and the timing control stay active.
 
+For embedded SRT, the first preview now publishes after **one** nearest cue
+cluster, rather than waiting for 12. Remaining clusters still fill in batches
+without dropping any cues, and native webOS range reads remain serialized to
+protect video decoding. The optional range-read callback exposes elapsed
+milliseconds and byte counts for request-timing diagnostics without logging
+authenticated part URLs. Styled ASS retains its established initial batching
+to avoid repeated heavy renderer initialization. This improves time-to-first
+SRT cue after the video starts; MKV index discovery and the decoder-first gate
+are unchanged. A delayed distant-cluster test covers early preview and final
+full-track fidelity; actual latency on LG hardware remains to be measured.
+
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
 and cancels a full-file response at the header boundary. If the decoder

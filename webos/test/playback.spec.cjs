@@ -1,7 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-const {assFixture} = require('./fixtures/matroska.cjs');
+const {assFixture, srtFixture} = require('./fixtures/matroska.cjs');
 const packagedEntry = require('node:url').pathToFileURL(path.resolve(__dirname,'../dist/index.html')).href;
 const plexSubtitlePath = '/subtitles/:/transcode/universal/start';
 async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null, entryUrl = '/') {
@@ -1920,6 +1920,28 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
   expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
     .toEqual(['none']);
   expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
+});
+
+test('embedded MKV SRT displays the first cue while later cluster reads are blocked', async ({page}) => {
+  const fixture = srtFixture(6000);
+  let releaseNext;
+  const next = new Promise(resolve => { releaseNext = resolve; });
+  const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
+      {streamType:3,id:31,codec:'srt',index:0,selected:1}
+    ]}]}]}, undefined, [], {}, null, null, null, true, {
+    source:fixture.source, beforeRead:start => start === fixture.secondCluster ? next : undefined
+  });
+  try {
+    await page.locator('[data-action="pause"]').click();
+    await page.locator('video').evaluate(element => { element.currentTime = 0.5; });
+    await expect(page.locator('.player-captions [part="cue"]')).toContainText('Subtitle 0', {timeout:5000});
+    expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
+  } finally {
+    releaseNext();
+  }
+  await page.locator('video').evaluate(element => { element.currentTime = 6.5; });
+  await expect(page.locator('.player-captions [part="cue"]')).toContainText('Subtitle 1');
 });
 
 const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',

@@ -117,12 +117,13 @@ function rangeReader(url, statedSize, signal, onRead, native) {
       return length;
     }
     const range = 'bytes=' + start + '-' + (start + length - 1);
+    const started = Date.now();
     const bytes = native ? await xhrRange(url, range, signal, checkHeaders)
       : await fetchRange(url, range, signal, checkHeaders);
     if (signal.aborted) throw abortError();
     if (bytes.length !== length) throw invalid('Plex returned a truncated byte range');
     if (start === 0) prefix = bytes;
-    onRead?.();
+    onRead?.({start, length, elapsedMs:Date.now() - started});
     return bytes;
   };
 }
@@ -471,10 +472,16 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
       frames.push({start:cue.time * scale / 1000000, end:(cue.time + duration) * scale / 1000000, text:block.text});
     }
   }
-  for (let start = 0, batch = 12; start < ordered.length; batch = Math.max(48, batch * 2)) {
+  // The LG decoder shares its connection with serial MKV range requests.
+  // A 12-cluster first batch keeps short SRT cues invisible for many round
+  // trips. Publish the nearest cluster as soon as it is decoded, then fill
+  // out the track in larger batches. ASS retains its existing batch size so
+  // that expensive styled-renderer initialization isn't repeated immediately.
+  for (let start = 0, batch = ass ? 12 : 1; start < ordered.length;) {
     await parallel(ordered.slice(start, start + batch), readGroup);
     start += batch;
     if (preview && start < ordered.length) await preview(formatCaptions(frames, track, ass));
+    batch = !ass && start === 1 ? 12 : Math.max(48, batch * 2);
   }
   return formatCaptions(frames, track, ass);
 }
