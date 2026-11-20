@@ -1,3 +1,10 @@
+## 1.21.0 — Incremental ASS events and persistent font reuse
+
+- Start an MKV ASS preview after the closest indexed cluster instead of waiting for twelve, and append subsequent events in one worker message per batch. Keep the original ASS styles and signs without recreating libass's track after each partial read.
+- Fetch embedded fonts concurrently with subtitle-index/cluster reads. Cache font bytes in memory and IndexedDB so sibling episodes and app restarts avoid fetching the same attachments again, with checksum/name/size/scope validation and storage-pressure recovery.
+- Synchronize ASS after seeking, waiting, pause, play and playback-rate changes. Time-stamp messages at the decoder to prevent a busy worker from treating an old position as fresh.
+- Test actual WASM/legacy libass rendering, delayed-cluster previews, file-origin startup, worker batching, persisted fonts after page reload, decoder timing and legacy playback separation. LG C8 timing and font performance still require physical validation.
+
 ## 1.20.0 — Independent SRT/ASS playback modes
 
 - Replace Enhanced playback with separate SRT and ASS/SSA switches, preserving existing users' single-switch choice for both formats.
