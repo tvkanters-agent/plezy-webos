@@ -2082,10 +2082,23 @@ test('reopening ASS and switching episodes reuses the compiled worker and same-s
   await page.addInitScript(()=>{
     window.WebAssembly=undefined;
     window.assWorkerCreations=0;
+    window.assDebugMessages=[];
     const OriginalWorker=window.Worker;
     window.Worker=function(url) {
       window.assWorkerCreations++;
-      return new OriginalWorker(url);
+      const worker=new OriginalWorker(url);
+      window.assDebugWorker=worker;
+      const send=worker.postMessage.bind(worker);
+      worker.postMessage=function(data,...rest){
+        if (['video','set-track','create-events','plezy-force-frame'].includes(data?.target)) {
+          window.assDebugMessages.push({target:data.target,currentTime:data.currentTime,
+            paused:data.isPaused,events:data.events?.length,
+            script:data.content?.match(/Dialogue:/g)?.length});
+          if(window.assDebugMessages.length>40)window.assDebugMessages.shift();
+        }
+        return send(data,...rest);
+      };
+      return worker;
     };
     window.Worker.prototype=OriginalWorker.prototype;
   });
@@ -2155,7 +2168,21 @@ test('reopening ASS and switching episodes reuses the compiled worker and same-s
         paused:video?.paused,seeking:video?.seeking,readyState:video?.readyState,
         framesCreated:window.assWorkerCreations};
     });
+    const events=await page.evaluate(()=>new Promise(resolve=>{
+      const worker=window.assDebugWorker;
+      if(!worker)return resolve(null);
+      const timer=setTimeout(()=>{worker.removeEventListener('message',onMessage);resolve('timeout');},3000);
+      function onMessage(event){
+        if(event.data?.target!=='get-events')return;
+        clearTimeout(timer);worker.removeEventListener('message',onMessage);
+        resolve(event.data.events?.map(e=>[e.Start,e.Duration,e.Text?.slice(0,50)]));
+      }
+      worker.addEventListener('message',onMessage);
+      worker.postMessage({target:'get-events'});
+    }));
     console.error('ASS GAP FAIL SNAPSHOT:',JSON.stringify(snapshot));
+    console.error('ASS GAP EVENTS:',JSON.stringify(events));
+    console.error('ASS GAP MESSAGES:',JSON.stringify(await page.evaluate(()=>window.assDebugMessages)));
     throw error;
   }
   await page.locator('video').evaluate(video=>{video.currentTime=7.5;});
