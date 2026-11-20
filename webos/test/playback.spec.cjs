@@ -2,6 +2,7 @@ const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
 const {assFixture} = require('./fixtures/matroska.cjs');
+const plexSubtitlePath = '/subtitles/:/transcode/universal/start';
 async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null) {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
@@ -17,8 +18,15 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
+    if (url.pathname === plexSubtitlePath && url.searchParams.get('protocol') !== 'http') {
+      return route.fulfill({status:400,body:'Invalid protocol for subtitle-only transcode'});
+    }
+    if (url.pathname.endsWith('/start.m3u8') && url.searchParams.get('X-Plex-Platform') === 'Chrome' &&
+        url.searchParams.get('X-Plex-Client-Profile-Extra')?.includes('add-transcode-target')) {
+      return route.fulfill({status:400,body:'ClientProfileExtra: video transcode target already exists for streaming hls'});
+    }
     if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/') ||
-        url.pathname === '/subtitles/:/transcode/universal/start' || url.pathname === '/video/:/transcode/universal/subtitles'))
+        url.pathname === plexSubtitlePath))
       return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});
     if (url.pathname === '/library/parts/embedded/file.mkv') {
       const mkv = mkvFixture?.source || await readFile(path.join(__dirname,'fixtures/embedded-subtitles.mkv'));
@@ -31,8 +39,7 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
         headers:{'Content-Range':`bytes ${start}-${end}/${mkv.length}`},
         body:mkv.subarray(start,end + 1)});
     }
-    if (url.pathname.endsWith('/transcode/universal/subtitles') ||
-        url.pathname === '/subtitles/:/transcode/universal/start')
+    if (url.pathname.endsWith('/transcode/universal/subtitles') || url.pathname === plexSubtitlePath)
       return route.fulfill({status:404,body:''});
     if (url.pathname.endsWith('/indexes/sd'))
       return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
@@ -1510,7 +1517,7 @@ for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
       Part:[{id:'part',key:'/video.webm',Stream:[
         {streamType:3,id:31,codec:'ass',selected:1,...(embedded?{}:{key:'/library/streams/31'})}
       ]}]}]},undefined,[],{},null,null,async url=>{
-        const subtitlePath=embedded?'/subtitles/:/transcode/universal/start':'/library/streams/31.ass';
+        const subtitlePath=embedded?plexSubtitlePath:'/library/streams/31.ass';
         if(url.pathname!==subtitlePath) return '<html>Not Found</html>';
         return '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n'+
           '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'+
@@ -1544,7 +1551,7 @@ for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
     await page.locator('video').evaluate(video=>{video.currentTime=8.5;});
     await expect.poll(hasPixels).toBe(true);
     expect(calls.some(url=>embedded
-      ? url.pathname==='/subtitles/:/transcode/universal/start' && url.searchParams.get('subtitleStreamID')==='31'
+      ? url.pathname===plexSubtitlePath && url.searchParams.get('subtitleStreamID')==='31'
       : url.pathname==='/library/streams/31.ass' && url.searchParams.get('encoding')==='utf-8')).toBe(true);
     expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
     expect(errors).toEqual([]);
@@ -1561,7 +1568,7 @@ test('embedded SRT uses the selected track and changes visible cues while clean 
       {streamType:3,id:32,codec:'srt',selected:1}
     ]}]}]},undefined,[],{},null,null,async url=>{
       await download;
-      if(url.pathname!=='/video/:/transcode/universal/subtitles' ||
+      if(url.pathname!==plexSubtitlePath || url.searchParams.get('subtitles')!=='sidecar' ||
           url.searchParams.get('subtitleStreamID')!=='32') return '<html>Not Found</html>';
       // Plex's Web profile offers ASS as a transport even for a source SRT.
       return '[Script Info]\nScriptType: v4.00+\n'+
@@ -1638,7 +1645,7 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
     await page.getByRole('button',{name:'Reset subtitle sync'}).click();
     await expect.poll(cueDrawn).toBe(true);
     expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
-    expect(calls.some(url=>url.pathname.endsWith('/transcode/universal/subtitles'))).toBe(false);
+    expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(false);
     expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
       .toEqual(['none']);
   });
@@ -1681,7 +1688,7 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
   await expect.poll(cueDrawn).toBe(true);
   expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
     .toEqual(['none']);
-  expect(calls.some(url => url.pathname.endsWith('/transcode/universal/subtitles'))).toBe(false);
+  expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
 });
 
 const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
