@@ -26,7 +26,7 @@ test('a reopened MKV gets its complete ASS text and font manifest without range 
   const script='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,\u6f22';
   const fonts=[{name:'sign.ttf',length:8192,crc:'cafebabe'}];
   first.put(key,script,fonts);
-  await first.persist({key,script,fonts,used:Date.now()});
+  await first.persist({key,script,fonts,fontsVerified:true,used:Date.now()});
   const next=new AssTrackCache(factory);
   const restored=await next.get(key);
   assert.equal(restored.key,key);
