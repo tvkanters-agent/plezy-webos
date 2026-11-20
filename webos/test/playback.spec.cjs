@@ -1728,7 +1728,7 @@ const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
     {streamType:3,id:31,codec:'srt',index:2,selected:1}
   ]}]}]};
 
-test('MKV range requests wait for video playback and a failed subtitle leaves it running', async ({page}) => {
+test('MKV range requests wait for playback and failed extraction silently restarts with burn-in', async ({page}) => {
   await page.addInitScript(() => {
     const fetch = window.fetch;
     window.rangeStartTimes = [];
@@ -1742,7 +1742,10 @@ test('MKV range requests wait for video playback and a failed subtitle leaves it
   });
   const {calls} = await setup(page, embeddedMkv, undefined, [], {}, null, null, null, true,
     {beforeRead:() => 200});
-  await expect(page.locator('#toast')).toContainText('The selected subtitle could not be loaded');
+  const startsWith = () => calls.filter(url => url.pathname.endsWith('/start.m3u8'))
+    .map(url => url.searchParams.get('subtitles'));
+  await expect.poll(startsWith).toEqual(['none','burn']);
+  await expect(page.locator('#toast')).not.toBeVisible();
   const starts = await page.evaluate(() => window.rangeStartTimes);
   expect(starts).toHaveLength(1);
   expect(starts[0]).toBeGreaterThan(0.1);
@@ -1750,10 +1753,9 @@ test('MKV range requests wait for video playback and a failed subtitle leaves it
   const position = await video.evaluate(element => element.currentTime);
   await expect.poll(() => video.evaluate(element => element.currentTime)).toBeGreaterThan(position);
   await page.getByRole('button',{name:'Playback settings'}).click();
-  await expect(page.locator('.player-settings-sync-value')).toHaveText('Unavailable');
+  await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
   await expect(page.locator('.player-status')).toBeEmpty();
-  expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
-    .toEqual(['none']);
+  expect(startsWith()).toEqual(['none','burn']);
 });
 
 test('an HLS decoder error during an MKV range read retries video once using Plex subtitles', async ({page}) => {
