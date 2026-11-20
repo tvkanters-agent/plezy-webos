@@ -486,6 +486,12 @@ export class Plex {
         subtitles:transcode ? 'auto' : 'sidecar', advancedSubtitles:'text',
         subtitleStreamID:subtitle.id});
       subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true, url};
+      const container = String(part.container || media.container || '').toLowerCase();
+      if (part.key && ['mkv','matroska'].includes(container)) {
+        subtitleAsset.partUrl = this.url(part.key);
+        subtitleAsset.partSize = part.size;
+        subtitleAsset.streamIndex = selectedSubtitle.index;
+      }
     }
     if (options.audio !== undefined || options.subtitle !== undefined) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,

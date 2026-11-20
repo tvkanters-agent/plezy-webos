@@ -1,3 +1,7 @@
+## 1.13.2
+
+- Read indexed MKV subtitles directly from Plex media byte ranges so embedded SRT and ASS sync can work even if the Plex subtitle endpoint fails.
+
 ## 1.13.1
 
 - Render embedded Plex SRT and ASS/SSA locally so subtitle sync works without forcing video burn-in.

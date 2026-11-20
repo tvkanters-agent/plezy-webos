@@ -19,6 +19,18 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
     if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/') ||
         url.pathname === '/subtitles/:/transcode/universal/start' || url.pathname === '/video/:/transcode/universal/subtitles'))
       return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});
+    if (url.pathname === '/library/parts/embedded/file.mkv') {
+      const mkv = await readFile(path.join(__dirname,'fixtures/embedded-subtitles.mkv'));
+      const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range || '');
+      if (!range) return route.fulfill({status:416,body:''});
+      const start = +range[1], end = Math.min(+range[2], mkv.length - 1);
+      return route.fulfill({status:206,contentType:'video/x-matroska',
+        headers:{'Content-Range':`bytes ${start}-${end}/${mkv.length}`},
+        body:mkv.subarray(start,end + 1)});
+    }
+    if (url.pathname.endsWith('/transcode/universal/subtitles') ||
+        url.pathname === '/subtitles/:/transcode/universal/start')
+      return route.fulfill({status:404,body:''});
     if (url.pathname.endsWith('/indexes/sd'))
       return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
         : route.fulfill({status:404,body:''});
@@ -1587,3 +1599,44 @@ test('Plex extraction failure falls back once and explains why subtitle sync is 
   await expect(page.locator('#toast')).toContainText('timing cannot be changed');
   await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
 });
+
+for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
+  test('MKV ' + codec.toUpperCase() + ' sync works from original file when Plex subtitle endpoint is unavailable',async({page})=>{
+    await page.addInitScript(()=>{
+      window.WebAssembly=undefined;
+      Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
+    });
+    const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+      Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+        {streamType:3,id:31,codec:'srt',index:2,selected:index===2},
+        {streamType:3,id:32,codec:'ass',index:3,selected:index===3}
+      ]}]}]});
+    const video=page.locator('video');
+    await page.locator('[data-action="pause"]').click();
+    await video.evaluate((element,time)=>{element.currentTime=time;},position);
+
+    const srt=page.locator('.player-captions');
+    const canvas=page.locator('#player canvas.libassjs-canvas');
+    const cueDrawn=codec==='srt' ? async()=> (await srt.textContent()).includes('Embedded SRT')
+      : ()=>canvas.evaluate(element=>{
+        const pixels=element.getContext('2d').getImageData(0,0,element.width,element.height).data;
+        for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
+        return false;
+      });
+    await expect.poll(cueDrawn,{timeout:10000}).toBe(true);
+
+    await page.getByRole('button',{name:'Playback settings'}).click();
+    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+    const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+    await slider.evaluate(input=>{
+      input.value='3000'; input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await expect.poll(cueDrawn).toBe(false);
+    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+    await expect.poll(cueDrawn).toBe(true);
+    expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
+    expect(calls.some(url=>url.pathname.endsWith('/transcode/universal/subtitles'))).toBe(false);
+    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
+      .toEqual(['none']);
+  });
+}

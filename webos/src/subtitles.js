@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
+import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 
 // Positive sync offsets delay subtitles, matching the native text-track editor.
 export function subtitleTime(videoTime, offsetMs) {
@@ -15,6 +16,20 @@ function embeddedSubtitleType(content) {
   if (/^\s*\d+:\d{2}:\d{2}[,.]\d+\s+-->\s+\d+:\d{2}:\d{2}[,.]\d+/m.test(text))
     return 'srt';
   throw new Error('Plex did not return a text subtitle file.');
+}
+
+async function downloadSubtitle(asset, signal) {
+  if (asset.partUrl) {
+    try {
+      return await extractMatroskaSubtitle(asset, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      console.info('Could not read embedded subtitle from MKV:', error.message);
+    }
+  }
+  const response = await fetch(asset.url, {signal});
+  if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
+  return response.text();
 }
 
 export class SubtitleOverlay {
@@ -84,10 +99,7 @@ export class SubtitleOverlay {
     let timer;
     let content;
     try {
-      const download = fetch(asset.url, {signal:controller.signal}).then(response => {
-        if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
-        return response.text();
-      });
+      const download = downloadSubtitle(asset, controller.signal);
       const deadline = new Promise((_, reject) => {
         timer = setTimeout(() => {
           reject(new Error('Subtitle download timed out.'));
