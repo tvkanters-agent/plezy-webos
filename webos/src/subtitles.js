@@ -509,18 +509,21 @@ export class SubtitleOverlay {
     }
     // libass divides videoWidth by videoHeight. On the LG hardware plane
     // both can be zero even after decoding starts, leaving its canvas hidden.
+    renderer._plezyAspectRatio = asset.aspectRatio;
     if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
-      const nativePosition = renderer.getVideoPosition;
-      renderer.getVideoPosition = () => {
-        const video = this.video;
-        if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
-        const width = video.offsetWidth, height = video.offsetHeight;
-        const aspect = asset.aspectRatio;
-        if (!aspect) return {width, height, x:0, y:0};
-        const w = Math.min(width, Math.round(height * aspect));
-        const h = Math.min(height, Math.round(width / aspect));
-        return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
-      };
+      if (!renderer._plezyNativePosition) {
+        const nativePosition = renderer._plezyNativePosition = renderer.getVideoPosition;
+        renderer.getVideoPosition = () => {
+          const video = this.video;
+          if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
+          const width = video.offsetWidth, height = video.offsetHeight;
+          const aspect = renderer._plezyAspectRatio;
+          if (!aspect) return {width, height, x:0, y:0};
+          const w = Math.min(width, Math.round(height * aspect));
+          const h = Math.min(height, Math.round(width / aspect));
+          return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
+        };
+      }
       renderer.resize();
     }
     this.renderer = renderer;
