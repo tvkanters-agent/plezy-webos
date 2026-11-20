@@ -585,16 +585,21 @@ user-requested reversible webOS compatibility gate, not a native Plezy
 setting. Browser tests cover mode separation and requests; actual subtitle
 pixels and video decoding still require LG hardware verification.
 
-On the user's MKV+ASS case, Play from beginning succeeds while Resume plays
-audio over black video in compatibility mode. The original API request alone
-does not restore the player's start behavior: webOS also receives a nonzero
-`mediaOption` playback start which the LG HLS decoder may not handle. For
-legacy Plex HLS *resumes only*, start the same source without that mediaOption,
-then perform LG's documented `loadeddata` → `currentTime` seek after video
-data is available. The initial frame stays gated until the seek lands; this
-may preload/buffer twice, but avoids the problematic native-start variant.
-MP4 and enhanced-mode native resume remain unchanged. Hardware verification
-is still needed to confirm whether the affected LG reproduces this inference.
+The first compatibility release restored the original Plex request but still
+showed black video on a resumed MKV+ASS case. Version 1.15.1 assumed LG's
+nonzero HLS `mediaOption` start was responsible, and replaced it with a seek
+after `loadeddata`, introducing a second buffer. That assumption was not
+verified: the user confirmed that before the recent subtitle/playback changes,
+the same LG TV had always resumed correctly after a *single* buffer. As of
+1.15.3 the two-phase workaround is removed. Both Off and On pass the exact
+resume timestamp through the native `mediaOption` **before** video.load/play,
+as v1.10.2 already did, following Plezy's `Media(start:)` behavior. A later
+`currentTime` assignment is reserved for desktop browsers without the LG
+pipeline. The Off Plex startup completion check also restores the older
+first-frame semantics; it does not require newer `videoWidth`/clock-progress
+heuristics that might reject real LG HLS playback. Regression tests cover
+Off/On, HLS/direct file, the exact native start value and zero late seeks.
+Decoder behavior still needs validation on the user's LG TV.
 
 As of 1.15.2 this switch is also enforced at every later boundary. Plex's
 playback API treats missing, malformed and false `enhancedPlayback` values as
@@ -609,8 +614,7 @@ track loads its script and worker. Leaving On disposes old overlay listeners.
 This preserves the historical *MP4* direct-file decision while excluding all
 newly expanded native formats and custom subtitle processing. Unit and browser
 tests assert that MKV SRT/ASS in Off makes one original HLS/burn-in request,
-no decision/extraction call and no ASS runtime load. The double buffer on
-legacy *resume* remains the explicit LG black-video workaround above.
+no decision/extraction call and no ASS runtime load.
 
 The reviewed native expansion is documented in [DIRECT_PLAY_REVIEW.md](DIRECT_PLAY_REVIEW.md). Unlike desktop mpv, LG HTML5 cannot select arbitrary embedded tracks; multi-audio files stay on HLS. Native-only AVC/HEVC formats require stream evidence within the C8/webOS 4.0 limits and correct source MIME. Independent SRT/ASS does not force a video transcode. Startup recovery is scoped to the session and remains armed past metadata until video clock progress, so native failures cannot hide indefinitely or suppress replacement HLS errors. Browser event tests are not hardware decode validation.
 
