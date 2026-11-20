@@ -23,7 +23,7 @@ export function parseAssEvent(line, styles, readOrder) {
 }
 
 function nearPlayhead(line, position) {
-  const match = /^Dialogue:\\s*[^,]*,(\\d+:\\d{2}:\\d{2}\\.\\d{2}),(\\d+:\\d{2}:\\d{2}\\.\\d{2}),/.exec(line);
+  const match = /^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2}),/.exec(line);
   if (!match) return false;
   const begin = assMilliseconds(match[1]) / 1000;
   const end = assMilliseconds(match[2]) / 1000;
