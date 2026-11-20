@@ -675,3 +675,14 @@ track choice. This LG-only fallback is silent on screen; it does not
 claim to recover a failed Plex video burn. Source changes abort the old range
 request. The browser tests exercise ordering and failure handling; they do not
 emulate the TV's network or decoder.
+
+For an MKV SRT/ASS fallback, Plex burns the subtitle selected on the media
+**part**, not the stream named in the HLS request (Plezy's
+`PlexClient.selectSubtitleStreamForBurn`). The local-video attempt may have
+disabled subtitles for its own HLS stream, and stale detail metadata is not
+proof of the current server selection. Before the burn decision, select the
+requested subtitle by `PUT /library/parts/{partId}?subtitleStreamID=…&allParts=1`,
+even when it was Plex's default rather than an explicit user choice. If that
+PUT fails, abort the burn attempt: success on the HLS URL alone cannot prove
+any subtitle pixels were encoded. Browser and unit tests verify this request
+ordering for both embedded formats; live PMS output remains TV verification.

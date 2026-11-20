@@ -1629,6 +1629,12 @@ test('failed MKV byte ranges and Plex extraction silently retry HLS with burned 
   await expect.poll(()=>starts().length).toBe(2);
   expect(starts().map(url=>url.searchParams.get('subtitles'))).toEqual(['none','burn']);
   expect(starts()[1].searchParams.get('subtitleStreamID')).toBe(null);
+  const selected=()=>calls.findIndex(url=>url.pathname==='/library/parts/embedded' &&
+    url.searchParams.get('subtitleStreamID')==='32');
+  const decision=()=>calls.findIndex(url=>url.pathname==='/video/:/transcode/universal/decision' &&
+    url.searchParams.get('subtitles')==='burn');
+  expect(selected()).toBeGreaterThanOrEqual(0);
+  expect(selected()).toBeLessThan(decision(), 'Plex must select the MKV track before asking it to burn');
   expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(true);
   expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
   await expect(page.locator('#toast')).not.toBeVisible();
