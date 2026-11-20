@@ -1621,7 +1621,12 @@ async function render(prepared = null) {
   const valid = () => currentRevision === revision;
   try {
     if (!api && !['settings', 'add', 'plex', 'simkl'].includes(route.type)) route = {type: 'settings'};
-    if (route.type === 'settings') settings();
+    if (route.type === 'settings') {
+      settings();
+      // First-run remote onboarding must still start on Plex sign-in, even
+      // though the playback compatibility switch is displayed above it.
+      if (!api) preferredFocus = main.querySelector('.actions .primary');
+    }
     else if (route.type === 'add') addForm(route.kind);
     else if (route.type === 'plex') { await plexSignIn(); return; }
     else if (route.type === 'simkl') { await simklSignIn(); return; }
@@ -2531,6 +2536,14 @@ async function play(item, start, transcode = false) {
 }
 function settings() {
   title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');
+  const compatibility = el('section', undefined, 'panel');
+  compatibility.append(el('h2', 'Playback mode'));
+  compatibility.append(button('Enhanced playback (Direct Play + subtitle renderers): ' +
+    (state.enhancedPlayback ? 'On' : 'Off'), () => {
+    state.enhancedPlayback = !state.enhancedPlayback; persist(); render();
+  }));
+  compatibility.append(el('p', 'Off (recommended): use the original Plex playback and burned-in subtitle path. On: try newer Direct Play and local SRT/ASS rendering. Changes apply when starting or restarting playback.', 'muted'));
+  main.append(compatibility);
   state.servers.forEach(server => {
     const panel = el('section', undefined, 'panel'); panel.append(el('h2', server.name), el('p', server.kind.toUpperCase() + ' · ' + server.url, 'muted'));
     const actions = el('div', undefined, 'actions');
@@ -2552,7 +2565,7 @@ function settings() {
   panel.append(button('Quality: ' + (state.quality === 'auto' ? 'Automatic' : 'Compatible H.264 / AAC'), () => {
     state.quality = state.quality === 'auto' ? 'transcode' : 'auto'; persist(); render();
   }));
-  panel.append(el('p', 'Automatic plays compatible MP4 files directly. Other formats use server transcoding. Compatible playback requires permission to transcode on your server.', 'muted'));
+  panel.append(el('p', 'Automatic follows the selected playback mode: the original path uses Plex transcoding for MKV and other incompatible files; Enhanced playback can try more formats directly. Compatible playback requires permission to transcode on your server.', 'muted'));
 
   // Native PlaybackSettingsScreen: independent off/button/auto modes for
   // intros and credits, plus countdown and chapter-pattern preferences.

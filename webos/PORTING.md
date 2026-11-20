@@ -569,6 +569,22 @@ Source-track PUT follows PlexClient.selectStreams and treats HTTP success as suc
 
 ### Guarded native Direct Play
 
+The user's playback-compatibility switch is the first Settings control. It
+defaults to **Off** even on upgraded installations, because local SRT/ASS
+extraction, Matroska range reads and expanded native Direct Play have not
+worked reliably on the target LG TV. Off explicitly selects the historical
+v1.10.2 Plex request path: conservative MP4 direct playback, H.264/AAC HLS
+otherwise, Chrome's original profile and `subtitles=burn`, with no separate
+subtitle fetch, transcode decision, or Matroska reader. The original Plex
+server-selected subtitle is used unless the viewer explicitly selects a
+track; the original part selection PUT is preserved. Off also greys out
+subtitle sync with an explanatory Settings toast, since the TV cannot change
+timing on Plex-rendered video pixels. On opt-ins to the later Direct Play and
+local SRT/ASS renderer with its existing silent burn-in fallback. This is a
+user-requested reversible webOS compatibility gate, not a native Plezy
+setting. Browser tests cover mode separation and requests; actual subtitle
+pixels and video decoding still require LG hardware verification.
+
 The reviewed native expansion is documented in [DIRECT_PLAY_REVIEW.md](DIRECT_PLAY_REVIEW.md). Unlike desktop mpv, LG HTML5 cannot select arbitrary embedded tracks; multi-audio files stay on HLS. Native-only AVC/HEVC formats require stream evidence within the C8/webOS 4.0 limits and correct source MIME. Independent SRT/ASS does not force a video transcode. Startup recovery is scoped to the session and remains armed past metadata until video clock progress, so native failures cannot hide indefinitely or suppress replacement HLS errors. Browser event tests are not hardware decode validation.
 
 ### Subtitle sync on Chromium 53 and real Plex sidecar keys

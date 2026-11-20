@@ -232,6 +232,23 @@ test('expired credentials leave a reachable settings action',async({page})=>{
   await mockServer(page,{failed:true});await page.goto('/');await expect(page.getByText(/Sign-in was rejected/)).toBeVisible();
   await page.locator('main').getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
 });
+test('playback compatibility toggle is first in Settings, defaults off and persists across navigation',async({page})=>{
+  await mockServer(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await expect(page.locator('#main .panel').first().getByRole('heading',{name:'Playback mode'})).toBeVisible();
+  const toggle=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): Off'});
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  await expect(page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): On'})).toBeVisible();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(true);
+  // The mockServer init script rewrites storage on full reload; navigate
+  // within the running app to verify the persisted setting is used.
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): On'}).click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(false);
+});
 test('removing a server removes its token',async({page})=>{
   await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Remove from this TV'}).click();
   expect(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).not.toContain('test-token');

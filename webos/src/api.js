@@ -450,6 +450,43 @@ export class Plex {
     if (!response.ok) throw new Error('Plex rating returned HTTP '+response.status+'.');
     return true;
   }
+  // Preserve the v1.10.2 Plex playback path independently of the newer
+  // Direct Play/standalone-subtitle pipeline. In particular, this path makes
+  // no subtitle extraction or transcode-decision request, and leaves Plex
+  // responsible for rendering subtitles into its original HLS stream.
+  async playbackLegacy(item, options, mediaIndex, media, part) {
+    const sessionId = id();
+    const transcode = options.transcode || !['mp4', 'm4v', 'mov'].includes(media.container)
+      || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
+      || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
+    const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
+      protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
+      maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
+      session: sessionId, subtitleSize: 100, subtitles: 'burn',
+      'X-Plex-Platform': 'Chrome',
+      'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
+    if (options.audio !== undefined || options.subtitle !== undefined) {
+      await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
+        subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1},
+      {method: 'PUT'});
+    }
+    const extrasPromise = this.get('/library/metadata/' + enc(item.id),
+      {includeChapters: 1, includeMarkers: 1}).then(data => {
+      const metadata = data?.MediaContainer?.Metadata;
+      if (!Array.isArray(metadata) || !metadata[0]) return null;
+      const raw = metadata[0];
+      return plexNavigation({...raw,
+        Marker: Array.isArray(raw.Marker) ? raw.Marker : item.raw.Marker,
+        Chapter: Array.isArray(raw.Chapter) ? raw.Chapter : item.raw.Chapter},
+      options.skipSettings);
+    }).catch(() => null);
+    return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
+      sessionId, sourceId: String(part.id), transcode, item,
+      subtitleAsset: null, subtitleBurnedIn: transcode && !!selectedPlexSubtitle(media, options),
+      start: Math.max(0, Number(options.start) || 0),
+      ...plexNavigation(item.raw, options.skipSettings), extrasPromise,
+      ...mediaSourceTracks(item, mediaIndex), options};
+  }
   async playback(item, options = {}) {
     const mediaIndex = options.mediaIndex ?? 0;
     if (!Number.isInteger(mediaIndex) || mediaIndex < 0) throw new Error('Invalid media version.');
@@ -457,6 +494,8 @@ export class Plex {
     const part = media && (media.Part || [])[0];
     if (!part) throw new Error('This version has no playable media.');
     if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
+    if (options.enhancedPlayback === false)
+      return this.playbackLegacy(item, options, mediaIndex, media, part);
     const sessionId = id();
     const selectedSubtitle = selectedPlexSubtitle(media, options);
     const subtitle = options.burnSubtitles ? null : plexTextSubtitle(selectedSubtitle);

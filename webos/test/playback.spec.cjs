@@ -7,7 +7,9 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
-  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({...skipSettings,deviceId:'device',active:'plex',
+  // Existing renderer/Direct Play regressions explicitly exercise the opt-in
+  // path; the compatibility-mode case below switches it off.
+  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({enhancedPlayback:true,...skipSettings,deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
     simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),{pendingStops,skipSettings});
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
@@ -22,7 +24,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
       return route.fulfill({status:400,body:'Invalid protocol for subtitle-only transcode'});
     }
     if (url.pathname.endsWith('/start.m3u8') && url.searchParams.get('X-Plex-Platform') === 'Chrome' &&
-        url.searchParams.get('X-Plex-Client-Profile-Extra')?.includes('add-transcode-target')) {
+        url.searchParams.get('X-Plex-Client-Profile-Extra')?.includes('add-transcode-target') &&
+        url.searchParams.has('hasMDE')) {
       return route.fulfill({status:400,body:'ClientProfileExtra: video transcode target already exists for streaming hls'});
     }
     if ((url.pathname === plexSubtitlePath || url.pathname.endsWith('/start.m3u8')) && !calls.some(call =>
@@ -69,6 +72,32 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   }
   return {calls,events};
 }
+test('compatibility mode uses one original Plex HLS burn-in request and disables subtitle timing',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:32,codec:'srt',selected:1}]}]}]},undefined,[],{enhancedPlayback:false},
+      null,null,null,false);
+  // Chromium desktop cannot decode HLS; validate the URL and UI without
+  // treating a fake video/webm response as a functioning HLS stream.
+  await expect.poll(()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8')).length).toBe(1);
+  const starts=calls.filter(url=>url.pathname.endsWith('/start.m3u8'));
+  expect(starts).toHaveLength(1);
+  expect(starts[0].searchParams.get('subtitles')).toBe('burn');
+  expect(starts[0].searchParams.get('X-Plex-Platform')).toBe('Chrome');
+  expect(starts[0].searchParams.has('hasMDE')).toBe(false);
+  expect(calls.some(url=>url.pathname.endsWith('/transcode/universal/decision'))).toBe(false);
+  expect(calls.some(url=>url.pathname==='/subtitles/:/transcode/universal/start')).toBe(false);
+  expect(calls.some(url=>url.pathname.includes('/library/parts/embedded/file.mkv'))).toBe(false);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
+  await expect(sync).toHaveAttribute('aria-disabled','true');
+  await expect(sync).toHaveClass(/is-disabled/);
+  await expect(page.locator('.player-settings-sync-value')).toHaveText('Enhanced playback off');
+  await sync.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#toast')).toHaveText('Enable Enhanced playback in Settings to adjust subtitle timing');
+  await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+});
 function buildBif(image) {
   const count=2, tableEnd=64+(count+1)*8;
   const bytes=Buffer.alloc(tableEnd+2*image.length);

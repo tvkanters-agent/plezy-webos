@@ -468,15 +468,17 @@ export class Player {
   updateSubtitleSyncControls() {
     const label = this.formatSubtitleSyncOffset();
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
+    const legacyMode = this.preferences()?.enhancedPlayback === false;
     const burnedIn = !!this.session?.subtitleBurnedIn;
-    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : label;
+    const disabled = legacyMode || burnedIn;
+    if (settingsValue) settingsValue.textContent = legacyMode ? 'Enhanced playback off' : burnedIn ? 'Burned in' : label;
     const settingsRow = this.sheet.querySelector('.player-settings-sync');
     if (settingsRow) {
-      settingsRow.classList.toggle('is-active', !burnedIn && this.subtitleSyncOffsetMs !== 0);
-      settingsRow.classList.toggle('is-disabled', burnedIn);
+      settingsRow.classList.toggle('is-active', !disabled && this.subtitleSyncOffsetMs !== 0);
+      settingsRow.classList.toggle('is-disabled', disabled);
       // Keep it focusable for remote navigation; selecting it explains why
-      // the embedded pixels cannot be retimed.
-      settingsRow.setAttribute('aria-disabled', String(burnedIn));
+      // subtitle timing is unavailable in the current playback mode.
+      settingsRow.setAttribute('aria-disabled', String(disabled));
     }
     const value = this.sheet.querySelector('.sync-offset-value');
     if (value) value.textContent = label;
@@ -509,6 +511,10 @@ export class Player {
     }, 400);
   }
   openSyncBar() {
+    if (this.preferences()?.enhancedPlayback === false) {
+      this.notify('Enable Enhanced playback in Settings to adjust subtitle timing');
+      return;
+    }
     if (this.session?.subtitleBurnedIn) {
       this.notify('Cannot offset burned-in subtitles');
       return;
@@ -776,7 +782,9 @@ export class Player {
     if (!trackSheetFocus) this.root.querySelector('[data-action="pause"]').focus();
     let session;
     try {
-      session = await api.playback(item, {...options, skipSettings: this.preferences()});
+      session = await api.playback(item, {...options,
+        enhancedPlayback: this.preferences()?.enhancedPlayback !== false,
+        skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
       this.session = session;
       this.trackCatalog = session;
