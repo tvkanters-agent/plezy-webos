@@ -246,7 +246,7 @@ test('TV remote reaches lower settings rows by scrolling without losing focus',a
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
   const first=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
   await expect(first).toBeFocused();
-  for(let i=0;i<8;i++)await page.keyboard.press('ArrowDown');
+  for(let i=0;i<9;i++)await page.keyboard.press('ArrowDown');
   const last=page.getByRole('button',{name:'Credits chapter pattern',exact:true});
   await expect(last).toBeFocused();
   expect(await last.evaluate(node=>{
