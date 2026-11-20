@@ -130,7 +130,27 @@ async function subtitleRequest(signal, run) {
   }
 }
 
-async function downloadSubtitle(asset, signal, position, preview, onTiming, parked) {
+// Cached tracks are safe to read while the video decoder is starting. Only
+// uncached MKV range traffic must wait for a decoded frame. The wait is
+// abortable so switching tracks or closing playback cannot strand a load.
+async function waitForSubtitleNetwork(networkReady, signal) {
+  if (!networkReady) return;
+  const aborted = () => Object.assign(new Error('Subtitle load cancelled.'), {name:'AbortError'});
+  await new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(aborted()); return; }
+    const cancel = () => { signal.removeEventListener('abort',cancel); reject(aborted()); };
+    signal.addEventListener('abort',cancel);
+    Promise.resolve(networkReady).then(() => {
+      signal.removeEventListener('abort',cancel);
+      if (signal.aborted) reject(aborted());
+      else resolve();
+    }, error => {
+      signal.removeEventListener('abort',cancel);
+      reject(error);
+    });
+  });
+}
+async function downloadSubtitle(asset, signal, position, preview, onTiming, parked, networkReady) {
   if (asset.partUrl) {
     try {
       if (asset.format === 'ass' && asset.partCacheKey) {
@@ -156,6 +176,8 @@ async function downloadSubtitle(asset, signal, position, preview, onTiming, park
           }
         }
       }
+      // A verified cached ASS script and fonts do not require Plex requests.
+      await waitForSubtitleNetwork(networkReady, signal);
       const script = await subtitleRequest(signal, (requestSignal, refresh) =>
         extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming,
           onFonts:asset.format === 'ass' ? fonts => { asset.fonts = fonts; } : undefined,
@@ -214,7 +236,9 @@ export class SubtitleOverlay {
         // paint (especially during a paused seek).
         if (event === 'seeking' && this.kind === 'ass' && this.renderer?.ctx && this.renderer.canvas)
           this.renderer.ctx.clearRect(0,0,this.renderer.canvas.width,this.renderer.canvas.height);
-        this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
+        if (event === 'seeking' && this.kind === 'ass')
+          this.assAppender?.prioritize(subtitleTime(this.video.currentTime,this.offsetMs));
+        this.stopClock(); this.update(this.offsetMs); this.syncAssClock(event === 'seeking');
         if (event === 'ended') this.stopAssClock();
         else this.startAssClock();
       });
@@ -231,6 +255,7 @@ export class SubtitleOverlay {
       this.assWaiting = !this.video.paused && Number.isFinite(this.video.readyState) &&
         this.video.readyState < 3;
       this.assWaitingPosition = this.video.currentTime;
+      this.assAppender?.prioritize(subtitleTime(this.video.currentTime,this.offsetMs));
       this.update(this.offsetMs); this.syncAssClock(true); this.startAssClock(); this.startClock();
     });
     listen('timeupdate', () => {
@@ -308,6 +333,7 @@ export class SubtitleOverlay {
     this.abort = null;
     this.releaseRenderer();
     this.assWaiting = false;
+    this.assPriorityPosition = null;
     this.assContent = null;
     this.assUnavailable = this.assPainted = false;
   }
@@ -356,11 +382,12 @@ export class SubtitleOverlay {
     this.element.textContent = '';
   }
 
-  async load(asset, offsetMs, position = this.video.currentTime, onTiming = null) {
+  async load(asset, offsetMs, position = this.video.currentTime, onTiming = null, networkReady = null) {
     this.clear();
     if (!asset) return;
     const generation = this.generation;
     this.offsetMs = offsetMs;
+    this.assPriorityPosition = subtitleTime(position, offsetMs);
     const controller = this.abort = new AbortController();
     const startedAt = onTiming ? Date.now() : 0;
     let firstRendered = false;
@@ -376,7 +403,8 @@ export class SubtitleOverlay {
     if (asset.format === 'srt' || asset.format === 'vtt') ensurePixi().catch(()=>{});
     if (asset.format === 'ass') ensureAssRenderer().catch(()=>{});
     try {
-      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming, this.parkedAssRenderer);
+      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs),
+        render, onTiming, this.parkedAssRenderer, networkReady);
       await render(content);
     } finally {
       if (this.abort === controller) this.abort = null;
@@ -593,7 +621,7 @@ export class SubtitleOverlay {
     renderer._plezyTrackContent = content;
     this.startAssClock();
     if (asset.partUrl && renderer.worker && renderer.getStyles)
-      this.assAppender = new AssEventAppender(renderer, content);
+      this.assAppender = new AssEventAppender(renderer, content, this.assPriorityPosition);
     if (renderer.worker && this.preferences()?.diagnosticsEnabled === true)
       this.removeAssComparison = attachAssColorComparison(this.video, renderer);
     // Octopus calls onReady on its first worker message, including logs.
