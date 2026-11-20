@@ -998,9 +998,10 @@ main.settings-view { padding-top:38px; }
   color: var(--cue-color); white-space: var(--cue-white-space, pre-wrap);
   box-shadow: var(--cue-box-shadow); outline: var(--cue-outline);
   text-shadow: var(--cue-text-shadow); box-sizing: border-box;
-  -webkit-filter: var(--cue-outline-filter, none);
-  filter: var(--cue-outline-filter, none);
+  position: relative;
 }
+#player .player-captions .plezy-srt-foreground { position: relative; z-index: 1; }
+#player .player-captions .plezy-srt-vector-outline { z-index: 0; }
 /* SubtitlesOctopus positions signs in native ASS coordinates. Keep its canvas
    over the video, but below Plezy's controls, without moving signs on reveal. */
 #player .libassjs-canvas-parent { position: absolute !important; top: 0; right: 0; bottom: 0; left: 0; z-index: 2 !important; pointer-events: none; }

@@ -73,20 +73,23 @@ burn-in remains untouched, and ASS/SSA retains its authored formatting.
 MPV sizes subtitle font and border in units at 720p; webOS scales these with
 the display height. Native MPV paints a rounded border *behind* the glyphs.
 Chromium 53's `-webkit-text-stroke` covers the letter fill and creates sharp
-W/V mitres, while ring-shaped text shadows still appear uneven. The local
-renderer instead uses a reusable SVG filter: blur and threshold the cue's
-alpha into a circular contour, flood it with the selected border color, and
-merge the unchanged foreground text above it. The filter applies to the
-complete cue, including inline emphasis and multiline wrapping, without
-duplicating DOM text or observing changes every frame. The local overlay uses the
+W/V mitres, while ring-shaped text shadows still appear uneven. Blurring and
+thresholding the cue alpha rounded *interior* corners as well and rasterized
+the edge. The local renderer uses an SVG text stroke with round joins behind
+the unchanged HTML glyphs; browser text geometry provides visual runs and
+baselines so multiline wrapping and inline emphasis retain their layout.
+The SVG paths remain vector-based, and a scoped MutationObserver updates them
+only when cue text changes, not every playback frame. This is an adaptation
+of MPV's vector border for Chromium 53, not a replacement subtitle library.
+The local overlay uses the
 video rect when `Use margins` is off and the whole screen when enabled. For
 LG hardware planes where `videoWidth`/`videoHeight` report zero, Plex media
 metadata provides the fallback aspect ratio. Default-placement cues are
 repositioned like Plezy's text cues; authored cue placement is retained.
 Media Captions supplies the cue layout, while D-pad-compatible HSV/hex color
 and numeric editors replace native Flutter dialog widgets. Browser tests cover
-stored settings, keyboard focus, layout, and renderer style values. Pixel
-parity and physical LG caption placement have not yet been verified.
+stored settings, keyboard focus, layout, SVG outline geometry and rendered
+pixels. Physical LG caption placement and exact MPV pixel parity remain unverified.
 
 These are pointers, not claims of completed porting. The current HTML frontend still has parity gaps and must not be described as faithful merely because a similarly named feature exists.
 
