@@ -92,10 +92,11 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
     expect(calls.some(url=>url.pathname.includes('/library/parts/embedded/file.mkv'))).toBe(false);
     const renderer=await page.evaluate(()=>({
       assScript:!!document.querySelector('script[src^="libass/"]'),
+      pixiScript:!!document.querySelector('script[src="pixi.min.js"]'),
       assRuntime:typeof window.SubtitlesOctopus,
       captions:document.querySelector('.player-captions')?.childElementCount || 0
     }));
-    expect(renderer).toEqual({assScript:false,assRuntime:'undefined',captions:0});
+    expect(renderer).toEqual({assScript:false,pixiScript:false,assRuntime:'undefined',captions:0});
     await page.getByRole('button',{name:'Playback settings'}).click();
     const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
     await expect(sync).toHaveAttribute('aria-disabled','true');
@@ -1514,7 +1515,8 @@ test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn
   await page.locator('video').evaluate(video=>{video.currentTime=10.025;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('OFFSET CUE');
-  await expect(captions.locator('i')).toHaveText('OFFSET CUE');
+  await expect(captions.locator('canvas.plezy-pixi-subtitles')).toBeVisible();
+  expect(await page.evaluate(()=>window.PIXI?.VERSION)).toBe('4.8.9');
   expect(calls.some(url=>url.pathname==='/library/streams/31.srt' &&
     url.searchParams.get('encoding')==='utf-8')).toBe(true);
   await page.getByRole('button',{name:'Playback settings'}).click();
@@ -1659,101 +1661,71 @@ test('SRT playback applies saved Plezy text and border styling, including letter
   await page.locator('video').evaluate(video=>{video.pause();video.currentTime=10.5;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('STYLE CUE');
-  await page.screenshot({path:testInfo.outputPath('srt-vector-border.png')});
-  await expect.poll(()=>captions.locator('[part="cue-display"]').evaluate(node=>
-    node.style.getPropertyValue('--cue-top'))).not.toBe('NaN%');
+  await page.screenshot({path:testInfo.outputPath('srt-pixi-border.png')});
+  await expect(captions.locator('canvas.plezy-pixi-subtitles')).toBeVisible();
   const style=await captions.evaluate(node=>{
-    const cue=node.querySelector('[part="cue"]');
-    const computed=getComputedStyle(cue);
-    return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
-      italic:computed.fontStyle,bg:computed.backgroundColor,
-      shadow:computed.textShadow,strokeWidth:computed.webkitTextStrokeWidth,
-      top:parseFloat(node.style.top),
-      cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
-      cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
-        node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
-  });
-  assertStyle(style);
-  const strokes=await captions.locator('svg.plezy-srt-vector-outline text').evaluateAll(nodes=>
-    nodes.map(node=>({join:node.getAttribute('stroke-linejoin'),
-      stroke:node.getAttribute('stroke'),width:node.getAttribute('stroke-width'),
-      text:node.textContent})));
-  expect(strokes).toHaveLength(2);
-  expect(strokes.map(s=>s.text)).toEqual(['STYLE CUE WAVY V','SECOND LINE']);
-  for(const stroke of strokes){
-    expect(stroke).toMatchObject({join:'round',stroke:'#00FF00',width:'6.00'});
-  }
-  // The SVG paths provide a real vector stroke with rounded outer joins;
-  // unchanged HTML glyphs are composited above it, retaining sharp valleys.
-  const outlined=(await captions.screenshot()).toString('base64');
-  await captions.evaluate(()=>document.querySelectorAll('.plezy-srt-vector-outline text')
-    .forEach(node=>node.setAttribute('stroke-width','12.00')));
-  const thick=(await captions.screenshot()).toString('base64');
-  await captions.evaluate(()=>document.querySelectorAll('.plezy-srt-vector-outline text')
-    .forEach(node=>node.setAttribute('stroke','none')));
-  const plain=(await captions.screenshot()).toString('base64');
-  const counts=await page.evaluate(async images=>{
-    const results=[];
-    for(const base64 of images){
-      const image=new Image();image.src='data:image/png;base64,'+base64;
-      await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;});
-      const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
-      const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
-      const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-      let red=0,green=0;
-      for(let i=0;i<pixels.length;i+=4){
-        if(pixels[i]>160&&pixels[i+1]<65&&pixels[i+2]<40)red++;
-        if(pixels[i+1]>140&&pixels[i]<80&&pixels[i+2]<80)green++;
-      }
-      results.push({red,green});
+    const canvas=node.querySelector('canvas.plezy-pixi-subtitles');
+    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+    let red=0,green=0,minY=canvas.height,maxY=0,minX=canvas.width,maxX=0;
+    for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+      const i=(y*canvas.width+x)*4;
+      if(pixels[i]>100&&pixels[i+1]<100&&pixels[i+2]<70){red++;}
+      if(pixels[i+1]>130&&pixels[i]<100&&pixels[i+2]<100){green++;}
+      if(pixels[i+3]){minY=Math.min(y,minY);maxY=Math.max(y,maxY);minX=Math.min(x,minX);maxX=Math.max(x,maxX);}
     }
-    return results;
-  },[outlined,thick,plain]);
-  expect(counts[0].red).toBeGreaterThan(200);
-  expect(counts[0].red).toBeGreaterThanOrEqual(counts[2].red*0.98);
-  expect(counts[1].red).toBeGreaterThanOrEqual(counts[2].red*0.98);
-  expect(counts[0].green).toBeGreaterThan(100);
-  expect(counts[1].green).toBeGreaterThan(counts[0].green*1.3);
-  expect(counts[2].green).toBe(0);
-  // Save a readable black-on-grey multiline example for visual review.
-  await captions.evaluate(node=>{
-    node.style.setProperty('--cue-color','#FFFFFF');
-    node.querySelectorAll('.plezy-srt-vector-outline text').forEach(text=>{
-      text.setAttribute('stroke-width','6');text.setAttribute('stroke','#000000');
-    });
-    node.parentElement.style.backgroundColor='#777777';
-    node.parentElement.querySelector('video').style.opacity='0';
+    return {fontSize:node.style.fontSize,weight:node.style.fontWeight,italic:node.style.fontStyle,
+      top:parseFloat(node.style.top),width:canvas.width,height:canvas.height,
+      cueTopFraction:minY/canvas.height,bottomFraction:maxY/canvas.height,
+      leftFraction:minX/canvas.width,rightFraction:maxX/canvas.width,red,green};
   });
-  await page.screenshot({path:testInfo.outputPath('srt-rounded-wavy-outline.png')});
-  // Cue HTML can change without a new track (inline emphasis and timed VTT
-  // spans). The observer redraws only on mutations, preserving each run's
-  // font and the original HTML layout across an explicit line break.
-  await captions.locator('.plezy-srt-foreground').evaluate(node=>{
-    node.innerHTML='<b>WAVY</b> <i>VISUAL</i><br>SECOND';
-  });
-  await expect.poll(()=>captions.locator('svg.plezy-srt-vector-outline text')
-    .evaluateAll(nodes=>nodes.map(n=>n.textContent).join('|')))
-    .toBe('WAVY| |VISUAL|SECOND');
-  const inlineRuns=await captions.locator('svg.plezy-srt-vector-outline text').evaluateAll(nodes=>
-    nodes.map(n=>({text:n.textContent,style:n.getAttribute('font-style'),
-      y:parseFloat(n.getAttribute('y'))})));
-  expect(inlineRuns[2].style).toBe('italic');
-  expect(inlineRuns[3].y).toBeGreaterThan(inlineRuns[0].y+30);
+  expect(parseFloat(style.fontSize)).toBeGreaterThan(40);
+  expect(style.weight).toBe('700');
+  expect(style.italic).toBe('italic');
+  expect(style.top).toBeGreaterThan(12);
+  expect(style.cueTopFraction).toBeGreaterThan(0.35);
+  expect(style.cueTopFraction).toBeLessThan(0.65);
+  expect(style.red).toBeGreaterThan(200);
+  expect(style.green).toBeGreaterThan(100);
+  // The complete glyph and its outline must stay inside the texture; no
+  // asymmetrically cut-off or excessively extended left-hand border.
+  expect(style.leftFraction).toBeGreaterThan(0.1);
+  expect(style.rightFraction).toBeLessThan(0.9);
+  expect(style.bottomFraction).toBeLessThan(0.8);
   await page.locator('[data-action="stop"]').click();
-  await expect(page.locator('svg.plezy-srt-vector-outline')).toHaveCount(0);
-  function assertStyle(actual){
-    expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
-    expect(actual.color).toBe('rgb(170, 51, 17)');
-    expect(actual.weight).toBe('700');
-    expect(actual.italic).toBe('italic');
-    expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
-    expect(actual.shadow).toBe('none');
-    expect(parseFloat(actual.strokeWidth)).toBe(0);
-    expect(actual.top).toBeGreaterThan(12);
-    expect(actual.cuePosition).not.toBe('');
-    expect(actual.cueTopFraction).toBeGreaterThan(0.35);
-    expect(actual.cueTopFraction).toBeLessThan(0.65);
-  }
+  await expect(page.locator('canvas.plezy-pixi-subtitles')).toHaveCount(0);
+});
+
+test('Pixi SRT black border and white glyphs render opaque sharp pixels without a subtitle box',async({page},testInfo)=>{
+  await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/subtitles.srt',selected:1}
+    ]}]}]},undefined,[],{
+    subtitleFontSize:44,subtitleBorderSize:4,subtitleBorderColor:'#000000',subtitleTextColor:'#FFFFFF',
+    subtitlePosition:100,subtitleBold:false,subtitleItalic:false
+  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nWAVY VISION\n');
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=10.5;});
+  await expect(page.locator('.player-captions')).toContainText('WAVY VISION');
+  const counts=await page.locator('canvas.plezy-pixi-subtitles').evaluate(canvas=>{
+    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+    let black=0,white=0,transparent=0,partial=0;
+    for(let i=0;i<pixels.length;i+=4){
+      const alpha=pixels[i+3];
+      if(alpha===0){transparent++;continue;}
+      if(alpha<255){partial++;continue;}
+      if(pixels[i]<25&&pixels[i+1]<25&&pixels[i+2]<25)black++;
+      if(pixels[i]>230&&pixels[i+1]>230&&pixels[i+2]>230)white++;
+    }
+    return {black,white,transparent,partial};
+  });
+  expect(counts.black).toBeGreaterThan(1000);
+  expect(counts.white).toBeGreaterThan(1000);
+  expect(counts.partial).toBeGreaterThan(100);
+  expect(counts.transparent).toBeGreaterThan(500000,'background must be fully transparent');
+  await page.locator('#player').evaluate(player=>{
+    player.style.backgroundColor='#777777';
+    player.querySelector('video').style.opacity='0';
+  });
+  await page.screenshot({path:testInfo.outputPath('srt-pixi-black-border.png')});
 });
 
 test('Plex extraction failure silently falls back once and disables burned-in subtitle sync',async({page})=>{
@@ -1835,12 +1807,12 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
     if (codec === 'ass') {
       const ratio = await canvas.evaluate(el => el.clientWidth / el.clientHeight);
       expect(ratio).toBeCloseTo(2.4, 2);
-      await expect(srt.locator('[part="cue"]')).toHaveCount(0);
+      await expect(srt.locator('canvas.plezy-pixi-subtitles')).toHaveCount(0);
       const box = await canvas.boundingBox();
       expect(box.y).toBeGreaterThanOrEqual(0);
       expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize().height + 1);
     } else {
-      await expect(srt.locator('[part="cue"]')).toBeVisible();
+      await expect(srt.locator('canvas.plezy-pixi-subtitles')).toBeVisible();
     }
 
 
@@ -1975,13 +1947,13 @@ test('embedded MKV SRT displays the first cue while later cluster reads are bloc
   try {
     await page.locator('[data-action="pause"]').click();
     await page.locator('video').evaluate(element => { element.currentTime = 0.5; });
-    await expect(page.locator('.player-captions [part="cue"]')).toContainText('Subtitle 0', {timeout:5000});
+    await expect(page.locator('.player-captions')).toContainText('Subtitle 0', {timeout:5000});
     expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
   } finally {
     releaseNext();
   }
   await page.locator('video').evaluate(element => { element.currentTime = 6.5; });
-  await expect(page.locator('.player-captions [part="cue"]')).toContainText('Subtitle 1');
+  await expect(page.locator('.player-captions')).toContainText('Subtitle 1');
 });
 
 const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
