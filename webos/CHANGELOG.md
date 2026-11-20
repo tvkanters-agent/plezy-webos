@@ -1,3 +1,10 @@
+## 1.22.0 — Warm ASS workers, cached tracks and resilient seek clocks
+
+- Keep the compiled legacy/WASM libass worker and its registered fonts idle between enhanced ASS sessions, without decoding or video listeners. Reuse it for sibling episodes whose cached font bytes match; dispose it when switching to compatibility playback or a different font set.
+- Persist each completed embedded ASS track separately from its fonts. Reopening the same Plex part bypasses the MKV seek index and subtitle cluster reads, even after an app restart; no Plex authentication URLs are saved.
+- Follow the actual video position between sparse native timeupdate events, including paused seeks. Clear stale buffering state after playback progresses or seeking completes, and force a redraw after a seek so cached worker frames cannot remain blank.
+- Wait for the libass worker's actual runtime-ready event, not the first log message. Test real rendered signs and playback switches with the same font but different subtitle scripts.
+
 ## 1.21.0 — Incremental ASS events and persistent font reuse
 
 - Start an MKV ASS preview after the closest indexed cluster instead of waiting for twelve, and append subsequent events in one worker message per batch. Keep the original ASS styles and signs without recreating libass's track after each partial read.

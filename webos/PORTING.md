@@ -800,11 +800,22 @@ Cache matches are scoped to the Plex series using filename, length and the
 first bytes; when an attachment has an EBML CRC, identical fonts can be reused
 across titles. Changed/missing fonts are fetched again. Font storage is
 opportunistic and cannot prevent playback if unavailable or out of quota.
-Libass workers are still recreated on each playback session, so native font
-parsing and legacy JS-worker startup costs have not been eliminated.
+As of 1.22.0, an initialized worker and its font registrations are suspended
+and retained across enabled ASS sessions while no ASS subtitle is visible.
+The worker's video listeners and resize observer are detached when suspended,
+so switching to SRT or closing playback does not run idle rendering. A
+different font set or disabling enhanced playback disposes the old worker.
+Different ASS tracks with the same font bytes reuse the worker and replace
+only the track, avoiding recompilation of the large legacy JS worker. Each
+completed MKV ASS track is also cached separately from its font blobs using
+the Plex server/part identity, size and selected track; repeat plays can skip
+subtitle index and cluster range reads across app restarts.
 ASS video-state updates additionally transmit their send timestamp, paused
 state, and rate; a small bundled-worker adaptation projects queued updates
 to receipt time while suppressing this projection during pauses/buffering.
+The overlay additionally samples the real video clock every 250ms while ASS
+is active, including paused position changes, and forces a seek redraw. A
+stale `waiting` event cannot leave libass paused after decoded time advances.
 No other playback mode instantiates the custom ASS runtime.
 
 The diagnostic console logging added in v1.17.5 was removed in v1.17.7 at the
