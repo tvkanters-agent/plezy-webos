@@ -49,8 +49,8 @@ test('paused ASS event imports force a redraw after the worker installs the even
   appender.ready();
   stylesReply([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
   assert.deepEqual(sent.map(msg=>msg.target),
-    ['create-events','plezy-force-frame','video'],
-    'paused redraw must occur after the worker processes the new events');
+    ['create-events','video','plezy-force-frame'],
+    'paused redraw must receive the new subtitle time before forcing a frame');
   appender.dispose();
 });
 
@@ -69,4 +69,31 @@ test('the fully initialized worker style reply installs pending events without a
   appender.ready();
   assert.equal(sent.length,2,'initialization must be idempotent');
   appender.dispose();
+});
+
+test('long ASS streams import events near the resume or seek timestamp first',()=>{
+  const sent=[];
+  const renderer={video:{currentTime:125.5,paused:false,seeking:false},timeOffset:0,
+    worker:{postMessage:message=>sent.push(message)},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const headerScript=header+first+'\n';
+  const distant='Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,Distant';
+  const resumed='Dialogue: 0,0:02:05.00,0:02:12.00,Default,,0,0,0,,Resume subtitle';
+  const seeking='Dialogue: 0,0:03:40.00,0:03:41.00,Default,,0,0,0,,Seek subtitle';
+  const appender=new AssEventAppender(renderer,headerScript,125.5);
+  appender.remember(headerScript+distant+'\n'+seeking+'\n'+resumed+'\n');
+  appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.equal(sent[0].events[0].Text,'Resume subtitle');
+  assert.deepEqual(sent[0].events.slice(1).map(event=>event.Text),
+    ['Distant','Seek subtitle']);
+  appender.dispose();
+
+  const next=new AssEventAppender(renderer,headerScript,125.5);
+  next.remember(headerScript+distant+'\n'+resumed+'\n'+seeking+'\n');
+  next.prioritize(220.5);
+  sent.length=0;
+  next.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.equal(sent[0].events[0].Text,'Seek subtitle',
+    'a seek overtakes unrelated unimported vector-sign events');
+  next.dispose();
 });
