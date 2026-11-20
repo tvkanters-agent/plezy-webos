@@ -22,17 +22,27 @@ export function parseAssEvent(line, styles, readOrder) {
     MarginV:Number(values[7]) || 0, Effect:values[8], Text:text};
 }
 
+function nearPlayhead(line, position) {
+  const match = /^Dialogue:\\s*[^,]*,(\\d+:\\d{2}:\\d{2}\\.\\d{2}),(\\d+:\\d{2}:\\d{2}\\.\\d{2}),/.exec(line);
+  if (!match) return false;
+  const begin = assMilliseconds(match[1]) / 1000;
+  const end = assMilliseconds(match[2]) / 1000;
+  // Prioritize signs already active at the seek point and upcoming dialogue.
+  return begin <= position + 8 && end >= position - 0.25;
+}
+
 // Subtitles may be delivered out of chronological order, and the same line
 // can occur more than once. A multiset (not a prefix/diff) avoids duplicating
 // already installed events after each cumulative preview.
 export class AssEventAppender {
-  constructor(renderer, initialScript) {
+  constructor(renderer, initialScript, position = null) {
     this.renderer = renderer;
     this.counts = new Map();
     this.pending = [];
     this.styles = null;
     this.disposed = false;
     this.readOrder = 1000000;
+    this.priorityTime = Number.isFinite(position) ? position : null;
     this.remember(initialScript, false);
   }
 
@@ -47,7 +57,20 @@ export class AssEventAppender {
       if (append && count > (this.counts.get(line) || 0)) this.pending.push(line);
     }
     this.counts = counts;
-    if (append) this.flush();
+    if (append) {
+      if (this.priorityTime !== null) this.prioritize(this.priorityTime);
+      this.flush();
+    }
+  }
+
+  prioritize(position) {
+    if (!Number.isFinite(position)) return;
+    this.priorityTime = position;
+    if (this.pending.length < 2) return;
+    const near = [], other = [];
+    for (const line of this.pending)
+      (nearPlayhead(line, position) ? near : other).push(line);
+    if (near.length) this.pending = near.concat(other);
   }
 
   ready(styles = null) {
@@ -80,24 +103,24 @@ export class AssEventAppender {
     // A cached full-season track may contain thousands of vector-heavy
     // events. Yield between worker batches so clock/seek messages can pass
     // through instead of being delayed behind one giant libass allocation.
-    const lines = this.pending.splice(0, 128);
+    // Keep the first chunk small: it should paint a resumed/seeked cue
+    // before libass parses a long backlog of unrelated vector signs.
+    const lines = this.pending.splice(0, this.readOrder === 1000000 ? 32 : 128);
     const events = lines.map(line => parseAssEvent(line, this.styles, ++this.readOrder));
     this.renderer.worker.postMessage({target:'create-events', events});
-    // Changes to a paused track can leave the previous frame painted: libass
-    // does not always report a blend change for a newly empty cue window.
-    // Force the redraw *after* the new events are installed in worker order.
-    if (this.renderer.video.paused || this.renderer.video.seeking)
-      this.renderer.worker.postMessage({target:'plezy-force-frame'});
+    const paused = this.renderer.video.paused || this.renderer.video.seeking;
     if (this.pending.length) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null;
         this.flush();
       }, 8);
     }
-    // The worker normally repaints on its own. Force one update for the
-    // first newly installed events and the final batch while paused.
-    if (!this.pending.length || this.readOrder === 1000000 + lines.length)
+    // Set the *current* subtitle clock before forcing a paused redraw.
+    // Previously force-frame ran first, sometimes repainting the old seek
+    // position just after installing a newly available sign.
+    if (paused || !this.pending.length || this.readOrder === 1000000 + lines.length)
       this.renderer.setCurrentTime(this.renderer.video.currentTime + this.renderer.timeOffset);
+    if (paused) this.renderer.worker.postMessage({target:'plezy-force-frame'});
   }
 
   dispose() {
