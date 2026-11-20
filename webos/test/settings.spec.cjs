@@ -88,6 +88,22 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   })).toEqual([true,'transcode',12,'']);
 });
 
+test('Subtitle diagnostics stays off by default and persists only when enabled',async({page})=>{
+  await connected(page);
+  await page.getByRole('button',{name:'Video Playback',exact:true}).click();
+  const diagnostics=page.getByRole('button',{name:'Subtitle diagnostics',exact:true});
+  await expect(diagnostics).toHaveAttribute('aria-pressed','false');
+  await diagnostics.click();
+  await expect(diagnostics).toHaveAttribute('aria-pressed','true');
+  await expect(diagnostics).toBeFocused();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).subtitleDiagnostics)).toBe(true);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Video Playback',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Subtitle diagnostics',exact:true}))
+    .toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).subtitleDiagnostics)).toBe(true);
+});
+
 test('Subtitle Styling matches native Text/Border groups with TV-friendly editors and persists choices',async({page},testInfo)=>{
   await connected(page);
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();

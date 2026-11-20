@@ -39,6 +39,26 @@ test('extracts actual indexed SRT and ASS blocks with full-title times and style
   assert.doesNotMatch(ass, /Embedded SRT/);
 });
 
+test('MKV diagnostics are completely inactive without a timing callback', async t => {
+  serveRanges(t);
+  const now = t.mock.method(Date, 'now', () => { throw new Error('Unexpected diagnostic clock'); });
+  const srt = await extractMatroskaSubtitle({...asset,streamIndex:2,format:'srt'},
+    new AbortController().signal);
+  assert.match(srt, /Embedded SRT/);
+  assert.equal(now.mock.callCount(), 0);
+});
+
+test('opt-in MKV diagnostics report range, index and completion times', async t => {
+  const requests = serveRanges(t);
+  const timings = [];
+  await extractMatroskaSubtitle({...asset,streamIndex:2,format:'srt'},
+    new AbortController().signal, {onTiming:(event,ms)=>timings.push([event,ms])});
+  assert.equal(timings.filter(([event])=>event==='range').length,requests.length);
+  assert.equal(timings.filter(([event])=>event==='index').length,1);
+  assert.equal(timings.filter(([event])=>event==='complete').length,1);
+  assert.ok(timings.every(([,ms])=>Number.isFinite(ms) && ms>=0));
+});
+
 test('reads compressed MKV ASS without relative cue offsets or a stored Events section', async t => {
   const {source, firstCluster} = assFixture();
   let release;

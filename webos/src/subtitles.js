@@ -79,11 +79,11 @@ async function subtitleRequest(signal, run) {
   }
 }
 
-async function downloadSubtitle(asset, signal, position, preview) {
+async function downloadSubtitle(asset, signal, position, preview, onTiming) {
   if (asset.partUrl) {
     try {
       return await subtitleRequest(signal, (requestSignal, refresh) =>
-        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, async preview(content) {
+        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming, async preview(content) {
           if (!requestSignal.aborted) await preview(content);
         }}));
     } catch (error) {
@@ -196,15 +196,23 @@ export class SubtitleOverlay {
     this.element.textContent = '';
   }
 
-  async load(asset, offsetMs, position = this.video.currentTime) {
+  async load(asset, offsetMs, position = this.video.currentTime, onTiming = null) {
     this.clear();
     if (!asset) return;
     const generation = this.generation;
     this.offsetMs = offsetMs;
     const controller = this.abort = new AbortController();
-    const render = content => this.render(asset, content, generation);
+    const startedAt = onTiming ? Date.now() : 0;
+    let firstRendered = false;
+    const render = async content => {
+      await this.render(asset, content, generation);
+      if (onTiming && !firstRendered && generation === this.generation && this.kind === 'srt') {
+        firstRendered = true;
+        onTiming('first', Date.now() - startedAt);
+      }
+    };
     try {
-      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render);
+      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming);
       await render(content);
     } finally {
       if (this.abort === controller) this.abort = null;
