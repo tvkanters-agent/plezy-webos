@@ -1523,8 +1523,19 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  const called=[];
  // Plezy delivers other catalog scores without waiting for a slow provider.
  await page.addInitScript(()=>{
-   window.PalmServiceBridge=class { cancel(){} call(){window.releaseCatalog=()=>this.onservicecallback(
-     JSON.stringify({returnValue:true,status:404,headers:{},body:'{}'}));} };
+   window.pendingCatalogBridges=new Set();
+   window.PalmServiceBridge=class {
+     cancel(){window.pendingCatalogBridges.delete(this);}
+     call(){window.pendingCatalogBridges.add(this);}
+   };
+   // The old fixture only released the last bridge, leaving an earlier
+   // concurrent lookup pending (and the rating pill busy) under CI load.
+   window.releaseCatalog=()=>{
+     for(const bridge of Array.from(window.pendingCatalogBridges)) {
+       window.pendingCatalogBridges.delete(bridge);
+       bridge.onservicecallback(JSON.stringify({returnValue:true,status:404,headers:{},body:'{}'}));
+     }
+   };
  });
  await page.route('https://api.mdblist.com/**',route=>{
    const url=new URL(route.request().url());
@@ -1554,6 +1565,7 @@ test('Plezy MDBList provider adds multiple branded ratings to one metadata pill'
  await expect(bubble.locator('.rating-spinner')).toHaveCount(1);
  await expect(bubble.locator('.rating-badge')).toHaveCount(0);
  // Even though MDBList has returned, the pill must not grow in stages.
+ await expect.poll(()=>page.evaluate(()=>window.pendingCatalogBridges.size)).toBeGreaterThan(0);
  await page.evaluate(()=>window.releaseCatalog());
  await expect(bubble).toHaveAttribute('aria-busy','false');
  await expect(bubble.locator('.rating-spinner')).toHaveCount(0);
