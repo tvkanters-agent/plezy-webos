@@ -71,6 +71,36 @@ test('early MKV subtitle reads do not bypass resume seeks or compatibility playb
   player.scheduleEmbeddedSubtitle();t.mock.timers.tick(200);
   assert.equal(reads,0);
 });
+test('switching enabled SRT and ASS replaces only the overlay; burn-in requires reopening',()=>{
+  const api=new Plex({url:'http://plex.test',token:'fixture'},'tv');
+  const media={container:'mkv',Part:[{id:55,key:'/library/parts/55/file.mkv',Stream:[
+    {streamType:3,id:90,codec:'srt',selected:1},
+    {streamType:3,id:91,codec:'ass',selected:0}
+  ]}]};
+  const item={id:'movie',raw:{Media:[media]}};
+  const session={enhancedPlayback:true,subtitleAsset:{id:90,format:'srt'},subtitleBurnedIn:false,
+    subtitles:[{id:90,selected:true},{id:91,selected:false}]};
+  const prefs={srtPlayback:true,assPlayback:true};
+  let clears=0,reads=0,reloads=0;
+  const player=Object.assign(Object.create(Player.prototype),{
+    api,item,session,options:{},closing:false,generation:1,
+    subtitleOverlay:{clear(){clears++;}},preferences:()=>prefs,
+    scheduleEmbeddedSubtitle(){reads++;},updateSubtitleSyncControls(){},
+    reopen(){reloads++;}
+  });
+  assert.equal(player.switchLocalSubtitle(91),true);
+  assert.equal(player.session,session);
+  assert.equal(session.subtitleAsset.format,'ass');
+  assert.equal(player.options.subtitle,91);
+  assert.deepEqual([clears,reads,reloads],[1,1,0]);
+  prefs.assPlayback=false;
+  assert.equal(player.switchLocalSubtitle(91),false,'disabled ASS must use Plex burn-in');
+  assert.deepEqual([clears,reads,reloads],[1,1,0]);
+  assert.equal(player.switchLocalSubtitle(90),true,'enabled SRT can replace ASS without reopening');
+  assert.equal(player.switchLocalSubtitle(-1),true,'turning subtitles off needs no video reload');
+  assert.equal(session.subtitleAsset,null);
+  assert.deepEqual([clears,reads,reloads],[3,2,0]);
+});
 test('Play rejection without a media error invokes recovery, while autoplay denial waits for a gesture',async()=>{
   for(const name of ['NotSupportedError','NotAllowedError','AbortError']) {
     let failures=0;
@@ -208,11 +238,11 @@ test('both modes send the exact initial timestamp to LG for Plex HLS and direct 
   try {
     for (const [session,target] of [
       [{transcode:true,legacyPlexPlayback:true},125.25],
-      [{transcode:true,enhancedPlayback:true},125.25],
+      [{transcode:true,srtPlayback:true,assPlayback:true},125.25],
       [{transcode:false,legacyPlexPlayback:true},125.25],
-      [{transcode:false,enhancedPlayback:true,mimeType:'video/x-matroska'},125.25],
+      [{transcode:false,srtPlayback:true,assPlayback:true,mimeType:'video/x-matroska'},125.25],
       [{transcode:true,legacyPlexPlayback:true},0],
-      [{transcode:true,enhancedPlayback:true},0]
+      [{transcode:true,srtPlayback:true,assPlayback:true},0]
     ]) {
       const video={appendChild(source){sources.push(source);},load(){}};
       const player=Object.assign(Object.create(Player.prototype),{

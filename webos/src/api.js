@@ -96,6 +96,16 @@ function plexTextSubtitle(stream) {
   return {id:stream.id, format, key:key + query};
 }
 
+// Select the transport before any playback/decision/subtitle requests.
+// Unsupported formats, unselected subtitles and a renderer's burn-in retry
+// use the original Plex pipeline, regardless of the other format's setting.
+function enabledLocalSubtitle(media, options) {
+  if (options.burnSubtitles) return null;
+  const subtitle = plexTextSubtitle(selectedPlexSubtitle(media, options));
+  return subtitle && (subtitle.format === 'srt' && options.srtPlayback === true ||
+    subtitle.format === 'ass' && options.assPlayback === true) ? subtitle : null;
+}
+
 export function plexExternalSubtitle(media, options = {}) {
   const subtitle = plexTextSubtitle(selectedPlexSubtitle(media, options));
   return subtitle?.key ? subtitle : null;
@@ -456,19 +466,20 @@ export class Plex {
   // responsible for rendering subtitles into its original HLS stream.
   async playbackLegacy(item, options, mediaIndex, media, part) {
     const sessionId = id();
-    const transcode = options.transcode || !['mp4', 'm4v', 'mov'].includes(media.container)
+    const selectedSubtitle = selectedPlexSubtitle(media, options);
+    const transcode = options.transcode || !!selectedSubtitle || !['mp4', 'm4v', 'mov'].includes(media.container)
       || media.videoCodec !== 'h264' || !['aac', 'mp3'].includes(media.audioCodec)
-      || options.audio !== undefined || (options.subtitle !== undefined && options.subtitle !== -1);
+      || options.audio !== undefined || (options.subtitle !== undefined && String(options.subtitle) !== '-1');
     const params = {path: '/library/metadata/' + item.id, mediaIndex, partIndex: 0,
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId, subtitleSize: 100, subtitles: 'burn',
       'X-Plex-Platform': 'Chrome',
       'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
-    if (options.audio !== undefined || options.subtitle !== undefined) {
+    if (options.audio !== undefined || options.subtitle !== undefined || (transcode && selectedSubtitle)) {
       await this.get('/library/parts/' + enc(part.id), {audioStreamID: options.audio,
-        subtitleStreamID: options.subtitle === -1 ? 0 : options.subtitle, allParts: 1},
-      {method: 'PUT'});
+        subtitleStreamID: selectedSubtitle ? selectedSubtitle.id : String(options.subtitle) === '-1' ? 0 : options.subtitle,
+        allParts: 1}, {method: 'PUT', responseType:'none'});
     }
     const extrasPromise = this.get('/library/metadata/' + enc(item.id),
       {includeChapters: 1, includeMarkers: 1}).then(data => {
@@ -482,7 +493,7 @@ export class Plex {
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, item, legacyPlexPlayback:true,
-      subtitleAsset: null, subtitleBurnedIn: transcode && !!selectedPlexSubtitle(media, options),
+      subtitleAsset: null, subtitleBurnedIn: transcode && !!selectedSubtitle,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings), extrasPromise,
       ...mediaSourceTracks(item, mediaIndex), options};
@@ -494,13 +505,11 @@ export class Plex {
     const part = media && (media.Part || [])[0];
     if (!part) throw new Error('This version has no playable media.');
     if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
-    // Enhanced playback is opt-in at the API boundary too. A caller that
-    // forgets the setting must never enable expanded Direct Play or renderers.
-    if (options.enhancedPlayback !== true)
+    const subtitle = enabledLocalSubtitle(media, options);
+    if (!subtitle)
       return this.playbackLegacy(item, options, mediaIndex, media, part);
     const sessionId = id();
     const selectedSubtitle = selectedPlexSubtitle(media, options);
-    const subtitle = options.burnSubtitles ? null : plexTextSubtitle(selectedSubtitle);
     // An explicit stream ID is not proof that it exists in this media part.
     const hasSubtitle = !!selectedSubtitle;
     const mimeType = plexDirectPlayMime(media, {...options, localSubtitle:!!subtitle});
@@ -519,35 +528,7 @@ export class Plex {
       'X-Plex-Platform':'Generic', 'X-Plex-Client-Profile-Name':'Generic',
       'X-Plex-Session-Identifier':sessionId,
       'X-Plex-Client-Profile-Extra':'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
-    let subtitleAsset = null;
-    if (subtitle?.key) {
-      subtitleAsset = {id:subtitle.id, format:subtitle.format,
-        url:this.url(subtitle.key, {encoding:'utf-8'})};
-    } else if (subtitle) {
-      // Plex Web requests a standalone HTTP subtitle file. The video may
-      // need HLS, but applying that protocol to this request can be rejected.
-      const subtitleSession = id();
-      const subtitleParams = {...source,
-        session:subtitleSession, context:'streaming', protocol:'http', fastSeek:1, copyts:1,
-        directPlay:1, directStream:1, directStreamAudio:1, subtitles:'sidecar', advancedSubtitles:'text',
-        subtitleStreamID:subtitle.id, 'X-Plex-Platform':'Chrome', 'X-Plex-Session-Identifier':subtitleSession};
-      subtitleAsset = {id:subtitle.id, format:subtitle.format, embedded:true,
-        decisionUrl:this.url('/video/:/transcode/universal/decision', subtitleParams),
-        url:this.url('/subtitles/:/transcode/universal/start', subtitleParams)};
-      const container = String(part.container || media.container || '').toLowerCase();
-      if (part.key && ['mkv','matroska'].includes(container)) {
-        subtitleAsset.partUrl = this.url(part.key);
-        subtitleAsset.partSize = part.size;
-        subtitleAsset.streamIndex = selectedSubtitle.index;
-      }
-    }
-    if (subtitleAsset) {
-      // Chromium/webOS may keep decoded video dimensions at zero on the
-      // hardware plane. Pass the same metadata aspect ratio to SRT's
-      // use-margins layout as well as the existing libass canvas fallback.
-      const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);
-      if (Number.isFinite(aspect) && aspect > 0) subtitleAsset.aspectRatio = aspect;
-    }
+    const subtitleAsset = this.localSubtitleAsset(item, options);
     // Plezy's PlexClient.selectSubtitleStreamForBurn does this before its
     // transcode decision: the universal transcoder ignores subtitleStreamID
     // on the HLS URL and burns the part's *stored* selected stream instead.
@@ -591,6 +572,40 @@ export class Plex {
       extrasPromise,
       ...mediaSourceTracks(item, mediaIndex),
       options};
+  }
+  // Pure URL construction: switching between enabled text tracks needs only
+  // a replacement overlay, never a new video transcode/decoder session.
+  localSubtitleAsset(item, options = {}) {
+    const media = (item.raw.Media || [])[options.mediaIndex ?? 0];
+    const part = media?.Part?.[0];
+    if (!part) return null;
+    const subtitle = enabledLocalSubtitle(media, options);
+    if (!subtitle) return null;
+    let asset;
+    if (subtitle.key) asset = {id:subtitle.id, format:subtitle.format,
+      url:this.url(subtitle.key, {encoding:'utf-8'})};
+    else {
+      const subtitleSession = id();
+      const source = {path:'/library/metadata/' + enc(item.id),
+        mediaIndex:options.mediaIndex ?? 0, partIndex:0, hasMDE:1};
+      const params = {...source,session:subtitleSession, context:'streaming',
+        protocol:'http', fastSeek:1, copyts:1, directPlay:1, directStream:1,
+        directStreamAudio:1, subtitles:'sidecar', advancedSubtitles:'text',
+        subtitleStreamID:subtitle.id, 'X-Plex-Platform':'Chrome',
+        'X-Plex-Session-Identifier':subtitleSession};
+      asset = {id:subtitle.id, format:subtitle.format, embedded:true,
+        decisionUrl:this.url('/video/:/transcode/universal/decision', params),
+        url:this.url('/subtitles/:/transcode/universal/start', params)};
+      const container = String(part.container || media.container || '').toLowerCase();
+      if (part.key && ['mkv','matroska'].includes(container)) {
+        asset.partUrl = this.url(part.key);
+        asset.partSize = part.size;
+        asset.streamIndex = selectedPlexSubtitle(media, options).index;
+      }
+    }
+    const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);
+    if (Number.isFinite(aspect) && aspect > 0) asset.aspectRatio = aspect;
+    return asset;
   }
   async scrubPreview(session, signal) {
     // Plezy obtains scrub frames from Plex's SD BIF index for the active part.

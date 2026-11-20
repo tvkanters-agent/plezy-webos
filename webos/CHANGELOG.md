@@ -1,3 +1,10 @@
+## 1.20.0 — Independent SRT/ASS playback modes
+
+- Replace Enhanced playback with separate SRT and ASS/SSA switches, preserving existing users' single-switch choice for both formats.
+- Select the historical Plex HLS/burn-in path when the selected format's switch is off, before any video decision, subtitle extraction, or renderer load. Only the enabled selected format uses the enhanced transport and overlay.
+- Switch between enabled local SRT and ASS tracks without reopening video; switching between local subtitles and Plex burn-in still replaces the video stream. Explicitly select the requested Plex track before burn-in, including a server-default selection.
+- Keep subtitle sync unavailable for burned-in or absent subtitles and preserve native one-buffer resume.
+
 ## 1.19.4 — Start nearby MKV SRT cues after decoder Play
 
 - Start the first embedded MKV subtitle read shortly after the hardware decoder's `playing` event instead of waiting for video dimensions and 0.1-second clock progress. Preserve the existing full startup gate and decoder-failure recovery.

@@ -226,6 +226,7 @@ export class Player {
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
+        if (kind === 'subtitle' && this.switchLocalSubtitle(id)) return;
         return this.reopen({[kind]:id, burnSubtitles:false, skipMatroskaSubtitles:false,
           transcode:kind === 'audio' || !!this.options.transcode},
           !this.sheet.hidden && this.openSheetAction === 'tracks-options' ? {kind, id} : null);
@@ -458,7 +459,7 @@ export class Player {
     } catch (_) {}
   }
   setSubtitleSyncOffset(offsetMs) {
-    if (!this.enhancedPlaybackActive || this.session?.subtitleBurnedIn) return;
+    if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset || this.session?.subtitleBurnedIn) return;
     this.subtitleSyncOffsetMs = clamp(Math.round(Number(offsetMs) / 50) * 50, -60000, 60000);
     try {
       const key = this.subtitleSyncStorageKey();
@@ -483,8 +484,10 @@ export class Player {
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
     const legacyMode = !this.enhancedPlaybackActive;
     const burnedIn = !!this.session?.subtitleBurnedIn;
-    const disabled = legacyMode || burnedIn;
-    if (settingsValue) settingsValue.textContent = legacyMode ? 'Enhanced playback off' : burnedIn ? 'Burned in' : label;
+    const noLocalTrack = !this.session?.subtitleAsset;
+    const disabled = legacyMode || burnedIn || noLocalTrack;
+    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' :
+      legacyMode ? 'Local subtitles off' : noLocalTrack ? 'No subtitles' : label;
     const settingsRow = this.sheet.querySelector('.player-settings-sync');
     if (settingsRow) {
       settingsRow.classList.toggle('is-active', !disabled && this.subtitleSyncOffsetMs !== 0);
@@ -516,7 +519,7 @@ export class Player {
   }
   startSyncHold(direction) {
     this.stopSyncHold();
-    if (!this.enhancedPlaybackActive || this.session?.subtitleBurnedIn) return;
+    if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset || this.session?.subtitleBurnedIn) return;
     this.syncHoldFired = false;
     this.syncHoldTimeout = setTimeout(() => {
       this.syncHoldFired = true;
@@ -525,12 +528,12 @@ export class Player {
     }, 400);
   }
   openSyncBar() {
-    if (!this.enhancedPlaybackActive) {
-      this.notify('Enable Enhanced playback in Settings to adjust subtitle timing');
-      return;
-    }
     if (this.session?.subtitleBurnedIn) {
       this.notify('Cannot offset burned-in subtitles');
+      return;
+    }
+    if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset) {
+      this.notify('Enable enhanced SRT or ASS playback in Settings to adjust subtitle timing');
       return;
     }
     this.stopSyncHold();
@@ -769,13 +772,10 @@ export class Player {
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
     const playbackPreferences = this.preferences();
-    this.enhancedPlaybackActive = playbackPreferences?.enhancedPlayback === true;
+    // The API chooses the route from the *selected* format and its setting.
+    // No local renderer, offset or extraction is started before that choice.
+    this.enhancedPlaybackActive = false;
     const diagnosticOpenedAt = playbackPreferences?.diagnosticsEnabled === true ? Date.now() : 0;
-    if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
-      this.subtitleOverlay.dispose();
-      this.subtitleOverlay = null;
-    }
-    this.loadSubtitleSyncOffset();
     this.pauseAfterOpen = !this.openIntentPlaying;
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
     this.lastPosition = options.start || 0;
@@ -806,14 +806,17 @@ export class Player {
     let session;
     try {
       session = await api.playback(item, {...options,
-        enhancedPlayback: this.enhancedPlaybackActive,
-        skipSettings: this.preferences()});
+        srtPlayback: playbackPreferences?.srtPlayback === true,
+        assPlayback: playbackPreferences?.assPlayback === true,
+        skipSettings: playbackPreferences});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
-      if (!this.enhancedPlaybackActive && session.enhancedPlayback === true) {
-        await api.stop(session).catch(() => {});
-        throw new Error('Enhanced playback is disabled in Settings.');
+      this.enhancedPlaybackActive = session.enhancedPlayback === true;
+      if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
+        this.subtitleOverlay.dispose();
+        this.subtitleOverlay = null;
       }
       this.session = session;
+      this.loadSubtitleSyncOffset();
       this.trackCatalog = session;
       if (diagnosticOpenedAt && this.enhancedPlaybackActive &&
           session.subtitleAsset?.partUrl && session.subtitleAsset.format === 'srt')
@@ -888,8 +891,10 @@ export class Player {
     this.subtitleLoadSession = session;
     clearTimeout(this.embeddedSubtitleTimer);
     this.embeddedSubtitleTimer = null;
-    const asset = this.options.skipMatroskaSubtitles ? {...session.subtitleAsset, partUrl:null} : session.subtitleAsset;
-    const alive = () => generation === this.generation && this.session === session;
+    const selection = session.subtitleAsset;
+    const asset = this.options.skipMatroskaSubtitles ? {...selection, partUrl:null} : selection;
+    const alive = () => generation === this.generation && this.session === session &&
+      session.subtitleAsset === selection;
     this.subtitleOverlay.onError = error => {
       if (alive()) this.subtitleFailed(error, session);
     };
@@ -1127,6 +1132,38 @@ export class Player {
     if (generation !== this.generation) return;
     this.closing = false;
     this.onClose();
+  }
+  // Plezy's native player changes local text tracks without reopening media.
+  // The webOS HLS/Direct Play video URL has subtitles=none in this mode, so
+  // only the independent overlay changes. Burn-in requires a new Plex stream.
+  switchLocalSubtitle(id) {
+    const session = this.session;
+    if (!session?.enhancedPlayback || !this.subtitleOverlay || this.closing ||
+        this.options.burnSubtitles || typeof this.api?.localSubtitleAsset !== 'function') return false;
+    const choices = {...this.options, subtitle:id, burnSubtitles:false, skipMatroskaSubtitles:false};
+    const prefs = this.preferences();
+    const asset = id === -1 ? null : this.api.localSubtitleAsset(this.item, {...choices,
+      srtPlayback:prefs?.srtPlayback === true, assPlayback:prefs?.assPlayback === true});
+    if (id !== -1 && !asset) return false;
+    this.options = choices;
+    session.options = choices;
+    session.subtitleAsset = asset;
+    session.subtitleBurnedIn = false;
+    session.subtitles.forEach(track => { track.selected = String(track.id) === String(id); });
+    clearTimeout(this.embeddedSubtitleTimer);
+    this.embeddedSubtitleTimer = null;
+    this.subtitleLoadSession = null;
+    this.matroskaSubtitleSession = null;
+    this.subtitleOverlay.clear();
+    this.subtitleDiagnostics?.dispose();
+    this.subtitleDiagnostics = prefs?.diagnosticsEnabled === true && asset?.partUrl && asset.format === 'srt'
+      ? new SubtitleDiagnostics(this.root, Date.now()) : null;
+    this.updateSubtitleSyncControls();
+    if (asset) {
+      if (asset.partUrl) this.scheduleEmbeddedSubtitle();
+      else this.loadSubtitleAsset(session, this.generation);
+    }
+    return true;
   }
   async reopen(changes, trackSheetFocus = null) {
     if (!this.item || this.closing) return;

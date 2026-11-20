@@ -36,7 +36,7 @@ test('Settings uses upstream grouped tiles and pushed subpages with Back focus r
   await expect(page.getByRole('heading',{name:'Video Playback',exact:true})).toBeVisible();
   await expect(page.getByRole('heading',{name:'Player',exact:true})).toBeVisible();
   await expect(page.getByRole('heading',{name:'Auto-play & Skip'})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'})).toBeFocused();
+  await expect(page.getByRole('button',{name:'Enhanced SRT playback'})).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
   await expect(playback).toBeFocused();
@@ -53,12 +53,17 @@ test('Settings uses upstream grouped tiles and pushed subpages with Back focus r
 test('Playback settings preserve toggle focus and use selection/input dialogs',async({page})=>{
   await connected(page);
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
-  const enhanced=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
-  await expect(enhanced).toHaveAttribute('aria-pressed','false');
-  await enhanced.click();
-  await expect(enhanced).toHaveAttribute('aria-pressed','true');
-  await expect(enhanced).toBeFocused();
+  const srt=page.getByRole('button',{name:'Enhanced SRT playback'});
+  const ass=page.getByRole('button',{name:'Enhanced ASS playback'});
+  await expect(srt).toHaveAttribute('aria-pressed','false');
+  await expect(ass).toHaveAttribute('aria-pressed','false');
+  await srt.click();
+  await expect(srt).toHaveAttribute('aria-pressed','true');
+  await expect(ass).toHaveAttribute('aria-pressed','false');
+  await expect(srt).toBeFocused();
   const quality=page.getByRole('button',{name:'Quality',exact:true});
+  await page.keyboard.press('ArrowDown');
+  await expect(ass).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(quality).toBeFocused();
   await page.keyboard.press('Enter');
@@ -84,8 +89,8 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   await expect(intro).toBeFocused();
   expect(await page.evaluate(()=>{
     const state=JSON.parse(localStorage.getItem('plezy.webos'));
-    return [state.enhancedPlayback,state.quality,state.autoSkipDelay,state.introPattern];
-  })).toEqual([true,'transcode',12,'']);
+    return [state.srtPlayback,state.assPlayback,state.quality,state.autoSkipDelay,state.introPattern];
+  })).toEqual([true,false,'transcode',12,'']);
 });
 
 test('general Diagnostics lives under About, defaults off and persists only when enabled',async({page})=>{
@@ -250,9 +255,9 @@ test('TV remote reaches lower settings rows by scrolling without losing focus',a
   await page.setViewportSize({width:1280,height:720});
   await connected(page);
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
-  const first=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
+  const first=page.getByRole('button',{name:'Enhanced SRT playback'});
   await expect(first).toBeFocused();
-  for(let i=0;i<8;i++)await page.keyboard.press('ArrowDown');
+  for(let i=0;i<9;i++)await page.keyboard.press('ArrowDown');
   const last=page.getByRole('button',{name:'Credits chapter pattern',exact:true});
   await expect(last).toBeFocused();
   expect(await last.evaluate(node=>{
