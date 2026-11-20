@@ -763,6 +763,80 @@ main.has-alpha-bar { padding-right:60px; }
 .skip-pref-row input[type=text] { flex:1; min-width:0; }
 .skip-pref-row input[type=number] { width:84px; }
 
+/* lib/widgets/settings_section.dart: SettingsGroup is a connected M3E list
+   of separate Material surfaces (20px outside / 5px inside corners, 2px
+   hairline gaps). Flutter's 13px dense rows are scaled for 10-foot webOS;
+   Chromium 53 uses SVG symbols instead of the Material Symbols font. */
+main.settings-view { padding-top:38px; }
+.settings-view > h1 { max-width:1040px; font-size:36px; font-weight:600; margin:0 0 22px; }
+.settings-group { max-width:1040px; margin:0 0 24px; }
+.settings-group-heading { font-size:18px; line-height:1.4; margin:0 16px 8px;
+  font-weight:600; color:#a2a5ae; }
+.settings-group-items { display:flex; flex-direction:column; padding:0 16px; }
+.settings-tile { display:flex; align-items:center; text-align:left; width:100%;
+  min-height:76px; padding:14px 20px; margin:0 0 2px; border:0; border-radius:5px;
+  background:#15171c; color:#ededed; box-shadow:none; }
+.settings-tile:first-child { border-top-left-radius:20px; border-top-right-radius:20px; }
+.settings-tile:last-child { margin-bottom:0; border-bottom-left-radius:20px; border-bottom-right-radius:20px; }
+.settings-tile:only-child { border-radius:20px; }
+.settings-tile > svg { width:25px; height:25px; flex:0 0 25px; margin-right:20px; }
+.settings-tile-copy { display:block; flex:1; min-width:0; }
+.settings-tile-title { display:block; font-size:20px; line-height:1.34; font-weight:500; }
+.settings-tile-subtitle { display:block; margin-top:4px; font-size:16px; line-height:1.4;
+  color:#a2a5ae; overflow-wrap:break-word; }
+.settings-chevron { display:block; flex:0 0 22px; margin-left:16px; color:#a2a5ae;
+  font-size:30px; line-height:1; text-align:center; }
+.settings-tile:hover { background:#26282e; }
+/* FocusableListTile's in-surface highlight: no outlined rectangle and no
+   geometry-changing border on a grouped setting row. */
+.settings-tile:focus { border:0; outline:0; background:#34373e; box-shadow:none;
+  -webkit-transform:scale(1.008); transform:scale(1.008); }
+.settings-switch { display:block; width:47px; height:29px; flex:0 0 47px;
+  margin-left:18px; border:2px solid #777b84; border-radius:20px;
+  background:#282a30; position:relative; }
+.settings-switch:before { content:''; position:absolute; top:5px; left:5px;
+  width:15px; height:15px; background:#aaaeb7; border-radius:50%; }
+.settings-switch.on { background:#ededed; border-color:#ededed; }
+.settings-switch.on:before { width:21px; height:21px; top:2px; left:21px;
+  background:#15171c; }
+.settings-page-header { max-width:1040px; display:flex; align-items:center; margin:0 0 22px; }
+.settings-page-header h1 { font-size:36px; font-weight:600; margin:0; }
+.settings-back { width:42px; height:42px; flex:0 0 42px; margin-right:12px;
+  padding:0; border:0; background:transparent; border-radius:50%; font-size:39px;
+  line-height:38px; }
+.settings-back:focus { border:0; background:#34373e; box-shadow:none; }
+.settings-description { max-width:960px; color:#a2a5ae; margin:0 16px 26px;
+  font-size:18px; line-height:1.45; }
+#dialog.settings-dialog { top:50%; left:50%; right:auto; width:560px; max-width:calc(100% - 80px);
+  max-height:calc(100% - 64px); overflow:auto; -webkit-transform:translate(-50%,-50%);
+  transform:translate(-50%,-50%); border:0; border-radius:28px;
+  background:#202229; padding:28px; box-shadow:0 0 0 100vmax rgba(0,0,0,.65); }
+.settings-dialog h2 { font-size:27px; font-weight:500; margin:0 0 20px; }
+.settings-dialog-options { display:flex; flex-direction:column; }
+.settings-dialog .settings-choice { display:block; text-align:left; border:0;
+  border-radius:12px; background:transparent; padding:12px 16px; margin:2px 0; }
+.settings-dialog .settings-choice[aria-pressed="true"] { background:#393c44; }
+.settings-dialog .settings-choice:focus { border:0; background:#ededed; color:#111318; box-shadow:none; }
+.settings-dialog .settings-cancel { border:0; background:transparent; margin-top:16px; }
+.settings-dialog .settings-cancel:focus { border:0; background:#ededed; color:#111318; box-shadow:none; }
+.settings-dialog-description { font-size:17px; color:#a2a5ae; }
+.settings-dialog-form input { width:100%; margin-bottom:8px; }
+.settings-dialog-actions { display:flex; justify-content:flex-end; align-items:center; }
+.settings-dialog-actions button { margin:10px 0 0 10px; }
+.settings-connect-form { margin:0 16px; padding:20px; border-radius:20px; background:#15171c; }
+.settings-connect-form input { display:block; width:100%; margin-bottom:10px; }
+.settings-connect-form p { margin:14px 0 0; }
+.settings-about { max-width:1040px; padding:40px 24px; text-align:center; }
+.settings-about img { width:80px; height:80px; border-radius:16px; }
+.settings-about h2 { font-size:29px; margin:12px 0 6px; }
+.settings-about p { max-width:600px; margin:0 auto 16px; font-size:18px; }
+@media (max-width:1100px) {
+  main.settings-view { padding-top:30px; }
+  .settings-tile { min-height:64px; }
+  .settings-tile-title { font-size:18px; }
+  .settings-tile-subtitle { font-size:15px; }
+}
+
 /* Plezy's CompactSyncBar: top-centred, single-row, below the title safe
    area, so subtitle text remains visible while synchronising playback. */
 .player-sheet.sheet-sync {
