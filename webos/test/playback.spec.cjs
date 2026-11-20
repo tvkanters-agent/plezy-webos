@@ -1655,32 +1655,40 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     subtitleFontSize:40,subtitleTextColor:'#AA3311',subtitleBorderSize:2,
     subtitleBorderColor:'#00FF00',subtitlePosition:50,
     subtitleUseMargins:false,subtitleBold:true,subtitleItalic:true
-  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nSTYLE CUE WAVY V\n');
+  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nSTYLE CUE WAVY V\nSECOND LINE\n');
   await page.locator('video').evaluate(video=>{video.pause();video.currentTime=10.5;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('STYLE CUE');
-  await page.screenshot({path:testInfo.outputPath('srt-border-stroke.png')});
+  await page.screenshot({path:testInfo.outputPath('srt-border-composited.png')});
   await expect.poll(()=>captions.locator('[part="cue-display"]').evaluate(node=>
     node.style.getPropertyValue('--cue-top'))).not.toBe('NaN%');
   const style=await captions.evaluate(node=>{
     const cue=node.querySelector('[part="cue"]');
     const computed=getComputedStyle(cue);
-    const container=getComputedStyle(node);
     return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
       italic:computed.fontStyle,bg:computed.backgroundColor,
       shadow:computed.textShadow,strokeWidth:computed.webkitTextStrokeWidth,
+      filter:computed.filter,
       top:parseFloat(node.style.top),
       cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
       cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
         node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
   });
   assertStyle(style);
-  // A stroke on the glyph itself would cover its coloured fill and produce
-  // spikes at sharp letters. Compare pixels with/without the outline: the
-  // red fill must remain intact, while green outline pixels appear around it.
-  const originalShadow=await captions.evaluate(node=>node.style.getPropertyValue('--cue-text-shadow'));
+  const filter=await captions.evaluate(node=>{
+    const filter=document.querySelector('#player svg filter[id^="plezy-srt-outline-"]');
+    return {sigma:filter.querySelector('feGaussianBlur').getAttribute('stdDeviation'),
+      color:filter.querySelector('feFlood').getAttribute('flood-color')};
+  });
+  expect(filter).toEqual({sigma:'1.50',color:'#00FF00'});
+  // Compare actual rendered pixels: the composed outline must not replace
+  // foreground glyph pixels or draw black strokes across W/V intersections.
+  const originalFilter=await captions.evaluate(node=>node.style.getPropertyValue('--cue-outline-filter'));
   const outlined=(await captions.screenshot()).toString('base64');
-  await captions.evaluate(node=>node.style.setProperty('--cue-text-shadow','none'));
+  await captions.evaluate(()=>document.querySelector('#player feGaussianBlur').setAttribute('stdDeviation','3.75'));
+  const thick=(await captions.screenshot()).toString('base64');
+  await captions.evaluate(()=>document.querySelector('#player feGaussianBlur').setAttribute('stdDeviation','1.50'));
+  await captions.evaluate(node=>node.style.setProperty('--cue-outline-filter','none'));
   const plain=(await captions.screenshot()).toString('base64');
   const counts=await page.evaluate(async images=>{
     const results=[];
@@ -1698,27 +1706,33 @@ test('SRT playback applies saved Plezy text and border styling, including letter
       results.push({red,green});
     }
     return results;
-  },[outlined,plain]);
+  },[outlined,thick,plain]);
   expect(counts[0].red).toBeGreaterThan(200);
-  expect(counts[0].red).toBeGreaterThanOrEqual(counts[1].red*0.98);
+  expect(counts[0].red).toBeGreaterThanOrEqual(counts[2].red*0.98);
+  expect(counts[1].red).toBeGreaterThanOrEqual(counts[2].red*0.98);
   expect(counts[0].green).toBeGreaterThan(100);
-  expect(counts[1].green).toBe(0);
-  // Save a readable black-on-grey example containing W/V for visual review.
-  await captions.evaluate((node,shadow)=>{
+  expect(counts[1].green).toBeGreaterThan(counts[0].green*1.3);
+  expect(counts[2].green).toBe(0);
+  // Save a readable black-on-grey multiline example for visual review.
+  await captions.evaluate((node,filterValue)=>{
     node.style.setProperty('--cue-color','#FFFFFF');
-    node.style.setProperty('--cue-text-shadow',shadow.replace(/#00FF00/g,'#000000'));
+    node.style.setProperty('--cue-outline-filter',filterValue);
+    node.parentElement.querySelector('feFlood').setAttribute('flood-color','#000000');
     node.parentElement.style.backgroundColor='#777777';
     node.parentElement.querySelector('video').style.opacity='0';
-  },originalShadow);
+  },originalFilter);
   await page.screenshot({path:testInfo.outputPath('srt-rounded-wavy-outline.png')});
+  await page.locator('[data-action="stop"]').click();
+  await expect(page.locator('svg filter[id^="plezy-srt-outline-"]')).toHaveCount(0);
   function assertStyle(actual){
     expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
     expect(actual.color).toBe('rgb(170, 51, 17)');
     expect(actual.weight).toBe('700');
     expect(actual.italic).toBe('italic');
     expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
-    expect(actual.shadow).toContain('rgb(0, 255, 0)');
+    expect(actual.shadow).toBe('none');
     expect(parseFloat(actual.strokeWidth)).toBe(0);
+    expect(actual.filter).toContain('plezy-srt-outline-');
     expect(actual.top).toBeGreaterThan(12);
     expect(actual.cuePosition).not.toBe('');
     expect(actual.cueTopFraction).toBeGreaterThan(0.35);

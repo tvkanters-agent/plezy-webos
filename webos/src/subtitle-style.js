@@ -28,21 +28,39 @@ export function subtitleStyle(values = {}) {
   return result;
 }
 
-// MPV's outline is drawn behind the glyph fill with rounded joins. WebKit
-// text-stroke is centred over the glyph and has sharp mitres on W/V, which
-// makes the text itself black and introduces spikes. Text shadows paint under
-// the text. Distribute their offsets around a circle (not a square), with
-// enough samples to avoid gaps even on diagonal strokes.
-export function subtitleOutline(size, color) {
-  if (!(size > 0)) return 'none';
-  const samples=Math.min(96,Math.max(12,Math.ceil(2*Math.PI*size/1.2)));
-  const shadows=[];
-  for (let i=0;i<samples;i++) {
-    const angle=2*Math.PI*i/samples;
-    shadows.push((size*Math.cos(angle)).toFixed(2)+'px '+
-      (size*Math.sin(angle)).toFixed(2)+'px 0 '+color);
-  }
-  return shadows.join(', ');
+let outlineId=0;
+const SVG_NS='http://www.w3.org/2000/svg';
+function svgNode(doc,name,attributes={}) {
+  const node=doc.createElementNS(SVG_NS,name);
+  for (const field of Object.keys(attributes)) node.setAttribute(field,attributes[field]);
+  return node;
+}
+
+// Expand the *alpha* of the composed cue with a circular Gaussian contour,
+// threshold it into a crisp mask, then draw the original glyphs above it.
+// Unlike SVG morphology's square kernel, this rounds sharp W/V vertices.
+// The cue markup, line wrapping and text fill remain completely unchanged.
+// The one SVG filter is reused for every cue and recalculated only on resize.
+function outlineFilter(element) {
+  if (element._plezyOutlineFilter) return element._plezyOutlineFilter;
+  if (!element.ownerDocument || !element.parentNode) return null;
+  const doc=element.ownerDocument,id='plezy-srt-outline-'+(++outlineId);
+  const svg=svgNode(doc,'svg',{'aria-hidden':'true',width:'0',height:'0'});
+  svg.style.position='absolute';svg.style.overflow='hidden';
+  const filter=svgNode(doc,'filter',{id,x:'-50%',y:'-50%',width:'200%',height:'200%',
+    'color-interpolation-filters':'sRGB'});
+  const blur=svgNode(doc,'feGaussianBlur',{in:'SourceAlpha',stdDeviation:'0',result:'softMask'});
+  // With sigma = radius/2, an alpha threshold near .02 approximates the
+  // requested outer radius. The narrow .02–.04 ramp antialiases its edge.
+  const contour=svgNode(doc,'feComponentTransfer',{in:'softMask',result:'expanded'});
+  contour.append(svgNode(doc,'feFuncA',{type:'linear',slope:'50',intercept:'-1'}));
+  const flood=svgNode(doc,'feFlood',{'flood-color':'#000000',result:'ink'});
+  const mask=svgNode(doc,'feComposite',{in:'ink',in2:'expanded',operator:'in',result:'outline'});
+  const merge=svgNode(doc,'feMerge');
+  merge.append(svgNode(doc,'feMergeNode',{in:'outline'}),svgNode(doc,'feMergeNode',{in:'SourceGraphic'}));
+  filter.append(blur,contour,flood,mask,merge);svg.append(filter);
+  element.parentNode.append(svg);
+  return element._plezyOutlineFilter={svg,id,blur,flood};
 }
 
 // object-fit:contain uses the video's decoded aspect ratio; with margins off
@@ -65,8 +83,15 @@ export function applySrtStyle(element, video, values, fallbackAspect) {
   element.style.fontWeight=style.subtitleBold?'700':'400';
   element.style.fontStyle=style.subtitleItalic?'italic':'normal';
   element.style.setProperty('--cue-color',style.subtitleTextColor);
-  element.style.setProperty('--cue-text-shadow',
-    subtitleOutline(style.subtitleBorderSize*scale,style.subtitleBorderColor));
+  const radius=style.subtitleBorderSize*scale;
+  element.style.setProperty('--cue-border-radius',radius.toFixed(2)+'px');
+  element.style.setProperty('--cue-text-shadow','none');
+  const outline=radius>0 ? outlineFilter(element) : element._plezyOutlineFilter;
+  if (outline) {
+    outline.blur.setAttribute('stdDeviation',(radius/2).toFixed(2));
+    outline.flood.setAttribute('flood-color',style.subtitleBorderColor);
+  }
+  element.style.setProperty('--cue-outline-filter',radius>0 && outline ? 'url(#'+outline.id+')' : 'none');
   // Upstream's text settings contain no background, and unstyled SRT should
   // not acquire an artificial opaque box from Media Captions' defaults.
   element.style.setProperty('--cue-bg-color','transparent');
@@ -80,8 +105,13 @@ export function resetSrtStyle(element) {
   if (!element.style) return;
   for (const field of ['fontSize','fontWeight','fontStyle','top','right','bottom','left'])
     element.style[field]='';
-  for (const field of ['--cue-color','--cue-text-shadow','--cue-bg-color'])
+  for (const field of ['--cue-color','--cue-text-shadow','--cue-outline-filter',
+    '--cue-border-radius','--cue-bg-color'])
     element.style.removeProperty(field);
+  if (element._plezyOutlineFilter) {
+    element._plezyOutlineFilter.svg.remove();
+    element._plezyOutlineFilter=null;
+  }
 }
 
 // Native sub-pos: 0 = top, 100 = bottom, 101–150 = below the default
