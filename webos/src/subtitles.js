@@ -195,6 +195,12 @@ export class SubtitleOverlay {
     listen('playing', () => { this.assWaiting = false; this.syncAssClock(); this.startAssClock(); this.startClock(); });
     for (const event of ['pause', 'ended', 'seeking']) {
       listen(event, () => {
+        // While the decoder jumps to a different timestamp, the old ASS
+        // canvas is no longer valid. Clear it immediately rather than
+        // leaving the last subtitle visible if libass has no new cue to
+        // paint (especially during a paused seek).
+        if (event === 'seeking' && this.kind === 'ass' && this.renderer?.ctx && this.renderer.canvas)
+          this.renderer.ctx.clearRect(0,0,this.renderer.canvas.width,this.renderer.canvas.height);
         this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
         if (event === 'ended') this.stopAssClock();
         else this.startAssClock();
