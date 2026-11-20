@@ -243,3 +243,26 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
   assert.equal(fonts[0].bytes.length,8192);
   assert.equal(maximum,1,'font and subtitle XHRs must share the same native request queue');
 });
+
+test('a failed MKV font read cannot publish a fontless ASS track',async t=>{
+  const font=Buffer.alloc(8192,0x55);
+  const {source}=assFixture(6000,'ass',font);
+  const fontOffset=source.indexOf(font);
+  assert.ok(fontOffset>0);
+  let fail=true;
+  serveRanges(t,source,start=>{
+    if (fail && start===fontOffset) throw new Error('temporary Plex font range failure');
+  });
+  const selected={...asset,partSize:source.length,streamIndex:0,format:'ass',
+    fontScope:'plex:font-recovery-fixture'};
+  let published;
+  await assert.rejects(extractMatroskaSubtitle(selected,new AbortController().signal,
+    {onFonts:fonts=>{published=fonts;}}),/temporary Plex font range failure/);
+  assert.equal(published,undefined,'a failed font fetch must not publish an empty manifest');
+  fail=false;
+  const script=await extractMatroskaSubtitle(selected,new AbortController().signal,
+    {onFonts:fonts=>{published=fonts;}});
+  assert.match(script,/\[Events\]/);
+  assert.equal(published.length,1);
+  assert.deepEqual(Buffer.from(published[0].bytes),font);
+});

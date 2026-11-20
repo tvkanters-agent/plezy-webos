@@ -420,14 +420,16 @@ async function attachedFonts(read, offset, scope) {
   // when the font was already cached for another episode.
   const rootWindow = await read(offset, 4096);
   const header = element(rootWindow, 0);
-  if (header.id !== ATTACHMENTS || !Number.isSafeInteger(header.end)) return fonts;
+  if (header.id !== ATTACHMENTS || !Number.isSafeInteger(header.end))
+    throw invalid('invalid attachment index');
   const end = offset + header.end;
   let count = 0;
-  for (let pos = offset + header.start; pos < end && count++ < 256;) {
+  let pos = offset + header.start;
+  for (; pos < end && count++ < 256;) {
     const window = pos + 12 <= offset + rootWindow.length
       ? rootWindow.subarray(pos - offset) : await read(pos, Math.min(4096, end - pos));
     const file = element(window, 0);
-    if (pos + file.end > end) break;
+    if (pos + file.end > end) throw invalid('truncated attachment metadata');
     if (file.id === 0x61a7) {
       let name = '', data, crc;
       const smallRead = (start, length) => start >= pos && start + length <= pos + window.length
@@ -443,7 +445,9 @@ async function attachedFonts(read, offset, scope) {
         if (entry.id === 0x465c) data = {offset:child + entry.start, length};
         child += entry.end;
       }
-      if (data && data.length > 0 && data.length <= remaining && /\.(?:ttf|otf|ttc|woff2?)$/i.test(name)) {
+      if (data && /\.(?:ttf|otf|ttc|woff2?)$/i.test(name)) {
+        if (!(data.length > 0 && data.length <= remaining))
+          throw invalid('embedded fonts exceed the attachment read limit');
         name = name.split(/[\\/]/).pop();
         let bytes = await assFontCache.get(scope, name, data.length, crc);
         if (bytes && !crc) {
@@ -463,6 +467,7 @@ async function attachedFonts(read, offset, scope) {
     }
     pos += file.end;
   }
+  if (pos < end) throw invalid('font attachment catalog exceeds the supported entry count');
   return fonts;
 }
 
@@ -510,18 +515,21 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
   // first ASS preview still waits for the fonts to preserve authored glyphs.
   // Later clusters never pay for another attachment read or worker restart.
   const fontRange = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native, onTiming);
+  // Do not turn failed attachment reads into []: that permanently poisons
+  // the completed-track cache. Capture errors immediately so other indexed
+  // clusters can finish without an unhandled promise rejection.
   const fontPromise = onFonts && positions.has(ATTACHMENTS)
     ? attachedFonts(native ? serialize(fontRange) : fontRange,
-      positions.get(ATTACHMENTS), asset.fontScope).catch(error => {
-        if (!signal.aborted) console.info('Could not load MKV fonts:', error.message);
-        return [];
-      }) : Promise.resolve([]);
+      positions.get(ATTACHMENTS), asset.fontScope)
+      .then(fonts => ({fonts}), error => ({error}))
+    : Promise.resolve({fonts:[]});
   let fontsPublished = false;
   const publishFonts = async () => {
     if (fontsPublished || !onFonts) return;
-    const fonts = await fontPromise;
+    const result = await fontPromise;
     if (signal.aborted) throw abortError();
-    onFonts(fonts);
+    if (result.error) throw result.error;
+    onFonts(result.fonts);
     fontsPublished = true;
   };
   if (!complete()) throw invalid('the file has no usable seek index');

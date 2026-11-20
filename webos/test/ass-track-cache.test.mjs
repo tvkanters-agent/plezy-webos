@@ -26,7 +26,7 @@ test('a reopened MKV gets its complete ASS text and font manifest without range 
   const script='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,\u6f22';
   const fonts=[{name:'sign.ttf',length:8192,crc:'cafebabe'}];
   first.put(key,script,fonts);
-  await first.persist({key,script,fonts,used:Date.now()});
+  await first.persist({key,script,fonts,fontsVerified:true,used:Date.now()});
   const next=new AssTrackCache(factory);
   const restored=await next.get(key);
   assert.equal(restored.key,key);
@@ -40,4 +40,19 @@ test('very large tracks are not stored in the on-device ASS cache',async()=>{
   const cache=new AssTrackCache(null);
   cache.put('big','A'.repeat(20*1024*1024),[]);
   assert.equal(await cache.get('big'),null);
+});
+
+test('legacy and fontless ASS caches cannot suppress re-extraction',async()=>{
+  const {factory,saved}=fakeDb();
+  const script='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,HELLO';
+  saved.set('old',{key:'old',script,fonts:[{name:'sign.ttf',length:1234}]});
+  saved.set('poison',{key:'poison',script,fonts:[],fontsVerified:true});
+  const cache=new AssTrackCache(factory);
+  assert.equal(await cache.get('old'),null,'pre-fix cache entries must be rechecked');
+  assert.equal(await cache.get('poison'),null,'fontless entries must not bypass extraction');
+  cache.put('poison',script,[]);
+  assert.equal(await cache.get('poison'),null,'new fontless records must not be written');
+  const fonts=[{name:'sign.ttf',length:1234,crc:'beef'}];
+  cache.put('poison',script,fonts);
+  assert.deepEqual((await cache.get('poison')).fonts,fonts);
 });

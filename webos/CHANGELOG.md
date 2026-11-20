@@ -1,3 +1,9 @@
+## 1.22.1 — Fix permanent missing ASS fonts on cached MKV tracks
+
+- Do not save completed ASS tracks without a verified, nonempty font manifest. Existing 1.22.0 records with missing verification or no attached fonts are re-extracted rather than replayed permanently with fallback fonts.
+- Propagate failed MKV font attachment reads instead of converting errors into an empty font list. The existing Plex subtitle fallback remains available if extraction genuinely fails.
+- Reject truncated attachment metadata and oversized skipped fonts rather than silently displaying the wrong glyphs. Add regression tests for failed font reads and invalid cache entries.
+
 ## 1.22.0 — Warm ASS workers, cached tracks and resilient seek clocks
 
 - Keep the compiled legacy/WASM libass worker and its registered fonts idle between enhanced ASS sessions, without decoding or video listeners. Reuse it for sibling episodes whose cached font bytes match; dispose it when switching to compatibility playback or a different font set.

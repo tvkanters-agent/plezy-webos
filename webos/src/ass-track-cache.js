@@ -6,6 +6,17 @@ const MEMORY_LIMIT = 64 * 1024 * 1024;
 // Fansub ASS scripts can be 10–15 MB, especially with vector-drawn signs.
 const MAX_TRACK = 32 * 1024 * 1024;
 
+// v1.22.0 could save a complete ASS script without its embedded fonts.
+// Those records must be re-extracted instead of permanently reusing fallback glyphs.
+export function reusableAssTrack(track) {
+  return !!track && track.fontsVerified === true &&
+    typeof track.script === 'string' && track.script.length > 0 &&
+    track.script.length * 2 <= MAX_TRACK &&
+    Array.isArray(track.fonts) && track.fonts.length > 0 &&
+    track.fonts.every(font => typeof font.name === 'string' && font.name.length > 0 &&
+      Number.isSafeInteger(font.length) && font.length > 0);
+}
+
 export class AssTrackCache {
   constructor(factory = typeof indexedDB === 'undefined' ? null : indexedDB) {
     this.factory = factory;
@@ -44,7 +55,7 @@ export class AssTrackCache {
 
   async get(key) {
     const memory = this.memory.get(key);
-    if (memory) { this.remember(key, memory); return memory; }
+    if (reusableAssTrack(memory)) { this.remember(key, memory); return memory; }
     const db = await this.open();
     if (!db) return null;
     return new Promise(resolve => {
@@ -52,8 +63,7 @@ export class AssTrackCache {
         const request = db.transaction('tracks', 'readonly').objectStore('tracks').get(key);
         request.onsuccess = () => {
           const found = request.result;
-          if (!found || typeof found.script !== 'string' || !Array.isArray(found.fonts) ||
-              found.script.length * 2 > MAX_TRACK) { resolve(null); return; }
+          if (!reusableAssTrack(found)) { resolve(null); return; }
           this.remember(key, found);
           resolve(found);
         };
@@ -64,7 +74,9 @@ export class AssTrackCache {
 
   put(key, script, fonts) {
     if (!key || script.length * 2 > MAX_TRACK) return;
-    const track = {key,script,fonts,used:Date.now()};
+    const track = {key,script,fonts,fontsVerified:true,used:Date.now()};
+    // Never cache a fontless track: missing attachments must be retryable.
+    if (!reusableAssTrack(track)) return;
     this.remember(key,track);
     this.persist(track).catch(() => {});
   }
