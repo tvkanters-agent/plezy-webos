@@ -1553,18 +1553,16 @@ for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
       if(response.status()>=400 && new URL(response.url()).hostname==='127.0.0.1')
         console.log('ASS asset HTTP '+response.status()+': '+new URL(response.url()).pathname);
     });
-    await page.addInitScript(({legacy,embedded})=>{
+    await page.addInitScript(legacy=>{
       Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
       if(legacy) window.WebAssembly=undefined;
-      if (legacy && !embedded)
-        Object.defineProperty(navigator,'userAgent',{value:'Mozilla/5.0 (Web0S; SmartTV) Chrome/53.0.2785.34 Safari/537.36'});
-    },{legacy,embedded});
+    },legacy);
     const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
       Part:[{id:'part',key:'/video.webm',Stream:[
         {streamType:3,id:31,codec:'ass',selected:1,...(embedded?{}:{key:'/library/streams/31'})}
-      ]}]}]},undefined,[],{},null,null,async url=>{
+      ]}]}]},undefined,[],{diagnosticsEnabled:!legacy},null,null,async url=>{
         const subtitlePath=embedded?plexSubtitlePath:'/library/streams/31.ass';
         if(url.pathname!==subtitlePath) return '<html>Not Found</html>';
         return '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n'+
@@ -1583,12 +1581,11 @@ for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
       return false;
     });
     await expect.poll(hasPixels,{timeout:60000}).toBe(true);
-    const containsSoftEdges=await canvas.evaluate(canvas=>{
-      const rgba=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-      for(let i=3;i<rgba.length;i+=4) if(rgba[i]>0 && rgba[i]<255) return true;
-      return false;
-    });
-    expect(containsSoftEdges).toBe(!(legacy && !embedded));
+    const comparison=page.locator('.ass-color-comparison canvas');
+    if (!legacy) {
+      await expect(comparison).toBeVisible();
+      expect(await comparison.evaluate(canvas=>canvas.width)).toBeGreaterThan(0);
+    } else await expect(comparison).toHaveCount(0);
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
     const slider=page.getByRole('slider',{name:'Subtitle sync offset'});

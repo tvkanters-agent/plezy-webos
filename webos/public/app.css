@@ -1010,3 +1010,9 @@ main.settings-view { padding-top:38px; }
    over the video, but below Plezy's controls, without moving signs on reveal. */
 #player .libassjs-canvas-parent { position: absolute !important; top: 0; right: 0; bottom: 0; left: 0; z-index: 2 !important; pointer-events: none; }
 #player .controls { z-index: 5; }
+
+#player .ass-color-comparison {
+  position: absolute; top: 2%; right: 2%; z-index: 7; margin: 0; padding: 8px;
+  max-width: 48%; background: #111; color: #fff; font-size: 18px; pointer-events: none;
+}
+#player .ass-color-comparison canvas { display: block; max-width: 100%; height: auto; }
