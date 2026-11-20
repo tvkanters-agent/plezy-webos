@@ -61,7 +61,7 @@ test('local subtitle failures retry Plex burn-in only once, without toasts or st
   let finish;
   const first={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'},subtitleBurnedIn:false};
   const player=Object.assign(Object.create(Player.prototype),{
-    session:first,notify(){throw new Error('A subtitle fallback must be silent');},
+    session:first,enhancedPlaybackActive:true,notify(){throw new Error('A subtitle fallback must be silent');},
     reopen(changes){
       assert.deepEqual(changes,{burnSubtitles:true});
       return new Promise(resolve=>{finish=resolve;});
@@ -76,6 +76,19 @@ test('local subtitle failures retry Plex burn-in only once, without toasts or st
   await player.subtitleFailed(new Error('new session error'),next);
   finish();await pending;
   assert.equal(player.recoveringSession,null);
+});
+test('compatibility playback cannot trigger subtitle fallback or write subtitle offsets',async()=>{
+  const session={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'},subtitleBurnedIn:false};
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,enhancedPlaybackActive:false,subtitleSyncOffsetMs:0,
+    reopen(){throw new Error('Enhanced subtitle recovery must not start');},
+    subtitleSyncStorageKey(){throw new Error('Enhanced subtitle storage must not be touched');}
+  });
+  player.loadSubtitleSyncOffset();
+  await player.subtitleFailed(new Error('stray renderer callback'),session);
+  player.setSubtitleSyncOffset(400);
+  player.applySubtitleSyncOffset();
+  assert.equal(player.subtitleSyncOffsetMs,0);
 });
 test('Matroska source passes MIME and native resume; obsolete source errors are ignored',()=>{
   const oldWindow=globalThis.window,oldDocument=globalThis.document;

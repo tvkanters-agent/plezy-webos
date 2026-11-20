@@ -46,6 +46,25 @@ test('switching subtitle files releases the previous renderer and pending downlo
   assert.equal(element.textContent, '');
 });
 
+test('disabling enhanced playback disposes subtitle video listeners and rendering state',()=>{
+  const attached=[];const detached=[];
+  const video={
+    currentTime:0,
+    addEventListener(type,handler){attached.push({type,handler});},
+    removeEventListener(type,handler){detached.push({type,handler});}
+  };
+  const element={textContent:'caption'};
+  const overlay=new SubtitleOverlay(video,element);
+  let destroyed=false;
+  overlay.renderer={destroy(){destroyed=true;}};
+  overlay.dispose();
+  assert.deepEqual(attached.map(entry=>entry.type),['playing','pause','ended','seeking','seeked']);
+  assert.deepEqual(detached,attached);
+  assert.equal(overlay.listeners.length,0);
+  assert.equal(destroyed,true);
+  assert.equal(element.textContent,'');
+});
+
 test('a sync adjustment during download supplies the current offset to ASS', async t => {
   let resolveDownload, options;
   const download = new Promise(resolve => { resolveDownload = resolve; });
