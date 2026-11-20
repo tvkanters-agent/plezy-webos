@@ -481,7 +481,7 @@ export class Plex {
       options.skipSettings);
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
-      sessionId, sourceId: String(part.id), transcode, item,
+      sessionId, sourceId: String(part.id), transcode, item, legacyPlexPlayback:true,
       subtitleAsset: null, subtitleBurnedIn: transcode && !!selectedPlexSubtitle(media, options),
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings), extrasPromise,

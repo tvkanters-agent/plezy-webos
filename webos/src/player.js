@@ -55,6 +55,9 @@ export class Player {
       this.startAfterInitialSeek();
     });
     this.video.addEventListener('loadeddata', () => {
+      // LG's HLS compatibility resume seeks only after its first data event.
+      // Seeking at metadata can leave the pipeline with audio but no picture.
+      this.resume();
       if (!this.initialSeekPending) { this.hasFirstFrame = true; this.update(); }
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
@@ -862,22 +865,29 @@ export class Player {
   loadSource(session) {
     const nativeResume = typeof window.PalmSystem !== 'undefined' ||
       /web0s|webos|netcast/i.test(navigator.userAgent);
+    // On the affected LG HLS pipeline, a nonzero mediaOption playTime leaves
+    // the video black while audio plays. Keep native fast resume for other
+    // sources; for the classic Plex HLS path use LG's documented loadeddata
+    // + currentTime resume instead, accepting the extra initial buffer.
+    this.legacyHlsResume = nativeResume && !!session.legacyPlexPlayback &&
+      !!session.transcode && this.initialSeekTarget > 0;
     if (nativeResume) {
       // LG's equivalent of Plezy's Media(start:): pass milliseconds to the
       // pipeline BEFORE load/play. A later currentTime assignment buffers twice.
       const source = document.createElement('source');
       source.setAttribute('src', session.url);
-      source.setAttribute('type', (session.transcode ? 'application/vnd.apple.mpegurl' : (session.mimeType || 'video/mp4')) +
+      const mime = session.transcode ? 'application/vnd.apple.mpegurl' : (session.mimeType || 'video/mp4');
+      source.setAttribute('type', mime + (this.legacyHlsResume ? '' :
         ';mediaOption=' + encodeURIComponent(JSON.stringify({option: {
           transmission: {playTime: {start: this.initialSeekTarget * 1000}}
-        }})));
+        }}))));
       const generation = this.generation;
       source.addEventListener('error', () => {
         if (generation === this.generation && this.session === session) this.failed();
       });
       this.video.appendChild(source);
       // Native startup owns the seek; metadata/canplay must not seek again.
-      this.pendingStart = 0;
+      this.pendingStart = this.legacyHlsResume ? this.initialSeekTarget : 0;
     } else {
       // Desktop preview has no LG pipeline; retain the HTML media seek path.
       this.video.src = session.url;
@@ -899,11 +909,14 @@ export class Player {
     }
   }
   resume() {
+    if (this.legacyHlsResume && this.video.readyState < 2) return;
     if (this.pendingStart && this.session && this.video.readyState>=1) {
       try {
         const available=Math.max(Number.isFinite(this.video.duration)?this.video.duration:0,
           Number(this.item?.duration)||0);
-        const target=clamp(this.pendingStart,0,Math.max(0,available-1));
+        // Thin Plex listings can omit duration before the HLS metadata
+        // arrives. Unknown duration must not turn a valid resume into 0:00.
+        const target=clamp(this.pendingStart,0,available>0?Math.max(0,available-1):this.pendingStart);
         this.video.currentTime=target;
         this.pendingStart=0;
         if(this.initialSeekPending)this.initialSeekTarget=target;
