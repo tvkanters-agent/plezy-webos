@@ -59,7 +59,7 @@ test('disabling enhanced playback disposes subtitle video listeners and renderin
   overlay.renderer={destroy(){destroyed=true;}};
   overlay.dispose();
   assert.deepEqual(attached.map(entry=>entry.type),
-    ['playing','pause','ended','seeking','waiting','seeked','ratechange','loadedmetadata']);
+    ['playing','pause','ended','seeking','waiting','seeked','timeupdate','ratechange','loadedmetadata']);
   assert.deepEqual(detached,attached);
   assert.equal(overlay.listeners.length,0);
   assert.equal(destroyed,true);
@@ -87,15 +87,70 @@ test('ASS sync restores video time, paused state and rate immediately after seek
   listeners.get('waiting')();
   assert.deepEqual(clocks.pop(),[true,160], 'buffering must freeze the worker clock');
   video.currentTime=161;
-  listeners.get('playing')();
-  assert.deepEqual(clocks.pop(),[false,161], 'playing must unfreeze the worker clock');
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks.pop(),[false,161], 'decoder progress unfreezes a stalled worker without playing');
+  listeners.get('waiting')();
+  video.currentTime=150;
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks.pop(),[false,150], 'backward decoder progress also releases a stale buffer latch');
+  listeners.get('waiting')();
+  video.currentTime=170;
+  listeners.get('seeked')();
+  assert.deepEqual(clocks.pop(),[false,170], 'seeked clears stale buffering even without playing');
   video.paused=true;
   listeners.get('pause')();
-  assert.deepEqual(clocks.pop(),[true,161]);
+  assert.deepEqual(clocks.pop(),[true,170]);
   video.playbackRate=1.25;
   listeners.get('ratechange')();
   assert.equal(rates.pop(),1.25);
   overlay.dispose();
+});
+
+test('ASS renderer survives repeated playback of an identical track and font set',async t=>{
+  const original=globalThis.window;
+  const instances=[];
+  class FakeOctopus {
+    constructor(options) {
+      this.fonts=options.fonts;
+      this.canvasParent={style:{}};
+      this.canvas={style:{}};
+      this.worker={addEventListener(){},removeEventListener(){},postMessage(){}};
+      this.setTrackCalls=[];
+      instances.push(this);
+    }
+    setTrack(script){this.setTrackCalls.push(script);}
+    setIsPaused(){}
+    setRate(){}
+    plezySuspendVideo(){this.suspended=true;}
+    plezyResumeVideo(){this.suspended=false;}
+    dispose(){this.destroyed=true;}
+  }
+  globalThis.window={SubtitlesOctopus:FakeOctopus};
+  t.after(()=>{globalThis.window=original;});
+  const video={currentTime:1,paused:true,playbackRate:1};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const font={name:'font.ttf',bytes:Uint8Array.of(1,2,3)};
+  const content='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,A';
+  await overlay.renderStyledAss({fonts:[font]},content,overlay.generation);
+  const first=overlay.renderer;
+  first._plezyFullyReady=true;
+  overlay.clear();
+  assert.equal(first.suspended,true);
+  assert.equal(first.destroyed,undefined);
+  await overlay.renderStyledAss({fonts:[font]},content,overlay.generation);
+  assert.equal(overlay.renderer,first);
+  assert.deepEqual(first.setTrackCalls,[]);
+  assert.equal(first.suspended,false);
+  overlay.clear();
+  await overlay.renderStyledAss({fonts:[font]},content+'\n',overlay.generation);
+  assert.equal(overlay.renderer,first);
+  assert.deepEqual(first.setTrackCalls,[content+'\n']);
+  overlay.clear();
+  await overlay.renderStyledAss({fonts:[{name:'font.ttf',bytes:Uint8Array.of(9,9,9)}]},content,overlay.generation);
+  assert.equal(instances.length,2);
+  assert.equal(first.destroyed,true,'different fonts must not inherit stale registered faces');
+  overlay.dispose();
+  assert.equal(instances[1].destroyed,true,'enhanced mode off must release the retained worker');
 });
 
 test('a sync adjustment during download supplies the current offset to ASS', async t => {
@@ -165,31 +220,35 @@ test('an ASS worker that never becomes ready reports one render failure and is c
   overlay.clear();
   t.mock.timers.tick(20000);
   assert.equal(errors,1);
-  assert.equal(typeof callbacks.onReady,'function');
+  assert.equal(callbacks.onReady,undefined,
+    'the first worker log is not a reliable libass-ready signal');
   callbacks.onError(new Error('worker arrived too late'));
   assert.equal(errors,1);
 });
 
-test('an ASS worker that calls ready synchronously must not trigger a false fallback',async t=>{
+test('an ASS worker signals runtime ready before the startup timeout',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   t.mock.method(globalThis,'fetch',async()=>({ok:true,text:async()=>
     '[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n'}));
   const previousWindow=globalThis.window;
-  let paused, rate;
+  const messages=[];
   globalThis.window={SubtitlesOctopus:function(options){
     this.dispose=()=>{};
-    this.setIsPaused=(value,time)=>{paused=[value,time];};
-    this.setRate=value=>{rate=value;};
-    options.onReady();
+    this.worker={addEventListener(type,handler){
+      queueMicrotask(()=>handler({data:{target:'ready'}}));
+    },removeEventListener(){},postMessage(value){messages.push(value);}};
+    this.setIsPaused=()=>{};
+    this.setRate=()=>{};
   }};
   t.after(()=>{globalThis.window=previousWindow;});
   const overlay=new SubtitleOverlay({currentTime:1,paused:false,playbackRate:1.25},{textContent:''});
   let errors=0;
   overlay.onError=()=>{errors++;};
   await overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
+  await new Promise(resolve=>setImmediate(resolve));
   t.mock.timers.tick(20000);
-  assert.deepEqual(paused,[false,1]);
-  assert.equal(rate,1.25);
+  assert.ok(messages.some(data=>data.target==='video' && data.currentTime===1 &&
+    data.isPaused===false && data.rate===1.25));
   assert.equal(errors,0);
   overlay.clear();
 });
