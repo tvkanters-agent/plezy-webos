@@ -935,3 +935,17 @@ worker. This does not change the bundled libass runtime or fonts. For worker
 first-frame detection, the renderer trusts libass's nonempty blended image
 payload rather than downsampling the drawn canvas to 160 × 90 pixels, which
 could miss a very small sign. Both changes are exclusive to enhanced ASS.
+
+### Versioned ASS worker assets (1.22.5)
+
+On LG webOS, installing a new IPK under the same app ID does not guarantee
+that every previously loaded file:// classic-script resource is evicted.
+Version 1.22.4 changed the generated libass worker pieces from sequential
+pushes to indexed assignments without changing the URLs. Combining cached
+pieces from two releases can produce an invalid Blob worker, preventing
+embedded ASS fonts from ever loading. The app now loads all libass assets from
+a release-specific `libass/v<version>/` directory, not the old unversioned
+paths. Worker pieces are loaded sequentially and checked for gaps before
+assembling the Blob. This is narrowly scoped to ASS worker script assets;
+no IndexedDB databases or keys are modified, and the 1.22.4 clock, first-
+frame, and earlier extraction fixes are retained.
