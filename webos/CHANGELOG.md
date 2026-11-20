@@ -4,7 +4,8 @@
 - Apply pause and playback-rate state before updating the libass worker clock, preventing a transient frame rendered with the previous seek or rate.
 - Do not send incremental ASS event/style messages until the worker finishes loading its track; reuse its ready style response.
 - Start embedded ASS extraction without the extra 200 ms timer once playback supplies its first frame, including paused opens and dimensionless native video. Preserve the native resume/first-frame gate, compatibility mode and SRT timing behavior.
-- Add regression tests for cold/warm worker clock ownership, incremental event readiness, paused ASS opening and native zero-dimension video.
+- Load bundled legacy worker assets in bounded parallel groups and preserve their assembly order. Detect the first ASS frame from libass's image payload so tiny signs cannot be discarded by a low-resolution canvas probe.
+- Add regression tests for cold/warm worker clock ownership, incremental event readiness, paused ASS opening, native zero-dimension video and tiny-sign visibility.
 
 Real LG TV seek timing and first-render latency remain to be verified.
 
