@@ -16,7 +16,7 @@ const client = {'X-Plex-Client-Identifier':'plezy-subtitle-fixture', Accept:'app
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function waitFor(message, finish) {
-  for (let attempt = 0; attempt < 40; attempt++) {
+  for (let attempt = 0; attempt < 90; attempt++) {
     const result = await finish();
     if (result) return result;
     await sleep(500);
@@ -24,7 +24,7 @@ async function waitFor(message, finish) {
   throw new Error(message);
 }
 
-test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_ACTIONS, timeout:140000}, async t => {
+test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_ACTIONS, timeout:200000}, async t => {
   const scratch = await mkdtemp(join(tmpdir(), 'plezy-pms-'));
   const pkg = join(scratch, 'plex.deb');
   const packageUrl = 'https://downloads.plex.tv/plex-media-server-new/' + version + '/debian/plexmediaserver_' + version + '_amd64.deb';
@@ -57,9 +57,13 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
   await waitFor('Plex never finished starting',async () => (await get('/library/sections')).ok);
   const params = new URLSearchParams({name:'Plezy Subtitle Fixture',type:'movie',
     agent:'tv.plex.agents.movie',scanner:'Plex Movie',language:'en-US',location:library});
-  const added = await get('/library/sections?' + params,{method:'POST'});
-  if (!added.ok) throw Error('Could not create a fixture library: HTTP ' + added.status + ' ' +
-    (await added.text()).replaceAll(token,'[fixture token]').slice(0,350));
+  await waitFor('Plex did not become ready to create the fixture library',async () => {
+    const added = await get('/library/sections?' + params,{method:'POST'});
+    if (added.ok) return true;
+    const details = (await added.text()).replaceAll(token,'[fixture token]').slice(0,350);
+    if (details.includes('still starting up')) return false;
+    throw Error('Could not create a fixture library: HTTP ' + added.status + ' ' + details);
+  });
   const sections = (await (await get('/library/sections')).json()).MediaContainer.Directory;
   const section = sections.find(x => x.title === 'Plezy Subtitle Fixture');
   if (!section) throw Error('Could not find the fixture library');
