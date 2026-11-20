@@ -2,8 +2,9 @@ const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
 const {assFixture} = require('./fixtures/matroska.cjs');
+const packagedEntry = require('node:url').pathToFileURL(path.resolve(__dirname,'../dist/index.html')).href;
 const plexSubtitlePath = '/subtitles/:/transcode/universal/start';
-async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null) {
+async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null, entryUrl = '/') {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
   const calls = [], events = [];
   let metadataRequests = 0;
@@ -63,7 +64,7 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
     }
     return route.fulfill({json:url.pathname==='/hubs'?{MediaContainer:{Hub:[{title:'Movies',Metadata:[item]}]}}:{MediaContainer:{Metadata:[item]}}});
   });
-  await page.goto('/'); await page.getByRole('button',{name:'Test Movie',exact:true}).click();
+  await page.goto(entryUrl); await page.getByRole('button',{name:'Test Movie',exact:true}).click();
   if (version !== undefined) await page.getByLabel('Media version',{exact:true}).selectOption(String(version));
   await page.getByRole('button',{name:'Play',exact:true}).first().click();
   if (waitForPlayback) {
@@ -90,7 +91,7 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
     expect(calls.some(url=>url.pathname==='/subtitles/:/transcode/universal/start')).toBe(false);
     expect(calls.some(url=>url.pathname.includes('/library/parts/embedded/file.mkv'))).toBe(false);
     const renderer=await page.evaluate(()=>({
-      assScript:!!document.querySelector('script[src="libass/subtitles-octopus.js"]'),
+      assScript:!!document.querySelector('script[src^="libass/"]'),
       assRuntime:typeof window.SubtitlesOctopus,
       captions:document.querySelector('.player-captions')?.childElementCount || 0
     }));
@@ -1565,7 +1566,7 @@ for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
           'Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n'+
           '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
           'Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,OFFSET CUE\n';
-      });
+      },true,null,legacy ? '/' : packagedEntry);
     await page.locator('[data-action="pause"]').click();
     await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
     const canvas=page.locator('#player canvas.libassjs-canvas');
@@ -1699,7 +1700,8 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
       Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
         {streamType:3,id:31,codec:'srt',index:2,selected:index===2},
         {streamType:3,id:32,codec:'ass',index:3,selected:index===3}
-      ]}]}]});
+      ]}]}]},undefined,[],{},null,null,null,true,null,
+      codec==='ass' ? packagedEntry : '/');
     const video=page.locator('video');
     await page.locator('[data-action="pause"]').click();
     await video.evaluate((element,time)=>{element.currentTime=time;},position);
