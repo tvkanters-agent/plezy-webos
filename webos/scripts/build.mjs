@@ -33,6 +33,14 @@ for (const legacy of [false, true]) {
     const wasm = await readFile(path.join(vendor, worker + '.wasm'));
     source = 'var Module = {wasmBinary:' + binaryExpression(wasm) + '};\n' + source;
   }
+  // A queued video timestamp must mean when the decoder reported it, not
+  // when the busy libass worker finally receives the message. Only the webOS
+  // overlay sends senderTime; upstream messages keep their existing behavior.
+  const clockCall = 'self.setCurrentTime(message.data.currentTime)';
+  if (!source.includes(clockCall)) throw new Error('libass worker clock integration changed');
+  source = source.replace(clockCall,
+    'self.setCurrentTime(message.data.currentTime+(message.data.senderTime&&message.data.isPaused===false' +
+    '?Math.max(0,Date.now()-message.data.senderTime)/1000*(message.data.rate||self.rate):0))');
   // Workers launched by file-origin apps cannot reliably XHR even sibling
   // blob URLs. Install the bundled default font into libass's own filesystem.
   source += '\nvar loadExtraFont = self.loadFontFile;\n' +
@@ -41,6 +49,19 @@ for (const legacy of [false, true]) {
     '    Module.FS_createDataFile("/fonts", id + path.name, path.bytes, true, false); return;\n  }\n' +
     '  if (path !== "default.woff2") return loadExtraFont(id, path);\n' +
     '  Module.FS_createDataFile("/fonts", id + path, ' + binaryExpression(fallbackFont) + ', true, false);\n};';
+  // libass-wasm 4.x exposes createEvent, but its public wrapper posts one
+  // message per event. Append a batch to the existing track instead of
+  // reparsing an ever-growing ASS script on every extracted MKV cluster.
+  source += '\nvar originalAssWorkerMessage = self.onmessage;\n' +
+    'self.onmessage = function(message) {\n' +
+    '  if (message.data.target !== "create-events") return originalAssWorkerMessage(message);\n' +
+    '  var events = message.data.events;\n' +
+    '  for (var i = 0; i < events.length; i++) {\n' +
+    '    var index = self.octObj.allocEvent(), target = self.octObj.track.get_events(index);\n' +
+    '    var event = events[i];\n' +
+    '    for (var key in event) if (Object.prototype.hasOwnProperty.call(event, key)) target[key] = event[key];\n' +
+    '  }\n' +
+    '};\n';
   // A single multi-megabyte script literal blocks input while a C8 parses it
   // and encodes it into a Blob. Yield between bounded classic-script loads.
   let count = 0;
