@@ -1880,7 +1880,7 @@ for (const blocked of [false,true]) {
     await page.locator('[data-action="pause"]').click();
     await page.locator('video').evaluate(video=>{video.currentTime=3.5;});
     const cue = page.locator('.player-captions [part="cue"]');
-    await expect(cue).toContainText('Embedded ASS');
+    await expect(cue).toContainText('Embedded ASS',{timeout:15000});
     await expect(cue).toBeVisible();
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
@@ -1897,7 +1897,8 @@ for (const blocked of [false,true]) {
 
 test('compressed MKV ASS draws before the final ranges arrive and keeps the applied sync', async ({page}) => {
   await page.addInitScript(() => { window.WebAssembly = undefined; });
-  const fixture = assFixture(6000);
+  const font = await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
+  const fixture = assFixture(6000, 'ass', font);
   let releaseTail;
   const tail = new Promise(resolve => { releaseTail = resolve; });
   const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
@@ -1917,6 +1918,14 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
     await page.locator('[data-action="pause"]').click();
     await video.evaluate(element => { element.currentTime = 0.5; });
     await expect.poll(cueDrawn).toBe(true);
+    // The packaged fallback lacks Hangul. Two distinct glyph images rule
+    // out drawing the same missing-glyph box with that fallback.
+    const glyphImage = () => canvas.evaluate(element => element.toDataURL());
+    const firstGlyph = await glyphImage();
+    await video.evaluate(element => { element.currentTime = 6.5; });
+    await expect.poll(async () => await cueDrawn() && await glyphImage() !== firstGlyph).toBe(true);
+    await video.evaluate(element => { element.currentTime = 0.5; });
+    await expect.poll(glyphImage).toBe(firstGlyph);
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
     await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(input => {

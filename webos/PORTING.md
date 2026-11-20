@@ -853,14 +853,16 @@ the video element's layout box until intrinsic dimensions become available.
 
 The installed app opens a local HTML file. Chromium can refuse a separate local
 worker script or font request from that origin. The build packages each libass
-worker in a lazily loaded classic script. The selected worker runs from a Blob
+worker in bounded classic-script chunks loaded on demand. The selected worker runs from a Blob
 URL, initializes the default font directly in its filesystem and, on newer
 engines, receives the bundled WASM bytes. Browser tests open the built local HTML
 and check drawn ASS pixels and timing for both worker variants.
 
 SubtitlesOctopus reports ready on its first worker message. On webOS that
 can leave the viewer without dialogue even though playback and the sync
-control are active. Enhanced playback uses Media Captions for timed ASS
-dialogue until a nonempty libass frame paints the canvas. The styled canvas
+control are active. Enhanced playback starts libass with the current playback
+state, rate, numeric offset and supported font attachments from the MKV.
+Timed dialogue recovery starts on worker failure or after eight seconds without
+a painted frame. The styled canvas
 is anchored to the player viewport. If the worker fails, dialogue continues
 locally with the selected track and offset. The HTML fallback omits typesetting.

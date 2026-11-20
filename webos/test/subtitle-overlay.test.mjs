@@ -127,6 +127,7 @@ test('an ASS worker that never becomes ready reports one render failure and is c
   overlay.onError=()=>{errors++;};
   await overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
   t.mock.timers.tick(20000);
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(errors,1);
   overlay.clear();
   t.mock.timers.tick(20000);
@@ -141,17 +142,21 @@ test('an ASS worker that calls ready synchronously must not trigger a false fall
   t.mock.method(globalThis,'fetch',async()=>({ok:true,text:async()=>
     '[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n'}));
   const previousWindow=globalThis.window;
+  let paused, rate;
   globalThis.window={SubtitlesOctopus:function(options){
     this.dispose=()=>{};
-    this.setCurrentTime=()=>{};
+    this.setIsPaused=(value,time)=>{paused=[value,time];};
+    this.setRate=value=>{rate=value;};
     options.onReady();
   }};
   t.after(()=>{globalThis.window=previousWindow;});
-  const overlay=new SubtitleOverlay({currentTime:1},{textContent:''});
+  const overlay=new SubtitleOverlay({currentTime:1,paused:false,playbackRate:1.25},{textContent:''});
   let errors=0;
   overlay.onError=()=>{errors++;};
   await overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
   t.mock.timers.tick(20000);
+  assert.deepEqual(paused,[false,1]);
+  assert.equal(rate,1.25);
   assert.equal(errors,0);
   overlay.clear();
 });
