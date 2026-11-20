@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Plex, plexExternalSubtitle} from '../src/api.js';
+import {Plex, mediaSourceTracks, plexExternalSubtitle} from '../src/api.js';
+import {EpisodeTrackPreferences} from '../src/episode-track-preferences.js';
 
 function makeMedia(container = 'mp4', videoCodec = 'h264') {
   return {container, videoCodec, audioCodec:'aac', Part:[{id:55,
@@ -343,4 +344,69 @@ test('a failed Plex part-selection request must prevent an unconfirmed burn-in d
   await assert.rejects(api.playback({id:'123',raw:{Media:[media]}},
     {srtPlayback:true,assPlayback:true,burnSubtitles:true}),/HTTP 503/);
   assert.deepEqual(requests,['/library/parts/55']);
+});
+
+
+test('cross-season track choices reach enhanced SRT/ASS overlays and both Plex HLS audio paths',async()=>{
+  for (const codec of ['srt','ass']) {
+    const episode=(id,season,partId,streamIds)=>({
+      id,type:'episode',title:id,duration:120,
+      raw:{grandparentRatingKey:'show-1',parentRatingKey:season,Media:[{
+        container:'mkv',videoCodec:'h264',audioCodec:'aac',
+        Part:[{id:partId,key:'/library/parts/'+partId+'/file.mkv',Stream:[
+          {streamType:2,id:streamIds[0],languageCode:'eng',codec:'aac',selected:1},
+          {streamType:2,id:streamIds[1],languageCode:'fra',codec:'ac3'},
+          {streamType:3,id:streamIds[2],languageCode:'eng',codec,selected:1},
+          {streamType:3,id:streamIds[3],languageCode:'spa',codec}
+        ]}]
+      }]}
+    });
+    const first=episode('episode-1','season-1',55,[11,12,31,32]);
+    // The old French/Spanish IDs now refer to English tracks; carrying an ID
+    // instead of the intent would silently select the wrong audio and captions.
+    const second=episode('episode-2','season-2',56,[12,42,32,52]);
+    const preferences=new EpisodeTrackPreferences();
+    const firstTracks=mediaSourceTracks(first);
+    preferences.record(first,0,'audio',firstTracks.audio[1]);
+    preferences.record(first,0,'subtitle',firstTracks.subtitles[1]);
+    const selected=preferences.resolve(second,0,mediaSourceTracks(second));
+    assert.deepEqual(selected,{audio:42,subtitle:52});
+
+    const api=new Plex({id:'plex',url:'http://plex.test',token:'token'},'tv-test');
+    const requests=[];
+    api.get=async(path,params,options)=>{
+      requests.push({path,params,options});
+      return {MediaContainer:{Metadata:[{}]}};
+    };
+    const enhanced=await api.playback(second,{...selected,srtPlayback:true,assPlayback:true});
+    assert.equal(enhanced.enhancedPlayback,true);
+    assert.equal(enhanced.transcode,true,'multi-audio MKV must use HLS on webOS');
+    assert.equal(enhanced.subtitleAsset.id,52);
+    assert.equal(enhanced.subtitleAsset.format,codec);
+    const enhancedUrl=new URL(enhanced.url);
+    assert.equal(enhancedUrl.searchParams.get('audioStreamID'),'42');
+    assert.equal(enhancedUrl.searchParams.get('subtitleStreamID'),'0');
+    assert.equal(enhancedUrl.searchParams.get('subtitles'),'none');
+    const enhancedPart=requests.find(request=>request.path==='/library/parts/56');
+    assert.equal(enhancedPart.params.audioStreamID,42);
+    assert.equal(enhancedPart.params.subtitleStreamID,52);
+    assert.equal(requests.some(request=>request.path.endsWith('/decision')),true);
+    await enhanced.extrasPromise;
+
+    requests.length=0;
+    const legacy=await api.playback(second,{...selected,srtPlayback:false,assPlayback:false});
+    assert.equal(legacy.legacyPlexPlayback,true);
+    assert.equal(legacy.subtitleAsset,null);
+    const legacyUrl=new URL(legacy.url);
+    assert.equal(legacyUrl.searchParams.get('audioStreamID'),'42');
+    assert.equal(legacyUrl.searchParams.get('subtitles'),'burn');
+    const legacyPart=requests.find(request=>request.path==='/library/parts/56');
+    assert.equal(legacyPart.params.audioStreamID,42);
+    assert.equal(legacyPart.params.subtitleStreamID,52);
+    await legacy.extrasPromise;
+
+    const unrelated={...second,id:'unrelated',
+      raw:{...second.raw,grandparentRatingKey:'other-show'}};
+    assert.deepEqual(preferences.resolve(unrelated,0,mediaSourceTracks(unrelated)),{});
+  }
 });
