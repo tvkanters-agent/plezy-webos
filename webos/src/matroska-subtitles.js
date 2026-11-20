@@ -396,9 +396,17 @@ function formatCaptions(frames, track, ass) {
   return header + '\n' + events.sort((a,b) => a.order - b.order).map(event => event.line).join('\n') + '\n';
 }
 
-export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead} = {}) {
+export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead, onTiming} = {}) {
   const native = nativeWebOS();
-  const request = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native);
+  const started = Date.now();
+  let requests = 0, bytes = 0, requestMs = 0;
+  const request = rangeReader(asset.partUrl, asset.partSize, signal, timing => {
+    requests++;
+    bytes += timing.length;
+    requestMs += timing.elapsedMs;
+    onRead?.(timing);
+  }, native);
+  const mark = phase => onTiming?.({phase, elapsedMs:Date.now() - started, requests, bytes, requestMs});
   // The TV shares its connection with the video decoder. Its fetch shim
   // cannot cancel the actual network request, so use serial, abortable XHR.
   let pending = Promise.resolve();
@@ -438,6 +446,7 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
   if (!scale) throw invalid('invalid timestamp scale');
   const track = selectedTrack(tracks, asset.streamIndex, asset.format);
   const cues = subtitleCues(index, track.number, segment.start);
+  mark('index');
   const groups = new Map();
   for (const cue of cues) {
     if (!groups.has(cue.cluster)) groups.set(cue.cluster, []);
@@ -480,8 +489,10 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
   for (let start = 0, batch = ass ? 12 : 1; start < ordered.length;) {
     await parallel(ordered.slice(start, start + batch), readGroup);
     start += batch;
+    if (start === (ass ? 12 : 1)) mark('firstCues');
     if (preview && start < ordered.length) await preview(formatCaptions(frames, track, ass));
     batch = !ass && start === 1 ? 12 : Math.max(48, batch * 2);
   }
+  mark('complete');
   return formatCaptions(frames, track, ass);
 }
