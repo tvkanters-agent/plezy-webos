@@ -110,6 +110,22 @@ test('Subtitle Styling matches native Text/Border groups with TV-friendly editor
   await page.keyboard.press('ArrowRight');
   await expect(spinner).toHaveText('39');
   await expect(spinner).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  await expect(spinner).toHaveText('39');
+  await expect(spinner).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  const save=page.getByRole('dialog').getByRole('button',{name:'Save'});
+  const cancel=page.getByRole('dialog').getByRole('button',{name:'Cancel'});
+  await expect(save).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(spinner).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(save).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(spinner).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(size).toBeFocused();
   await expect(size.locator('.settings-tile-subtitle')).toHaveText('39');
@@ -136,6 +152,10 @@ test('Subtitle Styling matches native Text/Border groups with TV-friendly editor
   const control=page.getByRole('dialog').getByRole('button',{name:'Border Size'});
   await page.keyboard.press('ArrowLeft');
   await expect(control).toHaveText('2');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('dialog').getByRole('button',{name:'Save'})).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(control).toBeFocused();
   await page.keyboard.press('Enter');
 
   await page.keyboard.press('Escape');
@@ -148,6 +168,42 @@ test('Subtitle Styling matches native Text/Border groups with TV-friendly editor
     return [s.subtitleFontSize,s.subtitleTextColor,s.subtitleUseMargins,
       s.subtitleBold,s.subtitleItalic,s.subtitleBorderSize];
   })).toEqual([39,'#FF0088',false,true,true,2]);
+});
+
+test('Subtitle numeric dialogs keep stable D-pad focus between value, actions and Back',async({page})=>{
+  await connected(page);
+  await page.getByRole('button',{name:'Video Playback',exact:true}).click();
+  await page.getByRole('button',{name:'Subtitle Styling',exact:true}).click();
+  const position=page.getByRole('button',{name:'Position',exact:true});
+  await position.click();
+  const dialog=page.getByRole('dialog');
+  const number=dialog.getByRole('button',{name:'Position'});
+  const save=dialog.getByRole('button',{name:'Save'});
+  const cancel=dialog.getByRole('button',{name:'Cancel'});
+  await expect(number).toBeFocused();
+  for(let i=0;i<5;i++)await page.keyboard.press('ArrowRight');
+  await expect(number).toHaveText('105');
+  await expect(number).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(save).toBeFocused();
+  await page.keyboard.press('ArrowRight'); // Right edge must not escape.
+  await expect(save).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('ArrowLeft'); // Left edge must not escape.
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(number).toBeFocused();
+  for(let i=0;i<5;i++)await page.keyboard.press('ArrowLeft');
+  await expect(number).toHaveText('100');
+  await expect(number).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(save).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(number).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(position).toBeFocused();
+  await expect(position.locator('.settings-tile-subtitle')).toHaveText('Bottom');
 });
 
 test('Manage Libraries switches update the rail without rebuilding or losing remote focus',async({page})=>{

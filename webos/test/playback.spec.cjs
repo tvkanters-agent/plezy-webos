@@ -1641,7 +1641,7 @@ test('embedded SRT uses the selected track and changes visible cues while clean 
   expect(starts().every(url=>url.searchParams.get('subtitles')==='none')).toBe(true);
 });
 
-test('SRT playback applies saved Plezy text and border styling, including letterbox margin fallback',async({page})=>{
+test('SRT playback applies saved Plezy text and border styling, including letterbox margin fallback',async({page},testInfo)=>{
   // LG's hardware decoder often reports zero dimensions despite presenting
   // a wide video. Aspect ratio from Plex must still constrain the overlay.
   await page.addInitScript(()=>{
@@ -1659,6 +1659,7 @@ test('SRT playback applies saved Plezy text and border styling, including letter
   await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('STYLE CUE');
+  await page.screenshot({path:testInfo.outputPath('srt-border-stroke.png')});
   await expect.poll(()=>captions.locator('[part="cue-display"]').evaluate(node=>
     node.style.getPropertyValue('--cue-top'))).not.toBe('NaN%');
   const style=await captions.evaluate(node=>{
@@ -1667,19 +1668,33 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     const container=getComputedStyle(node);
     return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
       italic:computed.fontStyle,bg:computed.backgroundColor,
-      shadow:computed.textShadow,top:parseFloat(node.style.top),
+      shadow:computed.textShadow,strokeWidth:computed.webkitTextStrokeWidth,
+      strokeColor:computed.webkitTextStrokeColor,top:parseFloat(node.style.top),
       cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
       cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
         node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
   });
   assertStyle(style);
+  const widths=await captions.evaluate(node=>{
+    const cue=node.querySelector('[part="cue"]');
+    const original=node.style.getPropertyValue('--cue-stroke-width');
+    const result=[0,2,5].map(value=>{
+      node.style.setProperty('--cue-stroke-width',value+'px');
+      return parseFloat(getComputedStyle(cue).webkitTextStrokeWidth);
+    });
+    node.style.setProperty('--cue-stroke-width',original);
+    return result;
+  });
+  expect(widths).toEqual([0,2,5]);
   function assertStyle(actual){
     expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
     expect(actual.color).toBe('rgb(170, 51, 17)');
     expect(actual.weight).toBe('700');
     expect(actual.italic).toBe('italic');
     expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
-    expect(actual.shadow).toContain('rgb(0, 255, 0)');
+    expect(actual.shadow).toBe('none');
+    expect(parseFloat(actual.strokeWidth)).toBeGreaterThan(0);
+    expect(actual.strokeColor).toBe('rgb(0, 255, 0)');
     expect(actual.top).toBeGreaterThan(12);
     expect(actual.cuePosition).not.toBe('');
     expect(actual.cueTopFraction).toBeGreaterThan(0.35);
