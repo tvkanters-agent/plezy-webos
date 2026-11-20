@@ -57,6 +57,7 @@ export class Player {
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
+      if (!this.initialSeekPending && this.video.readyState >= 2) this.scheduleEmbeddedSubtitle();
     });
     this.video.addEventListener('loadeddata', () => {
       this.resume();
@@ -64,6 +65,7 @@ export class Player {
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
+      this.scheduleEmbeddedSubtitle();
       this.checkStartupProgress();
     });
     this.video.addEventListener('stalled', () => {
@@ -915,7 +917,7 @@ export class Player {
   }
   scheduleEmbeddedSubtitle() {
     if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset?.partUrl ||
-        this.options?.skipMatroskaSubtitles || this.pauseAfterOpen ||
+        this.options?.skipMatroskaSubtitles ||
         this.initialSeekPending || this.pendingStart ||
         this.subtitleLoadSession === this.session || this.embeddedSubtitleTimer != null) return;
     const session=this.session, generation=this.generation;
@@ -924,7 +926,7 @@ export class Player {
       if (this.session === session && this.generation === generation &&
           !this.initialSeekPending && !this.pendingStart)
         this.loadSubtitleAsset(session, generation);
-    }, 200);
+    }, session.subtitleAsset.format === 'ass' ? 0 : 200);
   }
   loadSource(session) {
     const nativeResume = typeof window.PalmSystem !== 'undefined' ||
@@ -1015,7 +1017,7 @@ export class Player {
     }
     // A hardware video plane may expose decoded frames before its dimensions.
     // An advancing audio clock alone still cannot start MKV extraction.
-    if (!(this.video.videoWidth > 0 || this.video.webkitDecodedFrameCount > 0)) {
+    if (!(this.hasFirstFrame || this.video.videoWidth > 0 || this.video.webkitDecodedFrameCount > 0)) {
       const quality = this.video.getVideoPlaybackQuality?.();
       if (!(quality && quality.totalVideoFrames > quality.droppedVideoFrames)) return;
     }
