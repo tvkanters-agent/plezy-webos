@@ -61,7 +61,7 @@ test('a sync adjustment during download supplies the current offset to ASS', asy
   t.after(() => overlay.clear());
   const loading = overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
   overlay.update(2500);
-  resolveDownload('[Script Info]');
+  resolveDownload('[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello');
   await loading;
   assert.equal(options.timeOffset,-2.5);
   assert.equal(overlay.offsetMs,2500);
@@ -88,4 +88,51 @@ test('SRT clock renders between timeupdate events and is cancelled on clear', t 
   assert.equal(renderer.currentTime,1.125);
   overlay.clear();
   assert.equal(cancelled,7);
+});
+
+test('an ASS worker that never becomes ready reports one render failure and is cancelled on release', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.method(globalThis,'fetch',async () => ({ok:true,text:async()=>
+    '[Script Info]\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n' +
+    'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n'}));
+  const previousWindow=globalThis.window;
+  let callbacks;
+  globalThis.window={SubtitlesOctopus:function (options) {
+    callbacks=options;
+    this.dispose=()=>{};
+    this.setCurrentTime=()=>{};
+  }};
+  t.after(()=>{globalThis.window=previousWindow;});
+  const overlay=new SubtitleOverlay({currentTime:1}, {textContent:''});
+  let errors=0;
+  overlay.onError=()=>{errors++;};
+  await overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
+  t.mock.timers.tick(20000);
+  assert.equal(errors,1);
+  overlay.clear();
+  t.mock.timers.tick(20000);
+  assert.equal(errors,1);
+  assert.equal(typeof callbacks.onReady,'function');
+  callbacks.onError(new Error('worker arrived too late'));
+  assert.equal(errors,1);
+});
+
+test('an ASS worker that calls ready synchronously must not trigger a false fallback',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,text:async()=>
+    '[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n'}));
+  const previousWindow=globalThis.window;
+  globalThis.window={SubtitlesOctopus:function(options){
+    this.dispose=()=>{};
+    this.setCurrentTime=()=>{};
+    options.onReady();
+  }};
+  t.after(()=>{globalThis.window=previousWindow;});
+  const overlay=new SubtitleOverlay({currentTime:1},{textContent:''});
+  let errors=0;
+  overlay.onError=()=>{errors++;};
+  await overlay.load({url:'http://plex.test/sub.ass',format:'ass'},0);
+  t.mock.timers.tick(20000);
+  assert.equal(errors,0);
+  overlay.clear();
 });

@@ -1601,17 +1601,45 @@ test('embedded SRT uses the selected track and changes visible cues while clean 
   expect(starts().every(url=>url.searchParams.get('subtitles')==='none')).toBe(true);
 });
 
-test('Plex extraction failure falls back once and explains why subtitle sync is unavailable',async({page})=>{
+test('Plex extraction failure silently falls back once and disables burned-in subtitle sync',async({page})=>{
   const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
     Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:32,codec:'srt',selected:1}]}]}]},
     undefined,[],{},null,null,async()=>'<html>Server cannot extract this track</html>');
   const burned=()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8') && url.searchParams.get('subtitles')==='burn');
   await expect.poll(()=>burned().length).toBe(1);
+  await expect(page.locator('#toast')).not.toBeVisible();
   await page.getByRole('button',{name:'Playback settings'}).click();
   await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
-  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
-  await expect(page.locator('#toast')).toContainText('timing cannot be changed');
+  const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
+  await expect(sync).toHaveAttribute('aria-disabled','true');
+  await expect(sync).toHaveClass(/is-disabled/);
+  await expect(sync).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#toast')).toHaveText('Cannot offset burned-in subtitles');
   await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+  expect(burned()).toHaveLength(1);
+});
+
+test('failed MKV byte ranges and Plex extraction silently retry HLS with burned subtitles',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+      {streamType:3,id:32,codec:'srt',index:2,selected:1}
+    ]}]}]},undefined,[],{},null,null,null,true,{beforeRead:()=>416});
+  const starts=()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8'));
+  await expect.poll(()=>starts().length).toBe(2);
+  expect(starts().map(url=>url.searchParams.get('subtitles'))).toEqual(['none','burn']);
+  expect(starts()[1].searchParams.get('subtitleStreamID')).toBe(null);
+  expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(true);
+  expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
+  await expect(page.locator('#toast')).not.toBeVisible();
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
+  await expect(sync).toHaveAttribute('aria-disabled','true');
+  await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
+  await expect(sync).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#toast')).toHaveText('Cannot offset burned-in subtitles');
+  expect(starts()).toHaveLength(2);
 });
 
 for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {

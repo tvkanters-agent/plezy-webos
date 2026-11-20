@@ -469,10 +469,15 @@ export class Player {
     const label = this.formatSubtitleSyncOffset();
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
     const burnedIn = !!this.session?.subtitleBurnedIn;
-    const unavailable = !!this.session?.subtitleUnavailable;
-    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : unavailable ? 'Unavailable' : label;
+    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : label;
     const settingsRow = this.sheet.querySelector('.player-settings-sync');
-    if (settingsRow) settingsRow.classList.toggle('is-active', !burnedIn && !unavailable && this.subtitleSyncOffsetMs !== 0);
+    if (settingsRow) {
+      settingsRow.classList.toggle('is-active', !burnedIn && this.subtitleSyncOffsetMs !== 0);
+      settingsRow.classList.toggle('is-disabled', burnedIn);
+      // Keep it focusable for remote navigation; selecting it explains why
+      // the embedded pixels cannot be retimed.
+      settingsRow.setAttribute('aria-disabled', String(burnedIn));
+    }
     const value = this.sheet.querySelector('.sync-offset-value');
     if (value) value.textContent = label;
     const slider = this.sheet.querySelector('.sync-offset-slider');
@@ -505,11 +510,7 @@ export class Player {
   }
   openSyncBar() {
     if (this.session?.subtitleBurnedIn) {
-      this.notify('Plex burned this subtitle into the video. Its timing cannot be changed.');
-      return;
-    }
-    if (this.session?.subtitleUnavailable) {
-      this.notify('The selected subtitle could not be loaded.');
+      this.notify('Cannot offset burned-in subtitles');
       return;
     }
     this.stopSyncHold();
@@ -1051,20 +1052,13 @@ export class Player {
     return this.open(this.api, this.item, options, true, trackSheetFocus, playing);
   }
   async subtitleFailed(error, session) {
-    if (!this.session || this.session !== session || this.recoveringSession === session) return;
-    if (session.subtitleAsset?.partUrl) {
-      // Just as Plezy recovers a stalled sidecar without it, keep the already
-      // opened picture and audio when both MKV subtitle sources fail.
-      if (session.subtitleUnavailable) return;
-      session.subtitleUnavailable = true;
-      this.subtitleOverlay.clear();
-      this.updateSubtitleSyncControls();
-      console.warn('MKV subtitle unavailable:', error.message);
-      this.notify('The selected subtitle could not be loaded. Video is still available.');
-      return;
-    }
-    console.warn('Subtitle renderer failed; retrying with Plex burn-in:', error);
-    this.notify('Could not load the subtitle separately. Plex will burn it into the video.');
+    if (!this.session || this.session !== session || this.recoveringSession === session ||
+        session.subtitleBurnedIn || !session.subtitleAsset) return;
+    // Both the Matroska reader and Plex's independent subtitle endpoint can
+    // fail. Unlike MPV, LG's HTML player cannot then use an embedded track;
+    // restart the same source with Plex rendering the selected track into HLS.
+    // No toast during playback: only the disabled sync control explains it.
+    console.warn('Local subtitle failed; retrying with Plex burn-in:', error);
     this.recoveringSession = session;
     try { await this.reopen({burnSubtitles:true}); }
     finally { if (this.recoveringSession === session) this.recoveringSession = null; }

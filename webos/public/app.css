@@ -792,6 +792,10 @@ main.has-alpha-bar { padding-right:60px; }
 .player-settings-chevron { color:#a2a5ae; font-size:26px; line-height:1; }
 .player-settings-sync.is-active .player-settings-icon,
 .player-settings-sync.is-active .player-settings-sync-value { color:#ffbf3e; }
+.player-options-list button.player-settings-sync.is-disabled { color:#888c95; background:#25272c; }
+.player-settings-sync.is-disabled .player-settings-icon,
+.player-settings-sync.is-disabled .player-settings-sync-value,
+.player-settings-sync.is-disabled .player-settings-chevron { color:#737780; }
 .player-settings-sync:focus .player-settings-icon,
 .player-settings-sync:focus .player-settings-sync-value,
 .player-settings-sync:focus .player-settings-chevron { color:#343840; }

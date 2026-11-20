@@ -83,6 +83,7 @@ export class SubtitleOverlay {
     this.offsetMs = 0;
     this.abort = null;
     this.frame = null;
+    this.readyTimer = null;
     // timeupdate may arrive only four times a second. Keep SRT cue boundaries
     // aligned to the visible playback clock, including short cues.
     video.addEventListener?.('playing', () => this.startClock());
@@ -121,6 +122,8 @@ export class SubtitleOverlay {
   }
 
   releaseRenderer() {
+    clearTimeout(this.readyTimer);
+    this.readyTimer = null;
     this.stopClock();
     const renderer = this.renderer;
     this.renderer = null;
@@ -154,7 +157,7 @@ export class SubtitleOverlay {
     const type = asset.embedded ? embeddedSubtitleType(content) : asset.format === 'ass' ? 'ssa' : 'srt';
     if (asset.format === 'srt' || type === 'srt' || type === 'vtt') {
       const track = await parseText(content, {type});
-      if (!track.cues.length && content.trim()) throw new Error('Subtitle file contains no readable cues.');
+      if (!track.cues.length) throw new Error('Subtitle file contains no readable cues.');
       if (generation !== this.generation) return;
       if (this.kind && this.kind !== 'srt') this.releaseRenderer();
       const renderer = this.renderer || new CaptionsRenderer(this.element);
@@ -164,6 +167,8 @@ export class SubtitleOverlay {
       this.update(this.offsetMs);
       this.startClock();
     } else if (asset.format === 'ass') {
+      if (!/\[Events\]/i.test(content) || !/^Dialogue:/mi.test(content))
+        throw new Error('ASS subtitle file contains no readable dialogue.');
       if (this.kind === 'ass') {
         this.renderer.setTrack(content);
         this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
@@ -173,7 +178,15 @@ export class SubtitleOverlay {
         throw new Error('SubtitlesOctopus is unavailable');
       if (this.kind) this.releaseRenderer();
       // The worker is loaded only for ASS/SSA; webOS 4.x uses its non-WASM build.
-      const renderer = new window.SubtitlesOctopus({
+      let renderer;
+      let ready = false;
+      const showReady = () => {
+        if (generation !== this.generation || this.renderer !== renderer) return;
+        clearTimeout(this.readyTimer);
+        this.readyTimer = null;
+        renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+      };
+      renderer = new window.SubtitlesOctopus({
         video: this.video, subContent: content, debug:true,
         // Debug mode avoids an uncaught global throw after a handled worker
         // failure; the player retries using Plex burn-in through onError.
@@ -181,8 +194,8 @@ export class SubtitleOverlay {
         legacyWorkerUrl: 'libass/subtitles-octopus-worker-legacy.js',
         timeOffset: -this.offsetMs / 1000,
         onReady: () => {
-          if (generation === this.generation && this.renderer === renderer)
-            renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+          ready = true;
+          showReady();
         },
         onError: error => {
           if (generation === this.generation && this.onError) this.onError(error);
@@ -191,6 +204,13 @@ export class SubtitleOverlay {
       if (generation !== this.generation) { renderer.dispose(); return; }
       this.renderer = renderer;
       this.kind = 'ass';
+      // A worker may neither become ready nor report an error on the LG
+      // browser. Treat that as a render failure instead of invisible captions.
+      if (ready) showReady();
+      else this.readyTimer = setTimeout(() => {
+        if (generation === this.generation && this.renderer === renderer && this.onError)
+          this.onError(new Error('ASS subtitle renderer did not become ready.'));
+      }, 20000);
     } else {
       throw new Error('Unsupported external subtitle format.');
     }
