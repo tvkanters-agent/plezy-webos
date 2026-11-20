@@ -155,6 +155,24 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
       const mediaResponse = await get(segment.pathname+segment.search);
       const size = (await mediaResponse.arrayBuffer()).byteLength;
       console.log('Generic HLS first segment:',mediaResponse.status,size);
+      if (!mediaResponse.ok || !size) throw Error('Plex did not serve an HLS segment');
+      const subtitle = new URL(sub);
+      const subDecision = new URL(subtitle);
+      subDecision.pathname = '/video/:/transcode/universal/decision';
+      const grant = await fetch(subDecision,{signal:AbortSignal.timeout(12000)});
+      const sidecar = await fetch(subtitle,{signal:AbortSignal.timeout(12000)});
+      const hasSubs = (await sidecar.text()).includes('Embedded SRT');
+      const videoId = video.searchParams.get('session');
+      const active = await (await get('/transcode/sessions')).text();
+      const log = await readFile(join(profile,'Logs','Plex Media Server.log'),'utf8');
+      const stopped = log.split('\n').some(row => row.includes('Terminated session') && row.includes(videoId));
+      const nextVideo = await get(playlistUrl.pathname+playlistUrl.search);
+      const hasVideo = (await nextVideo.text()).startsWith('#EXTM3U');
+      console.log('Concurrent Plex sidecar and HLS:',grant.status,sidecar.status,hasSubs,
+        active.includes(videoId),stopped,nextVideo.status,hasVideo);
+      if (!grant.ok || !sidecar.ok || !hasSubs || stopped || !nextVideo.ok || !hasVideo)
+        throw Error('Standalone subtitle and HLS did not remain active together');
+
 
     }
   }
