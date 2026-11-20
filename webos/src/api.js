@@ -474,6 +474,9 @@ export class Plex {
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId, subtitleSize: 100, subtitles: 'burn',
+      // The Plex HLS endpoint needs the selected source audio ID as well as
+      // the part-level PUT; otherwise it can play the default audio instead.
+      ...(options.audio !== undefined ? {audioStreamID:options.audio} : {}),
       'X-Plex-Platform': 'Chrome',
       'X-Plex-Client-Profile-Extra': 'add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)'};
     if (options.audio !== undefined || options.subtitle !== undefined || (transcode && selectedSubtitle)) {
@@ -523,6 +526,9 @@ export class Plex {
       videoCodec:'h264', audioCodec:'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId,
+      // Mirror PlexClient's HLS selection after resolving a cross-episode
+      // audio intent to this episode's own stream ID.
+      ...(options.audio !== undefined ? {audioStreamID:options.audio} : {}),
       subtitleSize: 100, subtitles: subtitleBurnedIn ? 'burn' : 'none',
       ...(subtitleBurnedIn ? {} : {subtitleStreamID:0}),
       'X-Plex-Platform':'Generic', 'X-Plex-Client-Profile-Name':'Generic',

@@ -187,7 +187,11 @@ stream catalogs are fetched before opening an episode. Choosing a new track
 supersedes earlier sibling episode choices for that kind only. Server switches
 discard the session memory. This is a webOS navigation adaptation, not a
 server-side bulk update, account-wide preference change, or a promise of
-persistence across restarts. LG hardware playback remains to be checked.
+persistence across restarts. For HLS (including enhanced SRT/ASS video),
+ the selected source audio ID must be present in the HLS start/decision URL
+ as well as the part-selection PUT; custom captions continue to use the
+ matched subtitle ID only in the separate subtitle asset, with HLS subtitles
+ disabled. LG hardware playback remains to be checked.
 
 ## Simkl-specific parity decision
 
