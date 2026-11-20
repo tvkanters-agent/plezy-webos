@@ -866,20 +866,21 @@ export class Player {
       // Arm before load/play: synchronous errors and never-settling Play
       // promises must not leave startup without a recovery deadline.
       this.armStartupTimeout(session, generation);
+      // Install the ASS decoder-network gate before video.load(): a native
+      // player can dispatch loadeddata/playing immediately when resuming a
+      // cached source. Otherwise that one-shot event could be missed and
+      // leave an uncached ASS load waiting forever.
+      if (this.enhancedPlaybackActive && session.subtitleAsset?.format === 'ass' &&
+          session.subtitleAsset.partUrl && !this.options.skipMatroskaSubtitles)
+        this.startEmbeddedAssPreload(session, generation);
       this.loadSource(session);
       if (generation !== this.generation || this.session !== session) return;
-      // Embedded MKV is loaded from the same Plex part as the video. Let the
-      // decoder secure its first frame before opening that second read.
-      // A decoder retry can deliberately disable MKV range reads while the
-      // session still exposes its original partUrl. Its Plex sidecar is an
-      // independent request and must not wait for the new video-ready gate.
-      if (this.enhancedPlaybackActive && session.subtitleAsset) {
-        if (session.subtitleAsset.format === 'ass' && session.subtitleAsset.partUrl &&
-            !this.options.skipMatroskaSubtitles)
-          this.startEmbeddedAssPreload(session, generation);
-        else if (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles)
-          this.loadSubtitleAsset(session, generation);
-      }
+      // The MKV subtitle cache can warm in parallel with video startup.
+      // Uncached MKV reads still wait for the decoder-ready network gate.
+      // Sidecar subtitles are an independent download, so start immediately.
+      if (this.enhancedPlaybackActive && session.subtitleAsset &&
+          (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles))
+        this.loadSubtitleAsset(session, generation);
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       // On webOS a non-started video often never reaches canplay/seeked.
