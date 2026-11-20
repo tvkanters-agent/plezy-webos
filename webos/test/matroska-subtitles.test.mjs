@@ -77,3 +77,61 @@ test('refuses mismatched track IDs, ignored ranges and cancellation', async t =>
     /did not serve a byte range/);
   assert.equal(bodyRead,false,'never try to buffer the whole video on the TV');
 });
+
+test('webOS requests one MKV range at a time and cancels the network transfer', async t => {
+  const oldWindow = globalThis.window;
+  const oldXHR = globalThis.XMLHttpRequest;
+  t.after(() => {
+    globalThis.window = oldWindow;
+    globalThis.XMLHttpRequest = oldXHR;
+  });
+  globalThis.window = {PalmSystem:{}};
+  let active = 0;
+  let maximum = 0;
+  let aborted = 0;
+  let mode = 'partial';
+  globalThis.XMLHttpRequest = class {
+    open(method, url) {
+      assert.equal(method,'GET');
+      assert.equal(url,asset.partUrl);
+    }
+    setRequestHeader(name, value) {
+      assert.equal(name,'Range');
+      const [, start, end] = /^bytes=(\d+)-(\d+)$/.exec(value);
+      this.start = Number(start);
+      this.end = Math.min(Number(end), movie.length - 1);
+    }
+    getResponseHeader(name) {
+      return name === 'Content-Range' ? `bytes ${this.start}-${this.end}/${movie.length}` : null;
+    }
+    send() {
+      maximum = Math.max(maximum, ++active);
+      if (mode === 'pending') return;
+      queueMicrotask(() => {
+        this.readyState = 2;
+        this.status = mode === 'partial' ? 206 : 200;
+        this.onreadystatechange();
+        if (!this.onload) return;
+        assert.equal(this.responseType,'arraybuffer');
+        this.response = Uint8Array.from(movie.subarray(this.start,this.end + 1)).buffer;
+        --active;
+        this.onload();
+      });
+    }
+    abort() { --active; ++aborted; }
+  };
+  const track = {...asset, streamIndex:2, format:'srt'};
+  const controller = new AbortController();
+  assert.match(await extractMatroskaSubtitle(track,controller.signal), /Embedded SRT/);
+  assert.equal(maximum,1);
+  mode = 'whole file';
+  await assert.rejects(extractMatroskaSubtitle(track,controller.signal), /HTTP 200/);
+  assert.equal(aborted,1,'abort an ignored Range as soon as response headers arrive');
+  mode = 'pending';
+  const reading = extractMatroskaSubtitle(track,controller.signal);
+  await Promise.resolve();
+  controller.abort();
+  await assert.rejects(reading,{name:'AbortError'});
+  assert.equal(aborted,2);
+  assert.equal(active,0);
+});

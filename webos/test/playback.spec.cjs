@@ -25,7 +25,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
       const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range || '');
       if (!range) return route.fulfill({status:416,body:''});
       const start = +range[1], end = Math.min(+range[2], mkv.length - 1);
-      if (mkvFixture) await mkvFixture.beforeRead(start);
+      const status = await mkvFixture?.beforeRead(start);
+      if (status) return route.fulfill({status,body:''});
       return route.fulfill({status:206,contentType:'video/x-matroska',
         headers:{'Content-Range':`bytes ${start}-${end}/${mkv.length}`},
         body:mkv.subarray(start,end + 1)});
@@ -1681,4 +1682,59 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
   expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
     .toEqual(['none']);
   expect(calls.some(url => url.pathname.endsWith('/transcode/universal/subtitles'))).toBe(false);
+});
+
+const embeddedMkv = {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+  Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+    {streamType:3,id:31,codec:'srt',index:2,selected:1}
+  ]}]}]};
+
+test('MKV range requests wait for video playback and a failed subtitle leaves it running', async ({page}) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch;
+    window.rangeStartTimes = [];
+    window.fetch = (url, options) => {
+      if (options?.headers?.Range && String(url).includes('/file.mkv')) {
+        const video = document.querySelector('video');
+        window.rangeStartTimes.push(video.currentTime);
+      }
+      return fetch(url, options);
+    };
+  });
+  const {calls} = await setup(page, embeddedMkv, undefined, [], {}, null, null, null, true,
+    {beforeRead:() => 200});
+  await expect(page.locator('#toast')).toContainText('The selected subtitle could not be loaded');
+  const starts = await page.evaluate(() => window.rangeStartTimes);
+  expect(starts).toHaveLength(1);
+  expect(starts[0]).toBeGreaterThan(0.1);
+  const video = page.locator('video');
+  const position = await video.evaluate(element => element.currentTime);
+  await expect.poll(() => video.evaluate(element => element.currentTime)).toBeGreaterThan(position);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await expect(page.locator('.player-settings-sync-value')).toHaveText('Unavailable');
+  await expect(page.locator('.player-status')).toBeEmpty();
+  expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
+    .toEqual(['none']);
+});
+
+test('an HLS decoder error during an MKV range read retries video once using Plex subtitles', async ({page}) => {
+  let releaseRange;
+  const range = new Promise(resolve => { releaseRange = resolve; });
+  const {calls} = await setup(page, embeddedMkv, undefined, [], {}, null, null,
+    async () => '1\n00:00:00,000 --> 00:00:12,000\nPLEX SUBTITLE\n', true,
+    {beforeRead:() => range});
+  const video = page.locator('video');
+  const ranges = () => calls.filter(url => url.pathname.endsWith('/file.mkv'));
+  const starts = () => calls.filter(url => url.pathname.endsWith('/start.m3u8'));
+  try {
+    await expect.poll(() => ranges().length).toBe(1);
+    await video.evaluate(element => element.dispatchEvent(new Event('error')));
+    await expect.poll(() => starts().length).toBe(2);
+    await expect(page.locator('.player-captions')).toContainText('PLEX SUBTITLE');
+    await expect(page.locator('.player-status')).toBeEmpty();
+    expect(starts().map(url => url.searchParams.get('subtitles'))).toEqual(['none', 'none']);
+    expect(ranges()).toHaveLength(1);
+  } finally {
+    releaseRange();
+  }
 });

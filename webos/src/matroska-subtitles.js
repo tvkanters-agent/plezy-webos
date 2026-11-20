@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {unzlibSync} from 'fflate';
+import {nativeWebOS} from './plex-direct-play.js';
 
 // Read indexed text blocks from the Plex part. Element IDs and timestamps:
 // https://www.matroska.org/technical/elements.html
@@ -90,7 +91,7 @@ function uint(bytes, entry, id) {
   return integer(field(bytes, entry, id));
 }
 
-function rangeReader(url, statedSize, signal, onRead) {
+function rangeReader(url, statedSize, signal, onRead, native) {
   let size = Number(statedSize) || 0;
   let read = 0;
   let prefix;
@@ -102,29 +103,73 @@ function rangeReader(url, statedSize, signal, onRead) {
     if (prefix && start + length <= prefix.length) return prefix.subarray(start, start + length);
     read += length;
     if (read > MAX_TOTAL_READ) throw invalid('byte budget exceeded');
-    const response = await fetch(url, {headers:{Range:'bytes=' + start + '-' + (start + length - 1)}, signal});
-    // Never consume a full movie if the server ignores Range.
-    if (response.status !== 206) {
-      response.body?.cancel?.().catch(() => {});
-      throw invalid('Plex did not serve a byte range (HTTP ' + response.status + ')');
+    function checkHeaders(status, getHeader) {
+      if (status !== 206) throw invalid('Plex did not serve a byte range (HTTP ' + status + ')');
+      const header = getHeader('Content-Range');
+      if (header) {
+        const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header);
+        if (!range || Number(range[1]) !== start || Number(range[2]) !== Math.min(start + length, Number(range[3])) - 1)
+          throw invalid('Plex returned a different byte range');
+        size = Number(range[3]);
+        length = Number(range[2]) - start + 1;
+      }
+      if (Number(getHeader('Content-Length')) > length) throw invalid('Plex returned an oversized byte range');
+      return length;
     }
-    const header = response.headers.get('Content-Range');
-    if (header) {
-      const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(header);
-      if (!range || Number(range[1]) !== start || Number(range[2]) !== Math.min(start + length, Number(range[3])) - 1)
-        throw invalid('Plex returned a different byte range');
-      size = Number(range[3]);
-      length = Number(range[2]) - start + 1;
-    }
-    const advertised = Number(response.headers.get('Content-Length'));
-    if (advertised > length) throw invalid('Plex returned an oversized byte range');
-    const bytes = await readResponse(response, length, signal);
+    const range = 'bytes=' + start + '-' + (start + length - 1);
+    const bytes = native ? await xhrRange(url, range, signal, checkHeaders)
+      : await fetchRange(url, range, signal, checkHeaders);
     if (signal.aborted) throw abortError();
     if (bytes.length !== length) throw invalid('Plex returned a truncated byte range');
     if (start === 0) prefix = bytes;
     onRead?.();
     return bytes;
   };
+}
+
+async function fetchRange(url, range, signal, checkHeaders) {
+  const response = await fetch(url, {headers:{Range:range}, signal});
+  let length;
+  try {
+    length = checkHeaders(response.status, name => response.headers.get(name));
+  } catch (error) {
+    response.body?.cancel?.().catch(() => {});
+    throw error;
+  }
+  return readResponse(response, length, signal);
+}
+
+function xhrRange(url, range, signal, checkHeaders) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    let length;
+    function finish(error) {
+      signal.removeEventListener('abort', cancel);
+      request.onreadystatechange = request.onprogress = request.onload = request.onerror = request.onabort = null;
+      if (error) {
+        request.abort();
+        reject(error);
+      } else resolve(new Uint8Array(request.response));
+    }
+    function cancel() { finish(abortError()); }
+    request.open('GET', url);
+    request.responseType = 'arraybuffer';
+    request.setRequestHeader('Range', range);
+    request.onreadystatechange = () => {
+      if (request.readyState !== 2) return;
+      try { length = checkHeaders(request.status, name => request.getResponseHeader(name)); }
+      catch (error) { finish(error); }
+    };
+    request.onprogress = event => {
+      if (event.loaded > length) finish(invalid('Plex returned an oversized byte range'));
+    };
+    request.onload = () => finish();
+    request.onerror = () => finish(invalid('the Plex byte range request failed'));
+    request.onabort = cancel;
+    signal.addEventListener('abort', cancel);
+    try { request.send(); }
+    catch (error) { finish(error); }
+  });
 }
 
 async function readResponse(response, length, signal) {
@@ -351,7 +396,16 @@ function formatCaptions(frames, track, ass) {
 }
 
 export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead} = {}) {
-  const read = rangeReader(asset.partUrl, asset.partSize, signal, onRead);
+  const native = nativeWebOS();
+  const request = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native);
+  // The TV shares its connection with the video decoder. Its fetch shim
+  // cannot cancel the actual network request, so use serial, abortable XHR.
+  let pending = Promise.resolve();
+  const read = native ? (offset, length) => {
+    const next = pending.then(() => request(offset, length));
+    pending = next.catch(() => {});
+    return next;
+  } : request;
   const prefix = await read(0, 32 * 1024);
   const ebml = element(prefix, 0);
   if (ebml.id !== 0x1a45dfa3) throw invalid('the Plex part is not an MKV file');

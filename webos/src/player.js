@@ -59,6 +59,7 @@ export class Player {
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
         this.showBuffering(false);
       this.startAfterInitialSeek();
+      this.checkStartupProgress();
     });
     this.video.addEventListener('stalled', () => {
       this.onPlaybackStarved();
@@ -112,6 +113,7 @@ export class Player {
     });
     this.video.addEventListener('pause', () => {
       this.tryResumeAfterSeek();
+      this.checkStartupProgress();
       // Waiting/stalled can outlive a paused decoder (notably near EOF).
       // Keep the first-frame and active seek-preview loading gates intact.
       if (!this.initialSeekPending && !this.seeking && !this.video.seeking)
@@ -213,7 +215,7 @@ export class Player {
           .find(entry => Number(entry.id) === id);
         if (this.onTrackChoice && (track || kind === 'subtitle' && id === -1))
           this.onTrackChoice(this.item, this.options.mediaIndex || 0, kind, track || {id:-1});
-        return this.reopen({[kind]:id, burnSubtitles:false,
+        return this.reopen({[kind]:id, burnSubtitles:false, skipMatroskaSubtitles:false,
           transcode:kind === 'audio' || !!this.options.transcode},
           !this.sheet.hidden && this.openSheetAction === 'tracks-options' ? {kind, id} : null);
       };
@@ -467,9 +469,10 @@ export class Player {
     const label = this.formatSubtitleSyncOffset();
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
     const burnedIn = !!this.session?.subtitleBurnedIn;
-    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : label;
+    const unavailable = !!this.session?.subtitleUnavailable;
+    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : unavailable ? 'Unavailable' : label;
     const settingsRow = this.sheet.querySelector('.player-settings-sync');
-    if (settingsRow) settingsRow.classList.toggle('is-active', !burnedIn && this.subtitleSyncOffsetMs !== 0);
+    if (settingsRow) settingsRow.classList.toggle('is-active', !burnedIn && !unavailable && this.subtitleSyncOffsetMs !== 0);
     const value = this.sheet.querySelector('.sync-offset-value');
     if (value) value.textContent = label;
     const slider = this.sheet.querySelector('.sync-offset-slider');
@@ -503,6 +506,10 @@ export class Player {
   openSyncBar() {
     if (this.session?.subtitleBurnedIn) {
       this.notify('Plex burned this subtitle into the video. Its timing cannot be changed.');
+      return;
+    }
+    if (this.session?.subtitleUnavailable) {
+      this.notify('The selected subtitle could not be loaded.');
       return;
     }
     this.stopSyncHold();
@@ -815,15 +822,9 @@ export class Player {
       this.armStartupTimeout(session, generation);
       this.loadSource(session);
       if (generation !== this.generation || this.session !== session) return;
-      this.subtitleOverlay.onError = error => {
-        if (generation === this.generation && this.session === session)
-          this.subtitleFailed(error, session);
-      };
-      if (session.subtitleAsset) this.subtitleOverlay.load(session.subtitleAsset, this.subtitleSyncOffsetMs, session.start)
-        .catch(error => {
-          if (generation === this.generation && this.session === session && error.name !== 'AbortError')
-            this.subtitleFailed(error, session);
-        });
+      // Embedded MKV is loaded from the same Plex part as the video. Let the
+      // decoder secure its first frame before opening that second read.
+      if (session.subtitleAsset && !session.subtitleAsset.partUrl) this.loadSubtitleAsset(session, generation);
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       // On webOS a non-started video often never reaches canplay/seeked.
@@ -832,6 +833,21 @@ export class Player {
       await this.beginVideoPlayback(generation);
     } catch (error) {
       if (generation === this.generation) { this.showBuffering(false);this.status.textContent = error.message; this.reveal(); }
+    }
+  }
+  async loadSubtitleAsset(session, generation) {
+    const asset = this.options.skipMatroskaSubtitles ? {...session.subtitleAsset, partUrl:null} : session.subtitleAsset;
+    const alive = () => generation === this.generation && this.session === session;
+    this.subtitleOverlay.onError = error => {
+      if (alive()) this.subtitleFailed(error, session);
+    };
+    if (asset.partUrl) this.matroskaSubtitleSession = session;
+    try {
+      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position());
+    } catch (error) {
+      if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
+    } finally {
+      if (this.matroskaSubtitleSession === session) this.matroskaSubtitleSession = null;
     }
   }
   loadSource(session) {
@@ -899,7 +915,7 @@ export class Player {
   armStartupTimeout(session = this.session, generation = this.generation) {
     clearTimeout(this.startTimeout);
     this.startTimeout = setTimeout(() => {
-      if (generation === this.generation && this.session === session && !this.startupComplete) this.failed();
+      if (generation === this.generation && this.session === session && !this.startupComplete) this.failed('startup timed out');
     }, 30000);
   }
   checkStartupProgress() {
@@ -911,6 +927,7 @@ export class Player {
         this.openIntentPlaying === false && this.hasFirstFrame) {
       this.startupComplete = true;
       clearTimeout(this.startTimeout);
+      if (this.session.subtitleAsset?.partUrl) this.loadSubtitleAsset(this.session, this.generation);
     }
   }
   position() {
@@ -962,6 +979,7 @@ export class Player {
     ++this.generation;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
+    this.matroskaSubtitleSession = null;
     this.root?.classList?.remove('subtitle-lift');
     if (this.previewAbort) this.previewAbort.abort();
     this.previewAbort = null;
@@ -1034,27 +1052,42 @@ export class Player {
   }
   async subtitleFailed(error, session) {
     if (!this.session || this.session !== session || this.recoveringSession === session) return;
+    if (session.subtitleAsset?.partUrl) {
+      // Just as Plezy recovers a stalled sidecar without it, keep the already
+      // opened picture and audio when both MKV subtitle sources fail.
+      if (session.subtitleUnavailable) return;
+      session.subtitleUnavailable = true;
+      this.subtitleOverlay.clear();
+      this.updateSubtitleSyncControls();
+      console.warn('MKV subtitle unavailable:', error.message);
+      this.notify('The selected subtitle could not be loaded. Video is still available.');
+      return;
+    }
     console.warn('Subtitle renderer failed; retrying with Plex burn-in:', error);
     this.notify('Could not load the subtitle separately. Plex will burn it into the video.');
     this.recoveringSession = session;
     try { await this.reopen({burnSubtitles:true}); }
     finally { if (this.recoveringSession === session) this.recoveringSession = null; }
   }
-  async failed() {
+  async failed(reason) {
     const session = this.session;
     if (!session || this.closing || this.recoveringSession === session) return;
     clearTimeout(this.startTimeout);
-    if (!session.transcode) {
+    const retry = this.matroskaSubtitleSession === session ? {skipMatroskaSubtitles:true}
+      : !session.transcode ? {transcode:true} : null;
+    if (retry) {
       this.recoveringSession = session;
       this.showBuffering(true);
-      try { await this.reopen({transcode: true}); }
+      try { await this.reopen(retry); }
       finally { if (this.recoveringSession === session) this.recoveringSession = null; }
     } else {
       // A replacement HLS decoder can fail before the original reopen's
       // Play promise settles. Its error must never be hidden by that attempt.
       this.clearResumeAfterSeek();
       this.showBuffering(false);
-      this.status.textContent = 'Video could not play. Check server transcoding and TV codec support. Press Stop to return.';
+      const code = this.video?.error?.code;
+      const detail = reason || (code ? 'decoder error ' + code : 'decoder rejected the stream');
+      this.status.textContent = 'Video could not play (HLS, ' + detail + '). Press Stop to return.';
       this.reveal();
     }
   }
