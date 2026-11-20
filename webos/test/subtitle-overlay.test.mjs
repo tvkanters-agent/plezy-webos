@@ -391,6 +391,11 @@ test('cached ASS fonts and opening cues load before the decoder network gate at 
   assert.equal(options[0].fonts[0].bytes,font,'verified cached custom font reaches libass');
   assert.match(options[0].subContent,/Resume cue/);
   assert.doesNotMatch(options[0].subContent,/Past cue/);
+  assert.deepEqual(overlay.assClockSample(),{time:125,held:true},
+    'a resumed ASS preview must not be rewound to the old native 0:00 clock');
+  video.currentTime=125.125;
+  assert.deepEqual(overlay.assClockSample(),{time:125.125,held:false},
+    'the overlay follows the decoder again as soon as it reaches the target');
   overlay.dispose();
 });
 
@@ -408,5 +413,31 @@ test('closing playback cancels a cache miss waiting for decoder-safe MKV reads',
   overlay.clear();
   await assert.rejects(attempt,{name:'AbortError'});
   assert.equal(networkCalls,0,'an aborted preload must never access the old Plex file');
+  overlay.dispose();
+});
+
+test('ASS holds a requested seek target while LG reports its previous media clock',()=>{
+  const listeners=new Map(),messages=[],clocks=[];
+  const video={currentTime:12,paused:false,seeking:false,ended:false,playbackRate:1,
+    addEventListener:(type,callback)=>listeners.set(type,callback),
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  overlay.kind='ass';
+  overlay.renderer={worker:{postMessage:message=>messages.push(message)},
+    _plezyFullyReady:true,
+    setIsPaused:(paused,time)=>clocks.push({paused,time}),
+    setRate(){},dispose(){}};
+  overlay.requestAssSeek(180);
+  assert.deepEqual(clocks[clocks.length-1],{paused:true,time:180},
+    'libass holds the requested target instead of the stale old timestamp');
+  assert.equal(messages[messages.length-1].target,'plezy-force-frame');
+  video.currentTime=12.125;
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks[clocks.length-1],{paused:true,time:180},
+    'stale decoder timeupdate must not rewind the ASS worker');
+  video.currentTime=179.9;
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks[clocks.length-1],{paused:false,time:179.9},
+    'the overlay releases its latch once the decoder actually lands');
   overlay.dispose();
 });
