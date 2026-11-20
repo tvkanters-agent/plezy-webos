@@ -158,8 +158,9 @@ for (const legacy of [false, true]) {
     let end = Math.min(start + 256 * 1024, source.length);
     if (end < source.length && /[\uD800-\uDBFF]/.test(source[end - 1])) end--;
     const piece = JSON.stringify(source.slice(start, end));
-    await writeFile(path.join(libass, worker + '-' + count++ + '.js'),
-      'window.plezyAssParts.push(new Blob([' + piece + ']));\n');
+    await writeFile(path.join(libass, worker + '-' + count + '.js'),
+      'window.plezyAssParts[' + count + '] = new Blob([' + piece + ']);\n');
+    count++;
     start = end;
   }
   await writeFile(path.join(libass, worker + '-assets.js'), 'window.plezyAssPartCount = ' + count + ';\n');
