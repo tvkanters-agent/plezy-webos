@@ -453,7 +453,11 @@ export class SubtitleOverlay {
   async renderStyledAss(asset, content, generation) {
     if (this.kind === 'ass') {
       if (this.assAppender) this.assAppender.remember(content);
-      else this.renderer.setTrack(content);
+      else {
+        this.renderer.setTrack(content);
+        if (this.video.paused && this.renderer._plezyFullyReady)
+          this.renderer.worker?.postMessage({target:'plezy-force-frame'});
+      }
       this.renderer._plezyTrackContent = content;
       return;
     }
@@ -468,6 +472,8 @@ export class SubtitleOverlay {
       const time = subtitleTime(this.video.currentTime, this.offsetMs);
       renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting), time);
       renderer.setRate(this.video.playbackRate || 1);
+      if (this.video.paused || this.video.seeking)
+        renderer.worker?.postMessage({target:'plezy-force-frame'});
     };
     const onError = error => {
       if (renderer) renderer.debug = true;
@@ -493,7 +499,13 @@ export class SubtitleOverlay {
         renderer.ctx.clearRect(0,0,renderer.canvas.width,renderer.canvas.height);
       renderer.plezyResumeVideo();
       renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
-      if (renderer._plezyTrackContent !== content) renderer.setTrack(content);
+      if (renderer._plezyTrackContent !== content) {
+        renderer.setTrack(content);
+        // A warm worker can retain its previous ASS bitmap even when the
+        // newly installed track has no cue at the current paused position.
+        if (this.video.paused)
+          renderer.worker?.postMessage({target:'plezy-force-frame'});
+      }
       ready = true;
     } else {
       parked?.dispose();
