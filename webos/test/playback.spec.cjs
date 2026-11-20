@@ -1920,6 +1920,19 @@ test('animated ASS sign layers paint together between video time updates', async
   await page.addInitScript(() => {
     window.WebAssembly = undefined;
     document.addEventListener('timeupdate', event => event.stopImmediatePropagation(), true);
+    // Date.now() on an older TV can give two different libass frames the
+    // same millisecond timestamp. Force that collision in every browser run:
+    // animations and paused-seek clears must still reach the canvas.
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(...args) {
+        super(...args);
+        this.addEventListener('message', event => {
+          if (event.data?.target === 'canvas' && event.data.op === 'renderCanvas')
+            event.data.time = 1;
+        });
+      }
+    };
   });
   const script = [
     '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 320', 'PlayResY: 180',
