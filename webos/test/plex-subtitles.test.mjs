@@ -14,6 +14,62 @@ function makeMedia(container = 'mp4', videoCodec = 'h264') {
     ]}]};
 }
 
+test('compatibility mode restores pre-change Plex HLS and burn-in for MKV SRT and ASS',async()=>{
+  for (const codec of ['srt','ass']) {
+    const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+    const calls=[];
+    api.get=async(path,params,options)=>{
+      calls.push({path,params,options});
+      return {MediaContainer:{Metadata:[{}]}};
+    };
+    const media=makeMedia('mkv');
+    media.Part[0].Stream=[{streamType:3,id:92,codec,selected:1}];
+    const item={id:'123',title:'Test',duration:120,raw:{Media:[media]}};
+    const session=await api.playback(item,{enhancedPlayback:false,start:45});
+    const url=new URL(session.url);
+    assert.equal(session.transcode,true);
+    assert.equal(session.start,45);
+    assert.equal(session.subtitleAsset,null);
+    assert.equal(session.subtitleBurnedIn,true);
+    assert.equal(url.pathname,'/video/:/transcode/universal/start.m3u8');
+    assert.equal(url.searchParams.get('X-Plex-Platform'),'Chrome');
+    assert.equal(url.searchParams.get('subtitles'),'burn');
+    assert.equal(url.searchParams.get('directPlay'),'0');
+    assert.equal(url.searchParams.has('hasMDE'),false);
+    assert.equal(url.searchParams.has('subtitleStreamID'),false);
+    assert.equal(url.searchParams.has('fastSeek'),false);
+    assert.deepEqual(calls.map(call=>call.path),['/library/metadata/123']);
+    await session.extrasPromise;
+
+    const selected=await api.playback(item,{enhancedPlayback:false,subtitle:92,mediaIndex:0});
+    assert.equal(selected.transcode,true);
+    assert.deepEqual(calls.slice(-2).map(call=>call.path),[
+      '/library/parts/55','/library/metadata/123']);
+    assert.equal(calls.at(-2).params.subtitleStreamID,92);
+    assert.equal(calls.at(-2).options.method,'PUT');
+    await selected.extrasPromise;
+  }
+});
+
+test('compatibility mode retains the historical MP4 direct-versus-compatible decision',async()=>{
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+  const calls=[];api.get=async(path,params,options)=>{
+    calls.push({path,params,options});return {MediaContainer:{Metadata:[{}]}};
+  };
+  const item={id:'123',raw:{Media:[makeMedia()]}};
+  const direct=await api.playback(item,{enhancedPlayback:false});
+  assert.equal(direct.transcode,false);
+  assert.equal(direct.subtitleAsset,null);
+  assert.equal(new URL(direct.url).pathname,'/library/parts/55/file.mp4');
+  await direct.extrasPromise;
+  const compatible=await api.playback(item,{enhancedPlayback:false,transcode:true,subtitle:-1});
+  assert.equal(compatible.transcode,true);
+  assert.equal(new URL(compatible.url).searchParams.get('subtitles'),'burn');
+  assert.equal(calls.at(-2).params.subtitleStreamID,0);
+  assert.ok(!calls.some(call=>call.path==='/video/:/transcode/universal/decision'));
+  await compatible.extrasPromise;
+});
+
 test('selected external text track resolves from Plex file key, not the first subtitle', () => {
   const media = makeMedia();
   assert.deepEqual(plexExternalSubtitle(media), {id:90,format:'srt',key:'/library/streams/90.srt'});

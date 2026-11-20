@@ -213,11 +213,17 @@ test('detail action-row status shows playable stream choices and updates without
   await expect(page.locator('.detail-playback-tracks')).toHaveAttribute('aria-label',
     'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
   await page.getByRole('button',{name:/The First Episode/}).first().click();
+  await expect(page.locator('#player')).toBeVisible();
   await expect(page.locator('.detail-playback-tracks')).toHaveAttribute('aria-label',
     'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
   // Back restores a detached detail DOM rather than rebuilding its route.
   // Its status must still respond to choices made after the restoration.
-  await page.keyboard.press('Escape');
+  // The episode tile starts video. Explicitly stop and wait for focus to
+  // return before navigating Back; two rapid Escapes can race the fixture's
+  // failing decoder and leave the video overlay above the detail screen.
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await expect(page.locator('#player')).toBeHidden();
+  await expect(page.getByRole('button',{name:/The First Episode/}).first()).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(status).toHaveAttribute('aria-label',
     'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');

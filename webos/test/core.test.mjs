@@ -23,6 +23,15 @@ test('D-pad favors overlapping rows and columns and never moves backwards', () =
   assert.equal(nextFocus(origin,candidates,'up'), null);
 });
 test('corrupt storage recovers without throwing', () => { const state=readState({getItem:()=>'{broken'}); assert.deepEqual(state.servers,[]); assert.equal(state.deviceId.length,32); });
+test('enhanced playback is opt-in and persists only an explicit enabled setting',()=>{
+  for (const [saved,expected] of [
+    [{},false],[{enhancedPlayback:false},false],[{enhancedPlayback:true},true],
+    [{enhancedPlayback:'true'},false]
+  ]) {
+    assert.equal(readState({getItem:()=>JSON.stringify(saved)}).enhancedPlayback,expected);
+  }
+  assert.equal(readState({getItem:()=>'{broken'}).enhancedPlayback,false);
+});
 test('HTTP failures are actionable and do not expose token URLs', async () => {
   const restore=mock(async()=>new Response('',{status:401}));
   try { await assert.rejects(request('https://media.test?token=secret'), error=>error.status===401 && !error.message.includes('secret')); } finally {restore();}

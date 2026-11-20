@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-export const VERSION = '1.14.5';
+export const VERSION = '1.15.0';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -89,6 +89,8 @@ export function readState(storage) {
     return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
       servers, active: typeof state.active === 'string' ? state.active : '',
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
+      // Existing installs start on the known pre-Direct-Play Plex pipeline.
+      enhancedPlayback: state.enhancedPlayback === true,
       skipIntroMode: ['off','button','auto'].includes(state.skipIntroMode) ? state.skipIntroMode : 'button',
       skipCreditsMode: ['off','button','auto'].includes(state.skipCreditsMode) ? state.skipCreditsMode : 'button',
       autoSkipDelay: Number.isInteger(state.autoSkipDelay) && state.autoSkipDelay >= 1 && state.autoSkipDelay <= 30
@@ -102,7 +104,8 @@ export function readState(storage) {
       sidebarCollapsed: state.sidebarCollapsed === true,
       hiddenLibraryIds: Array.isArray(state.hiddenLibraryIds)
         ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : []};
-  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', skipIntroMode: 'button', skipCreditsMode: 'button',
+  } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', enhancedPlayback: false,
+    skipIntroMode: 'button', skipCreditsMode: 'button',
     autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
     simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: []}; }
 }
