@@ -97,3 +97,26 @@ test('long ASS streams import events near the resume or seek timestamp first',()
     'a seek overtakes unrelated unimported vector-sign events');
   next.dispose();
 });
+
+test('paused ASS imports redraw nearby cues without repainting every distant batch',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const sent=[];
+  const renderer={video:{currentTime:125.5,paused:true,seeking:false},timeOffset:0,
+    worker:{postMessage:value=>sent.push(value)},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const appender=new AssEventAppender(renderer,header+first+'\n',125.5);
+  const important='Dialogue: 0,0:02:05.00,0:02:08.00,Default,,0,0,0,,Important sign';
+  const unrelated=Array.from({length:270},(_,i)=>
+    'Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Old sign '+i);
+  appender.remember(header+first+'\n'+[important,...unrelated].join('\n')+'\n');
+  appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  t.mock.timers.tick(100);
+  const batches=sent.filter(value=>value.target==='create-events');
+  const force=sent.filter(value=>value.target==='plezy-force-frame');
+  assert.equal(batches.length,3,'large tracks must still import all their events');
+  assert.equal(batches[0].events[0].Text,'Important sign');
+  assert.equal(force.length,2,'do not re-render dozens of distant inactive sign batches');
+  const firstForce=sent.indexOf(force[0]);
+  assert.equal(sent[firstForce-1].target,'video','frame forcing follows the current clock');
+  appender.dispose();
+});
