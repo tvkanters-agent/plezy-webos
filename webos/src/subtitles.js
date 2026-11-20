@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
+import {nativeWebOS} from './plex-direct-play.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
 import {PixiSrtRenderer} from './pixi-subtitles.js';
@@ -41,6 +42,9 @@ async function ensureAssRenderer() {
         const prefix = 'subtitles-octopus-worker' + (wasm ? '' : '-legacy');
         await loadAssScript(prefix + '-assets.js');
         window.plezyAssParts = [];
+        // On the C8, the hardware video plane darkens fractional-alpha edges.
+        if (!wasm && nativeWebOS() && /Chrome\/53\./i.test(navigator.userAgent))
+          window.plezyAssParts.push('self.plezyAssCoverage = true;\n');
         try {
           for (let i = 0; i < window.plezyAssPartCount; i++) await loadAssScript(prefix + '-' + i + '.js');
           const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});

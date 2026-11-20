@@ -1,4 +1,5 @@
 import {build} from 'esbuild';
+import {applyAssCoverage} from '../src/ass-coverage.js';
 import {VERSION} from '../src/core.js';
 import {generateSplash} from './splash.mjs';
 import {cp, mkdir, rm, readFile, writeFile} from 'node:fs/promises';
@@ -32,6 +33,14 @@ for (const legacy of [false, true]) {
   if (!legacy) {
     const wasm = await readFile(path.join(vendor, worker + '.wasm'));
     source = 'var Module = {wasmBinary:' + binaryExpression(wasm) + '};\n' + source;
+  }
+  if (legacy) {
+    // libass-wasm 4.1 transfers its final cropped image at this point.
+    const transfer = 'canvases=[{w:renderResult.dest_width,';
+    if (source.split(transfer).length !== 2) throw new Error('Unexpected libass worker blend output.');
+    source = source.replace(transfer,
+      'if(self.plezyAssCoverage)applyAssCoverage(result,renderResult.dest_width,renderResult.dest_x,renderResult.dest_y);' + transfer);
+    source += '\n' + applyAssCoverage.toString() + '\n';
   }
   // Workers launched by file-origin apps cannot reliably XHR even sibling
   // blob URLs. Install the bundled default font into libass's own filesystem.
