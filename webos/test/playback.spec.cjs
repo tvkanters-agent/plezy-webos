@@ -2081,7 +2081,8 @@ test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
   expect(ranges.filter(entry=>entry.length===font.length)).toHaveLength(1);
   expect(ranges.filter(entry=>entry.start===0&&entry.length===32768)).toHaveLength(indexedReads);
   expect(assRequests.length).toBeGreaterThan(0);
-  expect(assRequests.every(url=>url.includes('/libass/v1.22.5/'))).toBe(true,
+  const appVersion=JSON.parse(await readFile(path.join(__dirname,'../dist/appinfo.json'),'utf8')).version;
+  expect(assRequests.every(url=>url.includes('/libass/v'+appVersion+'/'))).toBe(true,
     'an IPK update must never reuse an earlier version of a worker script');
 });
 
