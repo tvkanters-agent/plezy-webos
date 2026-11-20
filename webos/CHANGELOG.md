@@ -1,3 +1,8 @@
+## 1.12.2
+
+- Render embedded Plex SRT and ASS/SSA locally so subtitle sync works without forcing video burn-in.
+- Explain when Plex has to burn a subtitle into the video and sync is unavailable.
+
 ## 1.12.1
 
 - Fix subtitle sync on Chromium 53 by supplying the Object APIs needed by Media Captions, and match Plezy's Plex sidecar URLs (codec extension and UTF-8).

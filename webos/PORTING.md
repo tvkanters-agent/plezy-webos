@@ -554,9 +554,8 @@ so changing the sync slider could not affect the visible subtitles.
 PlexClient._buildSidecarSubtitleUrl is authoritative for sidecar requests:
 append the codec extension to Plex's bare Stream.key and request encoding=utf-8.
 The port now does so, retaining already-suffixed keys, SSA format, query
-parameters and account authentication. Embedded/image subtitles still follow
-upstream's burn-in path on HLS; this change does not invent stream extraction
-endpoints or claim that already-burned subtitles can be retimed.
+parameters and account authentication. In 1.12.1 embedded/image subtitles
+still followed upstream's HLS burn-in path.
 
 Browser regressions remove Object.values, Object.entries and ResizeObserver
 before application startup. They adjust the real UI while checking marked-up
@@ -569,3 +568,28 @@ the worker requires it. The port now vendors the unmodified fallback font
 from the matching upstream tag (Git blob a562391696ad477e5a8ad28ef8b4d53c90bb0d42)
 and its SIL OFL license in public/libass. It is copied with the application
 and build-checked, so ASS never depends on downloading a font from a CDN.
+
+### Plex embedded text and subtitle sync
+
+Original Plezy's MPV player reads embedded subtitles locally on Direct Play.
+LG webOS 4.4's HTML player cannot reliably expose and select them. The port
+uses Plex Web's separate subtitle URLs for embedded SRT and ASS/SSA:
+`/subtitles/:/transcode/universal/start` on Direct Play and
+`/video/:/transcode/universal/subtitles` on compatible playback. The latter is
+Plex Media Server's documented subtitle-only transcode endpoint. These requests
+use the selected media version, part and subtitle stream with their own
+session, leaving the video route and full-title timeline independent. Video
+starts while the subtitle request is in flight. Compatible video can Direct
+Play, and HLS tells Plex to omit subtitles from the video.
+
+Media Captions renders text from embedded SRT, including a Plex ASS wrapper
+when supplied. SubtitlesOctopus receives an ASS/SSA payload intact so the
+viewer's delay also applies to the title's styled signs and dialogue. If
+Plex supplies a plain text conversion instead, the client renders that text.
+If the request fails or Plex only has image subtitles, video can still play
+with Plex burn-in. The sync row explains that timing is unavailable then.
+
+Browser tests use the real renderers with Plex-shaped HTTP responses, cover
+subtitle arrival after video starts, and check what is drawn before and after
+an adjustment. The TV's decoder and live PMS extraction are separate from
+those tests.
