@@ -601,6 +601,9 @@ export class Plex {
         asset.partUrl = this.url(part.key);
         asset.partSize = part.size;
         asset.streamIndex = selectedPlexSubtitle(media, options).index;
+        // A series' similarly named fonts can be reused across episodes.
+        asset.fontScope = this.server.id + ':' +
+          (item.raw.grandparentRatingKey || item.raw.parentRatingKey || item.id);
       }
     }
     const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);
