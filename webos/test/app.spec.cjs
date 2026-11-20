@@ -1101,6 +1101,38 @@ test('Plezy season header includes series information and functional actions',as
  await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
  await expect(page.getByRole('button',{name:'View series'})).toBeHidden();
 });
+test('episode season header is a remote-focusable link to its season',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
+  const show={ratingKey:'show',type:'show',title:'The Parent Series'};
+  const season={ratingKey:'season',type:'season',title:'Season 2',index:2,parentRatingKey:'show'};
+  const episode={ratingKey:'ep',type:'episode',title:'Pilot',parentIndex:2,index:3,
+    parentRatingKey:'season',grandparentRatingKey:'show',
+    Media:[{Part:[{id:'part',key:'/video.mp4'}]}]};
+  await page.route('http://plex.test/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path==='/hubs')return route.fulfill({json:{MediaContainer:{Hub:[{title:'On deck',Metadata:[episode]}]}}});
+    const metadata=path==='/library/metadata/ep'?[episode]:
+      path==='/library/metadata/show'?[show]:
+      path==='/library/metadata/season'?[season]:[];
+    return route.fulfill({json:{MediaContainer:{Metadata:metadata}}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:/Pilot/}).first().click();
+  await expect(page.getByRole('heading',{name:'Pilot'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Play',exact:true})).toBeFocused();
+  const seasonLink=page.getByRole('button',{name:'Season 2',exact:true});
+  await expect(seasonLink).toBeVisible();
+  await expect(page.locator('.detail-context')).toHaveText('Season 2 · Episode 3');
+  await page.keyboard.press('ArrowUp');
+  await expect(seasonLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading',{name:'Season 2'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading',{name:'Pilot'})).toBeVisible();
+  await expect(seasonLink).toBeFocused();
+});
+
 test('episode overflow opens actions without launching compatible playback',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
   deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'token'}]})));
