@@ -2,20 +2,33 @@
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 
+function loadAssScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'libass/' + src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load ' + src));
+    document.head.appendChild(script);
+  });
+}
+
 let assRendererScript;
 async function ensureAssRenderer() {
-  if (typeof window.SubtitlesOctopus === 'function') return;
+  if (typeof window.SubtitlesOctopus === 'function') return window.plezyAssAssets;
   if (!assRendererScript) {
-    assRendererScript = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'libass/subtitles-octopus.js';
-      script.onload = () => typeof window.SubtitlesOctopus === 'function'
-        ? resolve() : reject(new Error('SubtitlesOctopus did not initialize.'));
-      script.onerror = () => reject(new Error('SubtitlesOctopus could not be loaded.'));
-      document.head.appendChild(script);
-    }).catch(error => { assRendererScript = null; throw error; });
+    assRendererScript = (async () => {
+      let wasm = false;
+      try {
+        wasm = WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0]));
+      } catch (_) { /* Chromium 53 uses the JavaScript worker. */ }
+      if (!window.plezyAssAssets) await loadAssScript('subtitles-octopus-worker' + (wasm ? '' : '-legacy') + '-assets.js');
+      await loadAssScript('subtitles-octopus.js');
+      if (!window.plezyAssAssets || typeof window.SubtitlesOctopus !== 'function')
+        throw new Error('SubtitlesOctopus did not initialize.');
+      return window.plezyAssAssets;
+    })().catch(error => { assRendererScript = null; throw error; });
   }
-  await assRendererScript;
+  return assRendererScript;
 }
 
 // Positive sync offsets delay subtitles, matching the native text-track editor.
@@ -201,7 +214,7 @@ export class SubtitleOverlay {
         this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
         return;
       }
-      await ensureAssRenderer();
+      const resources = await ensureAssRenderer();
       if (generation !== this.generation) return;
       if (this.kind) this.releaseRenderer();
       // The worker is loaded only for ASS/SSA; webOS 4.x uses its non-WASM build.
@@ -217,8 +230,7 @@ export class SubtitleOverlay {
         video: this.video, subContent: content, debug:true,
         // Debug mode avoids an uncaught global throw after a handled worker
         // failure; the player retries using Plex burn-in through onError.
-        workerUrl: 'libass/subtitles-octopus-worker.js',
-        legacyWorkerUrl: 'libass/subtitles-octopus-worker-legacy.js',
+        workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
         timeOffset: -this.offsetMs / 1000,
         onReady: () => {
           ready = true;

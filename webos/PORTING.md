@@ -741,3 +741,12 @@ startup before reading MKV ranges. Decoded-frame counters can establish video
 output while the hardware plane still reports zero intrinsic dimensions.
 Libass then sizes its canvas using the selected Plex media aspect ratio and
 the video element's layout box until intrinsic dimensions become available.
+
+### Packaged ASS worker resources
+
+The installed app opens a local HTML file. Chromium can refuse a separate local
+worker script or font request from that origin. The build packages each libass
+worker in a lazily loaded classic script. The selected worker runs from a Blob
+URL, initializes the default font directly in its filesystem and, on newer
+engines, receives the bundled WASM bytes. Browser tests open the built local HTML
+and check drawn ASS pixels and timing for both worker variants.
