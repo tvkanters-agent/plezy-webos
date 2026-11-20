@@ -1,5 +1,6 @@
 ## 1.22.3 — Reduce ASS flicker, timing latency and cached-track startup
 
+- Invalidate stale ASS canvas pixels at the start of a video seek, including paused seeks that land between subtitle cues, without blanking ordinary playback.
 - Accept same-millisecond libass canvas frames so a paused seek cannot lose the one blank frame that clears stale text. Test forced timestamp collisions in real legacy libass animation.
 - Fix redundant SubtitlesOctopus canvas resets on no-op resizes, without delaying intentional blank frames after seeking.
 - Wait until libass responds to a style query before marking a new worker initialized; follow decoded video time every 100 ms and avoid redundant rate messages. Preserve native subtitle seek-state handling.
