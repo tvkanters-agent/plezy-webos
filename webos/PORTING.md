@@ -606,3 +606,23 @@ Browser tests use the real renderers with Plex-shaped HTTP responses, cover
 subtitle arrival after video starts, and check what is drawn before and after
 an adjustment. The TV's decoder and live PMS extraction are separate from
 those tests.
+
+### Embedded MKV subtitles from the original part
+
+Plex's separate subtitle endpoints failed on the target setup in 1.13.1.
+For MKV parts, the TV now reads the selected text track from the original
+media, matching how Plezy's MPV player demuxes embedded subtitles. It uses
+the Matroska SeekHead and subtitle Cues to request the track header, index,
+and referenced blocks from the existing authenticated Plex part URL.
+Plex stream index and Matroska codec must agree when both are available.
+The reader requires partial HTTP responses, bounds total bytes and concurrency,
+and aborts on track changes or player close. It retains full-title timestamps
+and ASS script styles. ASS uses the bundled fallback font.
+
+Plex extraction and burn-in remain fallbacks when byte ranges, the selected
+subtitle index, or the container encoding cannot be used. The committed test
+fixture was muxed with FFmpeg from synthetic black video, a sine wave, and
+known SRT and styled ASS cues. Tests compare decoded cue times and track IDs,
+then render the actual MKV subtitle bytes in the browser while the Plex
+subtitle endpoint returns an error. Physical TV networking remains a
+separate validation step.
