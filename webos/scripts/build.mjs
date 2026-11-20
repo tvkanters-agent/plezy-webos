@@ -8,6 +8,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 await rm(path.join(root, 'dist'), {recursive: true, force: true});
 await mkdir(path.join(root, 'dist'), {recursive: true});
 await cp(path.join(root, 'public'), path.join(root, 'dist'), {recursive: true});
+// Load PixiJS 4 only on first local SRT/VTT cue, never in compatibility mode.
+// Its prebuilt browser bundle also avoids pulling browser-only globals into
+// Node's subtitle/unit-test import graph.
+await cp(path.join(root, 'node_modules/pixi.js/dist/pixi.min.js'),path.join(root,'dist/pixi.min.js'));
+await cp(path.join(root, 'node_modules/pixi.js/LICENSE'),path.join(root,'dist/pixi-LICENSE.txt'));
 // Pack workers as load-on-demand classic scripts. A packaged file:// page
 // can load sibling scripts but Chromium may refuse a sibling Worker URL.
 const vendor = path.join(root, 'node_modules/libass-wasm/dist/js');

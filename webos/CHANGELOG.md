@@ -1,3 +1,10 @@
+## 1.19.0 — PixiJS 4 SRT rendering
+
+- Render enhanced SRT/VTT subtitles with PixiJS 4.8.9 CanvasRenderer. Rasterize text and rounded outlines at 2× resolution for sharp boundaries, preserving Plezy's font, color, border, positioning, margins, bold and italic preferences.
+- Retain timed/overlapping cue delivery, inline emphasis, multi-line wrapping and subtitle sync while avoiding per-frame texture regeneration or DOM/SVG cue measuring.
+- Load PixiJS only for enhanced text subtitles; compatibility playback and ASS/libass behavior remain separate. Bundle the renderer and its MIT license in the IPK.
+- Cover timing, text formatting, colors, border pixels, layout, library packaging and renderer lifecycle with targeted automated tests. LG C8 hardware validation remains outstanding.
+
 ## 1.14.3
 
 - Use Plezy's Generic Plex profile for the MPEG-TS HLS target to avoid a duplicate target in the Chrome profile.

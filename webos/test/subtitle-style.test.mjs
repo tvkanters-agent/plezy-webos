@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readState} from '../src/core.js';
 import {SUBTITLE_STYLE_DEFAULTS, subtitleStyle, videoInsets,
-  applySrtStyle, applySrtPosition, resetSrtStyle} from '../src/subtitle-style.js';
+  applySrtStyle, resetSrtStyle} from '../src/subtitle-style.js';
 
 test('native Plezy subtitle defaults, bounds and durable values survive reload',()=>{
   assert.deepEqual(subtitleStyle(),SUBTITLE_STYLE_DEFAULTS);
@@ -17,48 +17,34 @@ test('native Plezy subtitle defaults, bounds and durable values survive reload',
     subtitleBold:1}),SUBTITLE_STYLE_DEFAULTS);
 });
 
-test('SRT style matches MPV 720p units, colors and flags, without a background box',()=>{
-  const values={};
-  const element={offsetHeight:1080,style:{
-    setProperty(name,value){values[name]=value;}
-  }};
-  applySrtStyle(element,{videoWidth:1920,videoHeight:800,offsetWidth:1920,offsetHeight:1080},{
+test('Pixi SRT style matches MPV 720p font units, colors, flags and video insets',()=>{
+  const element={offsetHeight:1080,style:{}};
+  const style=applySrtStyle(element,{videoWidth:1920,videoHeight:800,offsetWidth:1920,offsetHeight:1080},{
     subtitleFontSize:40,subtitleTextColor:'#ff9900',subtitleBorderSize:2,
     subtitleBorderColor:'#123456',subtitleUseMargins:false,subtitleBold:true,subtitleItalic:true
   });
   assert.equal(element.style.fontSize,'60.00px');
   assert.equal(element.style.fontWeight,'700');
   assert.equal(element.style.fontStyle,'italic');
-  assert.equal(values['--cue-color'],'#FF9900');
-  assert.equal(values['--cue-border-radius'],'3.00px');
-  assert.equal(values['--cue-text-shadow'],'none');
-  assert.equal(values['--cue-bg-color'],'transparent');
+  assert.equal(style.subtitleTextColor,'#FF9900');
+  assert.equal(style.subtitleBorderSize,2);
+  assert.equal(style.subtitleBorderColor,'#123456');
   assert.ok(Math.abs(parseFloat(element.style.top)-12.963)<0.001);
   assert.equal(element.style.left,'0%');
   assert.equal(element.style.bottom,element.style.top);
   applySrtStyle(element,{offsetWidth:1920,offsetHeight:1080},{subtitleBorderSize:0});
-  assert.equal(values['--cue-border-radius'],'0.00px');
-  assert.equal(values['--cue-text-shadow'],'none');
   assert.equal(element.style.top,'0%');
   assert.equal(element.style.fontSize,'57.00px');
-  applySrtStyle(element,{offsetWidth:1920,offsetHeight:1080},{subtitleBorderSize:5,
-    subtitleBorderColor:'#FF0088'});
-  assert.equal(values['--cue-border-radius'],'7.50px');
-  assert.equal(values['--cue-text-shadow'],'none');
 });
 
-test('subtitle border values scale with video height and reset for ASS',()=>{
-  const properties={};
-  const element={offsetHeight:720,style:{setProperty(name,value){properties[name]=value;},
-      removeProperty(name){delete properties[name];}}};
+test('subtitle styling resets for ASS after the Pixi canvas is destroyed',()=>{
+  const element={offsetHeight:720,style:{}};
   applySrtStyle(element,{offsetHeight:720},{subtitleBorderSize:3,subtitleBorderColor:'#112233'});
-  assert.equal(properties['--cue-border-radius'],'3.00px');
+  assert.equal(element.style.fontSize,'38.00px');
   applySrtStyle(element,{offsetHeight:1080},{subtitleBorderSize:5,subtitleBorderColor:'#AABBCC'});
-  assert.equal(properties['--cue-border-radius'],'7.50px');
-  applySrtStyle(element,{offsetHeight:1080},{subtitleBorderSize:0});
-  assert.equal(properties['--cue-border-radius'],'0.00px');
+  assert.equal(element.style.fontSize,'57.00px');
   resetSrtStyle(element);
-  assert.equal(properties['--cue-border-radius'],undefined);
+  assert.equal(element.style.fontSize,'');
 });
 
 test('margins switch uses actual fitted video dimensions, with safe unknown metadata',()=>{
@@ -73,32 +59,10 @@ test('margins switch uses actual fitted video dimensions, with safe unknown meta
 });
 
 test('switching to ASS dialogue removes SRT-only styles and restores its original background',()=>{
-  const variables={'--cue-color':'#FF0000','--cue-bg-color':'transparent',
-    '--cue-text-shadow':'none','--cue-border-radius':'3px'};
   const node={style:{fontSize:'60px',fontWeight:'700',fontStyle:'italic',top:'12%',
-    right:'0%',bottom:'12%',left:'0%',removeProperty(name){delete variables[name];}}};
+    right:'0%',bottom:'12%',left:'0%'}};
   resetSrtStyle(node);
   assert.equal(node.style.fontSize,'');
   assert.equal(node.style.top,'');
-  assert.deepEqual(variables,{});
   resetSrtStyle({textContent:''}); // Lightweight legacy test overlays have no style object.
-});
-
-test('position adjusts only unpositioned text cues, keeping authored positions',()=>{
-  const auto={line:'auto',snapToLines:true,lineAlign:'start',vertical:''};
-  const authored={line:20,snapToLines:false,lineAlign:'start',vertical:''};
-  const vertical={line:'auto',vertical:'rl'};
-  applySrtPosition({cues:[auto,authored,vertical]},0,720,38);
-  assert.equal(auto.line,0);
-  assert.equal(auto.snapToLines,true);
-  assert.equal(auto.lineAlign,'start');
-  assert.equal(authored.line,20);
-  assert.equal(vertical.line,'auto');
-  const middle={line:'auto',vertical:''};
-  applySrtPosition({cues:[middle]},50,720,38);
-  assert.ok(middle.line>=6 && middle.line<=8);
-  const low={line:'auto',vertical:''};
-  applySrtPosition({cues:[low]},150);
-  assert.equal(low.line,'auto');
-  assert.equal(low.style['--cue-transform'],'translateY(50vh)');
 });

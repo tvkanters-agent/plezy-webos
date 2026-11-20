@@ -71,25 +71,30 @@ Background sections are intentionally absent per user request. Legacy Plex
 burn-in remains untouched, and ASS/SSA retains its authored formatting.
 
 MPV sizes subtitle font and border in units at 720p; webOS scales these with
-the display height. Native MPV paints a rounded border *behind* the glyphs.
-Chromium 53's `-webkit-text-stroke` covers the letter fill and creates sharp
-W/V mitres, while ring-shaped text shadows still appear uneven. Blurring and
-thresholding the cue alpha rounded *interior* corners as well and rasterized
-the edge. The local renderer uses an SVG text stroke with round joins behind
-the unchanged HTML glyphs; browser text geometry provides visual runs and
-baselines so multiline wrapping and inline emphasis retain their layout.
-The SVG paths remain vector-based, and a scoped MutationObserver updates them
-only when cue text changes, not every playback frame. This is an adaptation
-of MPV's vector border for Chromium 53, not a replacement subtitle library.
+the display height. Native MPV paints the border *behind* the glyphs.
+In 1.19.0 the enhanced SRT/VTT renderer uses **PixiJS 4.8.9** (its CanvasRenderer,
+which requires no WebGL overlay above LG's hardware decoder). Media Captions
+still parses text; its HTML cue painting and the SVG outline/MutationObserver
+have been removed for SRT/VTT. Pixi rasterizes each visible text run at 2x
+resolution and composes it at the display's native resolution with a rounded
+Canvas stroke beneath its filled glyph. Unlike blurred alpha, this retains
+clean concave letter corners and limits rounded joins to the stroke exterior.
+Only newly visible cues or changes to settings/size regenerate text textures;
+the playback animation clock merely checks the active cue index. The library
+and its MIT license are packaged locally and loaded only on first enhanced
+SRT/VTT use. Compatibility playback never instantiates Pixi or custom captions.
+Inline SRT bold/italic, explicit line breaks and word wrapping use per-run
+Pixi Text objects. Advanced WebVTT markup, ruby, vertical cues and regional
+layout remain outside the native-MPV parity guarantee and need TV validation.
 The local overlay uses the
 video rect when `Use margins` is off and the whole screen when enabled. For
 LG hardware planes where `videoWidth`/`videoHeight` report zero, Plex media
 metadata provides the fallback aspect ratio. Default-placement cues are
 repositioned like Plezy's text cues; authored cue placement is retained.
-Media Captions supplies the cue layout, while D-pad-compatible HSV/hex color
-and numeric editors replace native Flutter dialog widgets. Browser tests cover
-stored settings, keyboard focus, layout, SVG outline geometry and rendered
-pixels. Physical LG caption placement and exact MPV pixel parity remain unverified.
+D-pad-compatible HSV/hex color and numeric editors replace native Flutter
+dialog widgets. Browser tests cover stored settings, keyboard focus, cue timing,
+Pixi Text style/geometry and rendered canvas pixels. Physical LG caption
+placement and exact MPV pixel parity remain unverified.
 
 These are pointers, not claims of completed porting. The current HTML frontend still has parity gaps and must not be described as faithful merely because a similarly named feature exists.
 

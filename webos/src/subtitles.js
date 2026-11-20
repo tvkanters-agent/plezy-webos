@@ -1,7 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
-import {applySrtStyle, applySrtPosition, resetSrtStyle} from './subtitle-style.js';
+import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
+import {PixiSrtRenderer} from './pixi-subtitles.js';
+
+let pixiScript;
+function ensurePixi() {
+  if (window.PIXI?.CanvasRenderer && window.PIXI?.Text) return Promise.resolve(window.PIXI);
+  if (!pixiScript) pixiScript=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='pixi.min.js';
+    script.onload=()=>window.PIXI?.CanvasRenderer && window.PIXI?.Text
+      ? resolve(window.PIXI) : reject(new Error('PixiJS 4 did not initialize.'));
+    script.onerror=()=>reject(new Error('Could not load PixiJS subtitle renderer.'));
+    document.head.appendChild(script);
+  }).catch(error=>{pixiScript=null;throw error;});
+  return pixiScript;
+}
 
 function loadAssScript(src) {
   return new Promise((resolve, reject) => {
@@ -143,7 +158,8 @@ export class SubtitleOverlay {
 
   refreshStyle() {
     if (this.kind !== 'srt') return;
-    applySrtStyle(this.element, this.video, this.preferences(),this.aspectRatio);
+    const style=applySrtStyle(this.element,this.video,this.preferences(),this.aspectRatio);
+    this.renderer?.setStyle(style);
   }
 
   stopClock() {
@@ -211,6 +227,9 @@ export class SubtitleOverlay {
         onTiming('first', Date.now() - startedAt);
       }
     };
+    // Start the on-device Pixi script in parallel with Plex/Matroska reads.
+    // The initial visible SRT cue should not wait for a separate script load.
+    if (asset.format === 'srt' || asset.format === 'vtt') ensurePixi().catch(()=>{});
     try {
       const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming);
       await render(content);
@@ -228,15 +247,14 @@ export class SubtitleOverlay {
       if (generation !== this.generation) return;
       if (this.dialogue || this.kind && this.kind !== 'srt') this.releaseRenderer();
       this.aspectRatio = asset.aspectRatio;
-      // Layout must have its styled geometry before CaptionsRenderer captures
-      // the bounding box; SRT uses snapping text rows for sub-pos < 100.
       const style=applySrtStyle(this.element,this.video,this.preferences(),this.aspectRatio);
-      applySrtPosition(track,style.subtitlePosition,this.element.offsetHeight,
-        parseFloat(this.element.style.fontSize));
-      const renderer = this.renderer || new CaptionsRenderer(this.element);
+      const PIXI=await ensurePixi();
+      if (generation !== this.generation) return;
+      const renderer=this.renderer || new PixiSrtRenderer(PIXI,this.element,this.video,style);
       this.renderer = renderer;
       this.kind = 'srt';
       this.aspectRatio = asset.aspectRatio;
+      renderer.setStyle(style);
       renderer.changeTrack(track);
       this.update(this.offsetMs);
       this.startClock();
