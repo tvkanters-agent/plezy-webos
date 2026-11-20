@@ -56,6 +56,39 @@ async function seasonServer(page, multi = false) {
   return calls;
 }
 
+async function movieServer(page) {
+  const calls=[];
+  const movie={ratingKey:'movie',type:'movie',title:'Example Movie',duration:120000,
+    Media:[
+      {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'movie-part-0',key:'/first.mp4'}]},
+      {container:'mp4',videoCodec:'h264',audioCodec:'aac',Part:[{id:'movie-part-1',key:'/second.mp4'}]}
+    ]};
+  const detailed={...movie,Media:movie.Media.map((media,index)=>({...media,
+    Part:[{...media.Part[0],Stream:[
+      {streamType:2,id:index?12:11,languageCode:index?'fra':'eng',selected:1,codec:'aac'},
+      {streamType:2,id:index?13:14,languageCode:index?'eng':'fra',codec:'aac'},
+      {streamType:3,id:index?22:21,languageCode:'spa',codec:'srt'}
+    ]}]}))};
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'test',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',
+      url:'http://plex.test',token:'fixture'}]
+  })));
+  await page.route('http://plex.test/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    calls.push({path:url.pathname,method:req.method(),params:url.searchParams.toString()});
+    if(url.pathname==='/hubs')return route.fulfill({json:{MediaContainer:{
+      Hub:[{title:'Recently added',Metadata:[movie]}]
+    }}});
+    if(url.pathname==='/library/metadata/movie')
+      return route.fulfill({json:{MediaContainer:{Metadata:[detailed]}}});
+    if(req.method()==='PUT' || url.pathname.startsWith('/video/:/transcode'))
+      return route.fulfill({contentType:'application/xml',body:'<MediaContainer />'});
+    return route.fulfill({json:{MediaContainer:{Metadata:[]}}});
+  });
+  await page.goto('/');
+  return calls;
+}
+
 test('season episode metadata matches Plezy weight and separator spacing',async({page})=>{
   await seasonServer(page);
   await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
@@ -144,6 +177,55 @@ test('episode detail More options exposes the same source choices and Back resto
   await page.keyboard.press('Escape');
   await expect(page.locator('#dialog')).toBeHidden();
   await expect(more).toBeFocused();
+});
+
+test('movie context menu selects tracks for the chosen version before starting playback',async({page})=>{
+  const calls=await movieServer(page);
+  await page.getByRole('button',{name:'Example Movie'}).first().click();
+  await page.getByRole('combobox',{name:'Media version'}).selectOption('1');
+  const more=page.getByRole('button',{name:'More options',exact:true});
+  await more.click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await expect(page.locator('.episode-track-columns .episode-track-column')).toHaveCount(2);
+  await expect(page.locator('.episode-track-column').first().getByRole('button',{name:'French'}))
+    .toHaveAttribute('aria-pressed','true');
+  await page.locator('.episode-track-column').first().getByRole('button',{name:'English'}).click();
+  await page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}).click();
+  await expect(page.locator('#player')).toBeHidden();
+  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await expect.poll(()=>calls.some(call=>{
+    const params=new URLSearchParams(call.params);
+    return call.path==='/library/parts/movie-part-1' && call.method==='PUT' &&
+      params.get('audioStreamID')==='13' && params.get('subtitleStreamID')==='22';
+  })).toBe(true);
+  expect(calls.some(call=>call.path==='/library/parts/movie-part-0' && call.method==='PUT')).toBe(false);
+});
+
+test('show and season context menus choose the same episode as Play, carrying its track intent',async({page})=>{
+  const calls=await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  await page.getByRole('button',{name:'More options',exact:true}).click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await expect(page.getByRole('heading',{name:'Audio & Subtitles · The First Episode'})).toBeVisible();
+  await page.locator('.episode-track-column').first().getByRole('button',{name:'French'}).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:/Season 1/}).click();
+  await page.getByRole('button',{name:'More options',exact:true}).click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await expect(page.locator('.episode-track-column').first().getByRole('button',{name:'French'}))
+    .toHaveAttribute('aria-pressed','true');
+  await page.locator('.episode-track-column').last().getByRole('button',{name:'Off'}).click();
+  await page.keyboard.press('Escape');
+  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await page.locator('.episode-row').nth(1).click();
+  await expect.poll(()=>calls.some(call=>{
+    const params=new URLSearchParams(call.params);
+    return call.path==='/library/parts/part2' && call.method==='PUT' &&
+      params.get('audioStreamID')==='42' && params.get('subtitleStreamID')==='0';
+  })).toBe(true);
 });
 
 test('language choices from an episode menu carry into another episode with different stream IDs',async({page})=>{

@@ -1,6 +1,6 @@
 # Plezy for LG webOS TV
 
-**Community port, stable version 1.2.9. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
+**Community port, stable version 1.13.0. Primary target: webOS TV 4.4.3 (Chromium 53); webOS 4.x and newer.**
 
 This fork retains [edde746/plezy](https://github.com/edde746/plezy), including its history, license and native apps. **The port is currently Plex-first**; Jellyfin and Emby adapters are maintained on a best-effort basis, without a feature-parity commitment. The `webos/` directory is a dedicated HTML/JavaScript TV frontend. It ports the server protocols and Mono dark visual language; it does **not** run the existing Flutter screens or mpv on webOS, and is **not yet feature-equivalent** to upstream Plezy.
 
@@ -59,7 +59,7 @@ This is a direct browser-to-Simkl integration. Successful network requests depen
 - Automatic one-time fallback when direct playback fails, plus **Compatible playback** for manual transcoding.
 - Plex chapter seeking, intro/credits skip controls and media-version selection.
 - Optional Simkl playback tracking, with persisted failed-stop retries and quota cooldowns.
-- Server audio-track and subtitle selection. Selected subtitles are burned in by the server; switching tracks restarts the stream at the current position.
+- Server audio-track and subtitle selection from the player or from movie/show/season/episode detail menus before playback. Supported external SRT/ASS text subtitles render locally; other subtitles may require server burn-in. Switching tracks during playback can restart the stream at the current position.
 - D-pad spatial navigation, Magic Remote pointer, Back, transport keys and pause on backgrounding.
 - Installable IPK, locked build dependencies, automated protocol and browser tests, and a webOS-specific CI workflow.
 

@@ -26,6 +26,19 @@ test('source IDs remain exact for the episode on which the choice was made', () 
   deepStrictEqual(preferences.resolve(episode('e2','showB'),1,tracks([audio(0,'eng')],[])),{});
 });
 
+test('movies retain per-version source choices without carrying them to unrelated movies or episodes', () => {
+  const preferences = new EpisodeTrackPreferences();
+  const movie = {id:'movie1',type:'movie',raw:{}};
+  const otherMovie = {id:'movie2',type:'movie',raw:{}};
+  preferences.record(movie,1,'audio',audio(37,'jpn'));
+  preferences.record(movie,1,'subtitle',subtitle(57,'eng'));
+  deepStrictEqual(preferences.resolve(movie,1,tracks([audio(37,'jpn')],[subtitle(57,'eng')])),
+    {audio:37,subtitle:57});
+  deepStrictEqual(preferences.resolve(movie,0,tracks([audio(17,'eng')],[subtitle(27,'eng')])),{});
+  deepStrictEqual(preferences.resolve(otherMovie,1,tracks([audio(37,'jpn')],[subtitle(57,'eng')])),{});
+  deepStrictEqual(preferences.resolve(episode('ep'),1,tracks([audio(37,'jpn')],[subtitle(57,'eng')])),{});
+});
+
 test('commentary title outranks codec when matching across episodes', () => {
   const preferences = new EpisodeTrackPreferences();
   preferences.record(episode('e1'),0,'audio',audio(99,'eng',{title:'Commentary',codec:'ac3'}));
