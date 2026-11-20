@@ -99,7 +99,7 @@ test('welcome and remote-only navigation into sign-in',async({page},testInfo)=>{
   await page.goto('/');await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
   await page.screenshot({path:testInfo.outputPath('welcome.png')});
   await expect(page.getByRole('button',{name:'Sign in with Plex',exact:true})).toBeFocused();
-  await page.keyboard.press('ArrowRight');await expect(page.getByRole('button',{name:'Add Jellyfin',exact:true})).toBeFocused();
+  await page.keyboard.press('ArrowDown');await expect(page.getByRole('button',{name:'Add Jellyfin',exact:true})).toBeFocused();
   await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Connect Jellyfin'})).toBeVisible();
   await page.keyboard.press('Escape');await expect(page.getByRole('heading',{name:'Welcome to Plezy'})).toBeVisible();
 });
@@ -230,27 +230,36 @@ test('search renders results and focuses the first match',async({page})=>{
 });
 test('expired credentials leave a reachable settings action',async({page})=>{
   await mockServer(page,{failed:true});await page.goto('/');await expect(page.getByText(/Sign-in was rejected/)).toBeVisible();
-  await page.locator('main').getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
+  await page.locator('main').getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Test cinema',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
 });
-test('playback compatibility toggle is first in Settings, defaults off and persists across navigation',async({page})=>{
+test('playback compatibility toggle is in Plezy Playback > Player, defaults off and persists',async({page})=>{
   await mockServer(page);
   await page.goto('/');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
-  await expect(page.locator('#main .panel').first().getByRole('heading',{name:'Playback mode'})).toBeVisible();
-  const toggle=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): Off'});
+  await page.getByRole('button',{name:'Video Playback'}).click();
+  await expect(page.locator('#main .settings-group').first().getByRole('heading',{name:'Player'})).toBeVisible();
+  const toggle=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
   await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed','false');
   await toggle.click();
-  await expect(page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): On'})).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed','true');
+  await expect(toggle).toBeFocused();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(true);
   // The mockServer init script rewrites storage on full reload; navigate
   // within the running app to verify the persisted setting is used.
   await page.getByRole('button',{name:'Home',exact:true}).click();
   await page.getByRole('button',{name:'Settings',exact:true}).click();
-  await page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers): On'}).click();
+  await page.getByRole('button',{name:'Video Playback'}).click();
+  await expect(toggle).toHaveAttribute('aria-pressed','true');
+  await toggle.click();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(false);
 });
 test('removing a server removes its token',async({page})=>{
-  await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Remove from this TV'}).click();
+  await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Test cinema',exact:true}).click();
+  await page.getByRole('button',{name:'Remove from this TV'}).click();
   expect(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).not.toContain('test-token');
 });
 test('Back 461 opens an exit confirmation and traps navigation inside it',async({page})=>{
@@ -618,8 +627,12 @@ test('Simkl PIN linking stores writable session and enables automatic tracking',
     return route.fulfill({status:404});
   });
   await page.goto('/');
+  await page.getByRole('button',{name:'Services',exact:true}).click();
+  await page.getByRole('button',{name:'Simkl',exact:true}).click();
   await page.getByRole('button',{name:'Connect Simkl'}).click();
   await expect(page.getByText('ABCD-EFGH')).toBeVisible();
+  await page.getByRole('button',{name:'Services',exact:true}).click();
+  await page.getByRole('button',{name:'Simkl',exact:true}).click();
   await expect(page.getByRole('button',{name:'Disconnect Simkl'})).toBeVisible({timeout:12000});
   const session=JSON.parse(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).simkl;
   expect(session.accessToken).toBe('simkl_at_tv_test');
@@ -894,6 +907,7 @@ test('sidebar can collapse, and settings can hide individual Plex libraries',asy
   await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Collapse sidebar'})).toHaveCount(0);
   await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Manage Libraries',exact:true}).click();
   await expect(page.getByRole('button',{name:'Hide Movies in sidebar'})).toBeVisible();
   await page.getByRole('button',{name:'Hide Movies in sidebar'}).click();
   await expect(page.locator('.rail-library-items').getByRole('button',{name:'Movies'})).toHaveCount(0);
