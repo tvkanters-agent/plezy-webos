@@ -91,7 +91,7 @@ test('Plex native URL, MIME, sidecar and HLS fallback preserve version, position
     const calls=[];api.get=async(path,params,options)=>{
       calls.push({path,params,options});return {MediaContainer:{Metadata:[{}]}};
     };
-  const options={enhancedPlayback:true,mediaIndex:1,start:125.25,subtitle:90,audio:21};
+  const options={srtPlayback:true,assPlayback:true,mediaIndex:1,start:125.25,subtitle:90,audio:21};
     const session=await api.playback(item,options);
     assert.equal(session.transcode,false);
     assert.equal(session.mimeType,'video/x-matroska');
@@ -116,7 +116,7 @@ test('Plex native URL, MIME, sidecar and HLS fallback preserve version, position
     assert.equal(new URL(burn.url).searchParams.get('subtitles'),'burn');
     await burn.extrasPromise;
     const off=await api.playback(item,{...options,subtitle:'-1',transcode:true});
-    assert.equal(new URL(off.url).searchParams.get('subtitles'),'none');
+    assert.equal(new URL(off.url).searchParams.get('subtitles'),'burn');
     assert.equal(calls.filter(c=>c.options?.method==='PUT').at(-1).params.subtitleStreamID,0);
     await off.extrasPromise;
   } finally {globalThis.window=oldWindow;}

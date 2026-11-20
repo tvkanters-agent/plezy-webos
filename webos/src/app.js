@@ -2857,8 +2857,10 @@ function settingsSubpage(page,serverId) {
   if(page==='playback') {
     settingsPage('Video Playback');
     settingsGroup('Player',[
-      settingsToggle('enhancedPlayback','Enhanced playback (Direct Play + subtitle renderers)',
-        'Off uses original playback and burned-in subtitles. On enables Direct Play and local SRT/ASS rendering. Applies to the next playback.','play'),
+      settingsToggle('srtPlayback','Enhanced SRT playback',
+        'Use Direct Play and locally rendered SRT subtitles. Off uses original Plex burn-in.','subtitles'),
+      settingsToggle('assPlayback','Enhanced ASS playback',
+        'Use Direct Play and locally rendered ASS/SSA subtitles. Off uses original Plex burn-in.','subtitles'),
       settingsSelection('quality','Quality','Compatible playback requires server transcoding permission.',
         'quality',[['auto','Automatic'],['transcode','Compatible H.264 / AAC']])
     ]);

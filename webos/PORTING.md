@@ -52,7 +52,7 @@ Only currently implemented webOS options appear: Video Playback (Player,
 Subtitles and Auto-play & Skip), Manage Libraries, Services (Simkl and MDBList), Connections,
 and About. The original General and Appearance pages, and native-only playback
 preferences, are omitted rather than populated with invented settings. Server
-connection details and the Enhanced playback switch are existing webOS-only
+connection details and the separate SRT/ASS playback switches are existing webOS-only
 controls placed in the closest original group. First-run server connection and
 standalone Simkl linking remain available. Flutter's Material rows are rendered
 as grouped HTML/CSS and inline SVGs because webOS Chromium 53 cannot run Flutter
@@ -628,18 +628,27 @@ Source-track PUT follows PlexClient.selectStreams and treats HTTP success as suc
 
 ### Guarded native Direct Play
 
-The user's playback-compatibility switch is the first Settings control. It
-defaults to **Off** even on upgraded installations, because local SRT/ASS
-extraction, Matroska range reads and expanded native Direct Play have not
-worked reliably on the target LG TV. Off explicitly selects the historical
+The user's playback-compatibility controls are the first two Player settings.
+As of 1.20.0, SRT and ASS/SSA each have a separate opt-in switch. Both default
+**Off** on fresh installations; users who previously enabled the single
+Enhanced playback switch retain both local renderers enabled until they change
+either setting independently. An off setting for the **selected** subtitle
+format explicitly selects the historical
 v1.10.2 Plex request path: conservative MP4 direct playback, H.264/AAC HLS
 otherwise, Chrome's original profile and `subtitles=burn`, with no separate
 subtitle fetch, transcode decision, or Matroska reader. The original Plex
 server-selected subtitle is used unless the viewer explicitly selects a
 track; the original part selection PUT is preserved. Off also greys out
 subtitle sync with an explanatory Settings toast, since the TV cannot change
-timing on Plex-rendered video pixels. On opt-ins to the later Direct Play and
-local SRT/ASS renderer with its existing silent burn-in fallback. This is a
+timing on Plex-rendered video pixels. The selected format's on setting opts in
+to the later Direct Play and its local subtitle renderer with the existing
+silent burn-in fallback; unselected and unsupported formats use the original
+pipeline. Route selection precedes the video request, subtitle extraction and
+renderer initialization. When video is already on the local route, moving
+between enabled SRT and ASS tracks replaces the overlay without reloading the
+video. Moving between local subtitles and Plex burn-in reopens the video,
+since its pixels must change. Subtitle Off also clears the overlay without
+reopening. This is a
 user-requested reversible webOS compatibility gate, not a native Plezy
 setting. Browser tests cover mode separation and requests; actual subtitle
 pixels and video decoding still require LG hardware verification.
@@ -660,12 +669,12 @@ heuristics that might reject real LG HLS playback. Regression tests cover
 Off/On, HLS/direct file, the exact native start value and zero late seeks.
 Decoder behavior still needs validation on the user's LG TV.
 
-As of 1.15.2 this switch is also enforced at every later boundary. Plex's
-playback API treats missing, malformed and false `enhancedPlayback` values as
-legacy; the expanded Direct Play and text-sidecar paths require literal
-`true`. The player snapshots the setting for each open/reopen (including
-track changes and decoder retries) and rejects an accidentally returned
-enhanced session while Off. Off never constructs the custom subtitle overlay,
+The original single-switch enforcement was introduced in 1.15.2. Since 1.20.0,
+Plex's playback API treats missing, malformed and false `srtPlayback` or
+`assPlayback` values as legacy **for the corresponding selected format**.
+The player snapshots both settings for each open/reopen (including track changes
+and decoder retries) and only constructs an overlay when that choice yields
+an enhanced session. Off never constructs the custom subtitle overlay,
 reads/applies subtitle offsets, starts Matroska extraction, starts a subtitle
 download or triggers a renderer-failure restart. The ASS/libass runtime is
 no longer loaded by the application shell; only an explicit enhanced ASS

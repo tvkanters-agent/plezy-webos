@@ -14,11 +14,11 @@ test('Plex track selection accepts XML success and still rejects HTTP errors', a
         headers:{'Content-Type':'application/xml'}});
     return new Response(JSON.stringify({MediaContainer:{Metadata:[{}]}}));
   });
-  const session = await api.playback(item,{enhancedPlayback:true,audio:12,subtitle:-1});
+  const session = await api.playback(item,{srtPlayback:true,assPlayback:true,audio:12,subtitle:-1});
   await session.extrasPromise;
   assert.equal(session.options.audio,12);
   refused = true;
-  await assert.rejects(api.playback(item,{enhancedPlayback:true,audio:12}),/HTTP 500/);
+  await assert.rejects(api.playback(item,{srtPlayback:true,assPlayback:true,audio:12}),/HTTP 500/);
 });
 
 test('rapid track restarts merge choices and retain the original playback position', async () => {

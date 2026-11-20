@@ -10,7 +10,7 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   let metadataRequests = 0;
   // Existing renderer/Direct Play regressions explicitly exercise the opt-in
   // path; the compatibility-mode case below switches it off.
-  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({enhancedPlayback:true,...skipSettings,deviceId:'device',active:'plex',
+  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({srtPlayback:true,assPlayback:true,...skipSettings,deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
     simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),{pendingStops,skipSettings});
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
@@ -29,7 +29,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
         url.searchParams.has('hasMDE')) {
       return route.fulfill({status:400,body:'ClientProfileExtra: video transcode target already exists for streaming hls'});
     }
-    if ((url.pathname === plexSubtitlePath || url.pathname.endsWith('/start.m3u8')) && !calls.some(call =>
+    if ((url.pathname === plexSubtitlePath || url.pathname.endsWith('/start.m3u8') &&
+        url.searchParams.get('X-Plex-Platform') !== 'Chrome') && !calls.some(call =>
       call.pathname.endsWith('/transcode/universal/decision') && call.search === url.search)) {
       return route.fulfill({status:400,body:'Transcode session has no playback decision'});
     }
@@ -77,7 +78,7 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
   for (const codec of ['srt','ass']) {
     const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
       Part:[{id:'part',key:'/video.webm',Stream:[
-        {streamType:3,id:32,codec,selected:1}]}]}]},undefined,[],{enhancedPlayback:false},
+        {streamType:3,id:32,codec,selected:1}]}]}]},undefined,[],{srtPlayback:false,assPlayback:false},
         null,null,null,false);
     // Chromium desktop cannot decode HLS; validate the URL and UI without
     // treating a fake video/webm response as a functioning HLS stream.
@@ -101,10 +102,10 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
     const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
     await expect(sync).toHaveAttribute('aria-disabled','true');
     await expect(sync).toHaveClass(/is-disabled/);
-    await expect(page.locator('.player-settings-sync-value')).toHaveText('Enhanced playback off');
+    await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
     await sync.focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('#toast')).toHaveText('Enable Enhanced playback in Settings to adjust subtitle timing');
+    await expect(page.locator('#toast')).toHaveText('Cannot offset burned-in subtitles');
     await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
   }
 });
@@ -1100,8 +1101,16 @@ test('an intro appearing behind the chapter sheet does not steal remote focus',a
   await expect(chapter).toBeFocused();
 });
 
+async function setupWithLocalSrt(page) {
+  return setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/library/streams/31.srt',selected:1}
+    ]}]}]},undefined,[],{},null,null,async()=>
+    '1\n00:00:10,000 --> 00:00:11,000\nSubtitle sync fixture\n');
+}
+
 test('subtitle sync opens Plezy compact top bar with reachable slider and correct D-pad focus', async ({page}) => {
-  await setup(page);
+  await setupWithLocalSrt(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   const settingsRow=page.getByRole('button',{name:'Subtitle sync',exact:true});
   await expect(settingsRow).toBeFocused();
@@ -1156,7 +1165,7 @@ test('subtitle sync opens Plezy compact top bar with reachable slider and correc
 });
 
 test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without moving focus', async ({page}) => {
-  await setup(page);
+  await setupWithLocalSrt(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
   const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
@@ -1224,7 +1233,7 @@ test('sync bar Left/Right traverses every SVG button and Up/Down adjusts without
 });
 
 test('subtitle sync reaches both full-minute limits, updates live cues, and resets', async ({page}) => {
-  await setup(page);
+  await setupWithLocalSrt(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
   const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
@@ -1256,7 +1265,7 @@ test('subtitle sync reaches both full-minute limits, updates live cues, and rese
 });
 
 test('subtitle sync holding +/- accelerates with Plezy long-press stride', async ({page}) => {
-  await setup(page);
+  await setupWithLocalSrt(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
   await page.getByRole('button',{name:'Increase subtitle delay'}).focus();
@@ -1273,7 +1282,7 @@ test('subtitle sync holding +/- accelerates with Plezy long-press stride', async
 
 
 test('stopping playback cancels an active subtitle-sync long press', async ({page}) => {
-  await setup(page);
+  await setupWithLocalSrt(page);
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
   await page.getByRole('button',{name:'Increase subtitle delay'}).focus();
@@ -1468,7 +1477,11 @@ test('metadata-only native open with an unresolved Play promise falls back and p
       return play.call(this);
     };
   });
-  const {calls}=await setup(page,{},undefined,[],{},null,null,null,false);
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/library/streams/31.srt',selected:1}
+    ]}]}]},undefined,[],{},null,null,async()=>
+    '1\n00:00:10,000 --> 00:00:11,000\nSubtitle fixture\n',false);
   await expect.poll(()=>page.locator('#player video').evaluate(v=>v.readyState)).toBeGreaterThanOrEqual(1);
   await expect(page.locator('#player video')).toHaveJSProperty('currentTime',0);
   await page.clock.fastForward(31000);
@@ -1763,10 +1776,12 @@ test('failed MKV byte ranges and Plex extraction silently retry HLS with burned 
   expect(starts()[1].searchParams.get('subtitleStreamID')).toBe(null);
   const selected=()=>calls.findIndex(url=>url.pathname==='/library/parts/embedded' &&
     url.searchParams.get('subtitleStreamID')==='32');
-  const decision=()=>calls.findIndex(url=>url.pathname==='/video/:/transcode/universal/decision' &&
+  const burnedStart=()=>calls.findIndex(url=>url.pathname.endsWith('/start.m3u8') &&
     url.searchParams.get('subtitles')==='burn');
   expect(selected()).toBeGreaterThanOrEqual(0);
-  expect(selected()).toBeLessThan(decision(), 'Plex must select the MKV track before asking it to burn');
+  expect(selected()).toBeLessThan(burnedStart(), 'Plex must select the MKV track before asking it to burn');
+  expect(calls.some(url=>url.pathname==='/video/:/transcode/universal/decision' &&
+    url.searchParams.get('subtitles')==='burn')).toBe(false,'compatibility burn-in needs no separate decision');
   expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(true);
   expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
   await expect(page.locator('#toast')).not.toBeVisible();

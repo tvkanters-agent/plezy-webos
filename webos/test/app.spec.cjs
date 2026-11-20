@@ -234,19 +234,21 @@ test('expired credentials leave a reachable settings action',async({page})=>{
   await page.getByRole('button',{name:'Test cinema',exact:true}).click();
   await expect(page.getByRole('button',{name:'Remove from this TV'})).toBeVisible();
 });
-test('playback compatibility toggle is in Plezy Playback > Player, defaults off and persists',async({page})=>{
+test('SRT and ASS playback toggles are independent and persist in Playback > Player',async({page})=>{
   await mockServer(page);
   await page.goto('/');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByRole('button',{name:'Video Playback'}).click();
   await expect(page.locator('#main .settings-group').first().getByRole('heading',{name:'Player'})).toBeVisible();
-  const toggle=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
+  const toggle=page.getByRole('button',{name:'Enhanced SRT playback'});
+  const ass=page.getByRole('button',{name:'Enhanced ASS playback'});
   await expect(toggle).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-pressed','false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed','true');
   await expect(toggle).toBeFocused();
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(true);
+  expect(await ass.getAttribute('aria-pressed')).toBe('false');
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).srtPlayback)).toBe(true);
   // The mockServer init script rewrites storage on full reload; navigate
   // within the running app to verify the persisted setting is used.
   await page.getByRole('button',{name:'Home',exact:true}).click();
@@ -254,7 +256,11 @@ test('playback compatibility toggle is in Plezy Playback > Player, defaults off 
   await page.getByRole('button',{name:'Video Playback'}).click();
   await expect(toggle).toHaveAttribute('aria-pressed','true');
   await toggle.click();
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('plezy.webos')).enhancedPlayback)).toBe(false);
+  await ass.click();
+  expect(await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('plezy.webos'));
+    return [state.srtPlayback,state.assPlayback];
+  })).toEqual([false,true]);
 });
 test('removing a server removes its token',async({page})=>{
   await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();
