@@ -22,8 +22,8 @@ function loadAssScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'libass/' + src;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('Could not load ' + src));
+    script.onload = () => { script.remove(); resolve(); };
+    script.onerror = () => { script.remove(); reject(new Error('Could not load ' + src)); };
     document.head.appendChild(script);
   });
 }
@@ -37,7 +37,19 @@ async function ensureAssRenderer() {
       try {
         wasm = WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0]));
       } catch (_) { /* Chromium 53 uses the JavaScript worker. */ }
-      if (!window.plezyAssAssets) await loadAssScript('subtitles-octopus-worker' + (wasm ? '' : '-legacy') + '-assets.js');
+      if (!window.plezyAssAssets) {
+        const prefix = 'subtitles-octopus-worker' + (wasm ? '' : '-legacy');
+        await loadAssScript(prefix + '-assets.js');
+        window.plezyAssParts = [];
+        try {
+          for (let i = 0; i < window.plezyAssPartCount; i++) await loadAssScript(prefix + '-' + i + '.js');
+          const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});
+          window.plezyAssAssets = {workerUrl:URL.createObjectURL(blob)};
+        } finally {
+          delete window.plezyAssParts;
+          delete window.plezyAssPartCount;
+        }
+      }
       await loadAssScript('subtitles-octopus.js');
       if (!window.plezyAssAssets || typeof window.SubtitlesOctopus !== 'function')
         throw new Error('SubtitlesOctopus did not initialize.');
@@ -98,9 +110,11 @@ async function downloadSubtitle(asset, signal, position, preview, onTiming) {
   if (asset.partUrl) {
     try {
       return await subtitleRequest(signal, (requestSignal, refresh) =>
-        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming, async preview(content) {
-          if (!requestSignal.aborted) await preview(content);
-        }}));
+        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming,
+          onFonts:asset.format === 'ass' ? fonts => { asset.fonts = fonts; } : undefined,
+          async preview(content) {
+            if (!requestSignal.aborted) await preview(content);
+          }}));
     } catch (error) {
       if (signal.aborted) throw error;
       if (onTiming) onTiming('fallback', error.message);
@@ -193,7 +207,8 @@ export class SubtitleOverlay {
 
   releaseRenderer() {
     clearTimeout(this.readyTimer);
-    this.readyTimer = null;
+    clearTimeout(this.dialogueTimer);
+    this.dialogueTimer = this.readyTimer = null;
     this.stopClock();
     const renderer = this.renderer;
     this.renderer = null;
@@ -231,6 +246,7 @@ export class SubtitleOverlay {
     // Start the on-device Pixi script in parallel with Plex/Matroska reads.
     // The initial visible SRT cue should not wait for a separate script load.
     if (asset.format === 'srt' || asset.format === 'vtt') ensurePixi().catch(()=>{});
+    if (asset.format === 'ass') ensureAssRenderer().catch(()=>{});
     try {
       const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming);
       await render(content);
@@ -264,7 +280,15 @@ export class SubtitleOverlay {
         throw new Error('ASS subtitle file contains no readable dialogue.');
       if (this.kind && this.kind !== 'ass') this.releaseRenderer();
       this.assContent = content;
-      if (!this.assPainted) await this.prepareDialogue(content, generation);
+      if (this.assUnavailable || this.dialogue) await this.prepareDialogue(content, generation);
+      else if (!this.assPainted && this.dialogueTimer == null) {
+        // Give styled output the first frame. Only pay for a second parser
+        // when the worker has failed or still has not painted after startup.
+        this.dialogueTimer = setTimeout(() => {
+          if (generation === this.generation && !this.assPainted && !this.assUnavailable)
+            this.prepareDialogue(this.assContent, generation);
+        }, 8000);
+      }
       if (generation !== this.generation || this.assUnavailable) return;
       try {
         await this.renderStyledAss(asset, content, generation);
@@ -296,10 +320,10 @@ export class SubtitleOverlay {
   async assFailure(error, generation) {
     if (generation !== this.generation || this.assUnavailable) return;
     this.assUnavailable = true;
-    const wasPainted = this.assPainted;
+    clearTimeout(this.dialogueTimer);
     this.assPainted = false;
     clearTimeout(this.readyTimer);
-    if (wasPainted) await this.prepareDialogue(this.assContent, generation);
+    if (!this.dialogue) await this.prepareDialogue(this.assContent, generation);
     if (generation !== this.generation) return;
     if (!this.dialogue) { this.onError?.(error); return; }
     const renderer = this.renderer;
@@ -325,10 +349,13 @@ export class SubtitleOverlay {
       if (generation !== this.generation || this.renderer !== renderer) return;
       clearTimeout(this.readyTimer);
       this.readyTimer = null;
-      renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+      const time = subtitleTime(this.video.currentTime, this.offsetMs);
+      renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended), time);
+      renderer.setRate(this.video.playbackRate || 1);
     };
     renderer = new window.SubtitlesOctopus({
-      video: this.video, subContent: content, debug:true,
+      video: this.video, subContent: content, fonts:asset.fonts || [],
+      debug:this.preferences()?.diagnosticsEnabled === true,
       // Let the player recover from worker errors without a global throw.
       workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
       timeOffset: -this.offsetMs / 1000,
@@ -337,6 +364,9 @@ export class SubtitleOverlay {
         showReady();
       },
       onError: error => {
+        // Octopus otherwise throws globally and disposes a second time after
+        // invoking our recovery callback. Only change this on a failed worker.
+        if (renderer) renderer.debug = true;
         Promise.resolve().then(() => {
           if (this.renderer === renderer) this.assFailure(error, generation);
         });
@@ -375,6 +405,7 @@ export class SubtitleOverlay {
         for (let i = 3; i < pixels.length; i += 4) {
           if (!pixels[i]) continue;
           this.assPainted = true;
+          clearTimeout(this.dialogueTimer);
           renderer.worker.removeEventListener('message', onFrame);
           this.dialogue?.destroy();
           this.dialogue = null;

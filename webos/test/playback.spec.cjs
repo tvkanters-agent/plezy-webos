@@ -1880,7 +1880,7 @@ for (const blocked of [false,true]) {
     await page.locator('[data-action="pause"]').click();
     await page.locator('video').evaluate(video=>{video.currentTime=3.5;});
     const cue = page.locator('.player-captions [part="cue"]');
-    await expect(cue).toContainText('Embedded ASS');
+    await expect(cue).toContainText('Embedded ASS',{timeout:15000});
     await expect(cue).toBeVisible();
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
@@ -1895,9 +1895,45 @@ for (const blocked of [false,true]) {
   });
 }
 
+test('animated ASS sign layers paint together between video time updates', async ({page}) => {
+  await page.addInitScript(() => {
+    window.WebAssembly = undefined;
+    document.addEventListener('timeupdate', event => event.stopImmediatePropagation(), true);
+  });
+  const script = [
+    '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 320', 'PlayResY: 180',
+    '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    'Dialogue: 0,0:00:00.00,0:00:30.00,Default,,0,0,0,,{\\an7\\pos(10,10)\\bord0\\shad0\\1c&H00FF00&\\p1}m 0 0 l 20 0 20 20 0 20',
+    'Dialogue: 1,0:00:00.00,0:00:30.00,Default,,0,0,0,,{\\an7\\move(20,60,290,60,0,15000)\\bord0\\shad0\\1c&H0000FF&\\p1}m 0 0 l 20 0 20 20 0 20'
+  ].join('\n');
+  await setup(page, {Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'ass',selected:1,key:'/library/streams/31'}]}]}]},
+    undefined, [], {}, null, null, () => script);
+  const canvas = page.locator('#player canvas.libassjs-canvas');
+  const position = () => canvas.evaluate(element => {
+    const probe = document.createElement('canvas');
+    probe.width = 320; probe.height = 180;
+    const ctx = probe.getContext('2d');
+    ctx.drawImage(element,0,0,320,180);
+    const pixels = ctx.getImageData(0,0,320,180).data;
+    let green = false, red = -1;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i+3] < 200) continue;
+      if (pixels[i+1] > 200 && pixels[i] < 30) green = true;
+      if (red < 0 && pixels[i] > 200 && pixels[i+1] < 30) red = (i / 4) % 320;
+    }
+    return green ? red : -1;
+  });
+  await expect.poll(position).toBeGreaterThan(0);
+  const start = await position();
+  await expect.poll(position).toBeGreaterThan(start + 3);
+});
+
 test('compressed MKV ASS draws before the final ranges arrive and keeps the applied sync', async ({page}) => {
   await page.addInitScript(() => { window.WebAssembly = undefined; });
-  const fixture = assFixture(6000);
+  const font = await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
+  const fixture = assFixture(6000, 'ass', font);
   let releaseTail;
   const tail = new Promise(resolve => { releaseTail = resolve; });
   const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
@@ -1917,6 +1953,14 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
     await page.locator('[data-action="pause"]').click();
     await video.evaluate(element => { element.currentTime = 0.5; });
     await expect.poll(cueDrawn).toBe(true);
+    // The packaged fallback lacks Hangul. Two distinct glyph images rule
+    // out drawing the same missing-glyph box with that fallback.
+    const glyphImage = () => canvas.evaluate(element => element.toDataURL());
+    const firstGlyph = await glyphImage();
+    await video.evaluate(element => { element.currentTime = 6.5; });
+    await expect.poll(async () => await cueDrawn() && await glyphImage() !== firstGlyph).toBe(true);
+    await video.evaluate(element => { element.currentTime = 0.5; });
+    await expect.poll(glyphImage).toBe(firstGlyph);
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
     await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(input => {

@@ -37,11 +37,22 @@ for (const legacy of [false, true]) {
   // blob URLs. Install the bundled default font into libass's own filesystem.
   source += '\nvar loadExtraFont = self.loadFontFile;\n' +
     'self.loadFontFile = function(id, path) {\n' +
+    '  if (path && path.bytes instanceof Uint8Array) {\n' +
+    '    Module.FS_createDataFile("/fonts", id + path.name, path.bytes, true, false); return;\n  }\n' +
     '  if (path !== "default.woff2") return loadExtraFont(id, path);\n' +
     '  Module.FS_createDataFile("/fonts", id + path, ' + binaryExpression(fallbackFont) + ', true, false);\n};';
-  const script = 'window.plezyAssAssets = {workerUrl: URL.createObjectURL(new Blob([' +
-    JSON.stringify(source) + '], {type:"text/javascript"}))};\n';
-  await writeFile(path.join(libass, worker + '-assets.js'), script);
+  // A single multi-megabyte script literal blocks input while a C8 parses it
+  // and encodes it into a Blob. Yield between bounded classic-script loads.
+  let count = 0;
+  for (let start = 0; start < source.length;) {
+    let end = Math.min(start + 256 * 1024, source.length);
+    if (end < source.length && /[\uD800-\uDBFF]/.test(source[end - 1])) end--;
+    const piece = JSON.stringify(source.slice(start, end));
+    await writeFile(path.join(libass, worker + '-' + count++ + '.js'),
+      'window.plezyAssParts.push(new Blob([' + piece + ']));\n');
+    start = end;
+  }
+  await writeFile(path.join(libass, worker + '-assets.js'), 'window.plezyAssPartCount = ' + count + ';\n');
 }
 await cp(path.join(root, '../LICENSE'), path.join(root, 'dist/LICENSE.txt'));
 // Prepare LG's native loading image before packaging, not at TV startup.
