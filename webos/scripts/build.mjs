@@ -101,18 +101,8 @@ for (const legacy of [false, true]) {
   // overlay sends senderTime; upstream messages keep their existing behavior.
   // Update the worker's playback rate and paused state before the timestamp.
   // The original order renders one frame using the previous seek state/rate.
-  const originalClockOrder = [
-    'if (message.data.currentTime !== undefined) {',
-    '                self.setCurrentTime(message.data.currentTime);',
-    '            }',
-    '            if (message.data.isPaused !== undefined) {',
-    '                self.setIsPaused(message.data.isPaused);',
-    '            }',
-    '            if (message.data.rate) {',
-    '                self.rate = message.data.rate;',
-    '            }'
-  ].join('\n');
-  if (!source.includes(originalClockOrder)) throw new Error('libass video update order changed');
+  const originalClockOrder = /if\s*\(message\.data\.currentTime\s*!==\s*undefined\)\s*\{\s*self\.setCurrentTime\(message\.data\.currentTime\);\s*\}\s*if\s*\(message\.data\.isPaused\s*!==\s*undefined\)\s*\{\s*self\.setIsPaused\(message\.data\.isPaused\);\s*\}\s*if\s*\(message\.data\.rate\)\s*\{\s*self\.rate\s*=\s*message\.data\.rate;\s*\}/;
+  if (!originalClockOrder.test(source)) throw new Error('libass video update order changed');
   source = source.replace(originalClockOrder, [
     'if (message.data.rate) {',
     '                self.rate = message.data.rate;',
