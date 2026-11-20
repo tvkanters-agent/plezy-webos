@@ -86,35 +86,53 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
     const session = await api.playback({id:raw.ratingKey,title:raw.title,duration:raw.duration,raw},{subtitle:track.id});
     const text = await extractMatroskaSubtitle(session.subtitleAsset,AbortSignal.timeout(10000));
     console.log('MKV range extraction:',track.codec,text.includes('Embedded'));
-    const current = new URL(session.subtitleAsset.url);
-    for (const variant of ['current','sidecar','plex-web-contract','direct-sidecar','decision-sidecar']) {
-      const url = new URL(current);
-      url.searchParams.set('session',crypto.randomUUID());
-      if (variant !== 'current') url.searchParams.set('subtitles','sidecar');
-      if (['plex-web-contract','direct-sidecar','decision-sidecar'].includes(variant)) {
-        url.searchParams.set('hasMDE','1');
-        url.searchParams.set('fastSeek','1');
-        url.searchParams.set('directStreamAudio','1');
-        url.searchParams.set('X-Plex-Session-Identifier',crypto.randomUUID());
-        for (const key of ['videoQuality','videoCodec','audioCodec','videoResolution','maxVideoBitrate','X-Plex-Client-Profile-Extra'])
-          url.searchParams.delete(key);
+    const old = new URL(session.subtitleAsset.url);
+    const sub = new URL(old);
+    sub.pathname = '/subtitles/:/transcode/universal/start';
+    sub.searchParams.set('session',crypto.randomUUID());
+    sub.searchParams.set('X-Plex-Session-Identifier',sub.searchParams.get('session'));
+    for (const [key, value] of Object.entries({protocol:'http',fastSeek:'1',copyts:'1',directPlay:'1',hasMDE:'1',
+      directStream:'1',directStreamAudio:'1',subtitles:'sidecar',advancedSubtitles:'text'}))
+      sub.searchParams.set(key,value);
+    for (const key of ['videoQuality','videoCodec','audioCodec','videoResolution','maxVideoBitrate',
+        'subtitleSize','X-Plex-Client-Profile-Extra']) sub.searchParams.delete(key);
+    const response = await fetch(sub,{signal:AbortSignal.timeout(25000)});
+    const content = await response.text();
+    console.log('Standalone HTTP subtitle:',track.codec,response.status,response.headers.get('content-type'),
+      content.includes('Embedded'),content.length);
+    if (!response.ok || !content.includes('Embedded')) {
+      const logs = await readFile(join(profile,'Logs','Plex Media Server.log'),'utf8');
+      for(const row of logs.split('\n').filter(line=>/Bad Request|Invalid protocol|suitable stream|target already|MediaDecisionEngine could|ERROR.*transcod/i.test(line)).slice(-12)) {
+        const message = row.split(' - ').at(-1).replaceAll(token,'[fixture token]').replace(/https?:[^ ]+/g,'[url]');
+        console.log('PMS error:',message.slice(0,210));
       }
-      if (variant === 'direct-sidecar') {
-        url.pathname = '/subtitles/:/transcode/universal/start';
-        url.searchParams.set('directPlay','1');
+      throw Error('Plex did not deliver the requested ' + track.codec + ' sidecar');
+    }
+    if (track === tracks[0]) {
+      const video = new URL(session.url);
+      video.searchParams.set('X-Plex-Platform','Generic');
+      video.searchParams.set('X-Plex-Client-Profile-Name','Generic');
+      video.searchParams.set('X-Plex-Session-Identifier',video.searchParams.get('session'));
+      video.searchParams.set('hasMDE','1');
+      video.searchParams.set('fastSeek','1');
+      const master = await fetch(video,{signal:AbortSignal.timeout(25000)});
+      const masterText = await master.text();
+      console.log('Generic HLS start:',master.status,masterText.startsWith('#EXTM3U'));
+      if (!masterText.startsWith('#EXTM3U')) throw Error('Plex did not start Generic HLS: HTTP ' + master.status);
+      let playlist = masterText;
+      let playlistUrl = video;
+      if (masterText.includes('#EXT-X-STREAM-INF')) {
+        const variant = playlist.split(/\r?\n/).find(line=>line&&!line.startsWith('#'));
+        playlistUrl = new URL(variant,video);
+        playlist = await (await get(playlistUrl.pathname+playlistUrl.search)).text();
       }
-      if (variant === 'decision-sidecar') {
-        const decision = new URL(url);
-        decision.pathname = '/video/:/transcode/universal/decision';
-        const response = await fetch(decision,{signal:AbortSignal.timeout(12000)}).catch(()=>null);
-        console.log('Plex subtitle decision:', track.codec, response?.status);
-      }
-      try {
-        const response = await fetch(url,{signal:AbortSignal.timeout(12000)});
-        const text = await response.text();
-        console.log('Plex sidecar:',track.codec,variant,response.status,response.headers.get('content-type'),
-          text.includes('Embedded'),text.length, response.ok ? '' : text.replaceAll(token,'[fixture token]').slice(0,180));
-      } catch (error) { console.log('Plex sidecar:',track.codec,variant,error.name); }
+      const part = playlist.split(/\r?\n/).find(line=>line&&!line.startsWith('#'));
+      if(!part) throw Error('Plex supplied no HLS segments');
+      const segment = new URL(part,playlistUrl);
+      const mediaResponse = await get(segment.pathname+segment.search);
+      const size = (await mediaResponse.arrayBuffer()).byteLength;
+      console.log('Generic HLS first segment:',mediaResponse.status,size);
+      if (!mediaResponse.ok || size <= 0) throw Error('Plex did not serve a video segment: HTTP ' + mediaResponse.status);
     }
   }
 });
