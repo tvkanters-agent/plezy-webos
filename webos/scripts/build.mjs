@@ -99,6 +99,31 @@ for (const legacy of [false, true]) {
   // A queued video timestamp must mean when the decoder reported it, not
   // when the busy libass worker finally receives the message. Only the webOS
   // overlay sends senderTime; upstream messages keep their existing behavior.
+  // Update the worker's playback rate and paused state before the timestamp.
+  // The original order renders one frame using the previous seek state/rate.
+  const originalClockOrder = [
+    'if (message.data.currentTime !== undefined) {',
+    '                self.setCurrentTime(message.data.currentTime);',
+    '            }',
+    '            if (message.data.isPaused !== undefined) {',
+    '                self.setIsPaused(message.data.isPaused);',
+    '            }',
+    '            if (message.data.rate) {',
+    '                self.rate = message.data.rate;',
+    '            }'
+  ].join('\n');
+  if (!source.includes(originalClockOrder)) throw new Error('libass video update order changed');
+  source = source.replace(originalClockOrder, [
+    'if (message.data.rate) {',
+    '                self.rate = message.data.rate;',
+    '            }',
+    '            if (message.data.isPaused !== undefined) {',
+    '                self.setIsPaused(message.data.isPaused);',
+    '            }',
+    '            if (message.data.currentTime !== undefined) {',
+    '                self.setCurrentTime(message.data.currentTime);',
+    '            }'
+  ].join('\n'));
   const clockCall = 'self.setCurrentTime(message.data.currentTime)';
   if (!source.includes(clockCall)) throw new Error('libass worker clock integration changed');
   source = source.replace(clockCall,
