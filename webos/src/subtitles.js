@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
-import {nativeWebOS} from './plex-direct-play.js';
+import {attachAssColorComparison} from './ass-color-diagnostics.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
 import {PixiSrtRenderer} from './pixi-subtitles.js';
@@ -42,9 +42,6 @@ async function ensureAssRenderer() {
         const prefix = 'subtitles-octopus-worker' + (wasm ? '' : '-legacy');
         await loadAssScript(prefix + '-assets.js');
         window.plezyAssParts = [];
-        // On the C8, the hardware video plane darkens fractional-alpha edges.
-        if (!wasm && nativeWebOS() && /Chrome\/53\./i.test(navigator.userAgent))
-          window.plezyAssParts.push('self.plezyAssCoverage = true;\n');
         try {
           for (let i = 0; i < window.plezyAssPartCount; i++) await loadAssScript(prefix + '-' + i + '.js');
           const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});
@@ -210,6 +207,8 @@ export class SubtitleOverlay {
   }
 
   releaseRenderer() {
+    this.removeAssComparison?.();
+    this.removeAssComparison = null;
     clearTimeout(this.readyTimer);
     clearTimeout(this.dialogueTimer);
     this.dialogueTimer = this.readyTimer = null;
@@ -324,6 +323,8 @@ export class SubtitleOverlay {
   async assFailure(error, generation) {
     if (generation !== this.generation || this.assUnavailable) return;
     this.assUnavailable = true;
+    this.removeAssComparison?.();
+    this.removeAssComparison = null;
     clearTimeout(this.dialogueTimer);
     this.assPainted = false;
     clearTimeout(this.readyTimer);
@@ -395,6 +396,8 @@ export class SubtitleOverlay {
     }
     this.renderer = renderer;
     this.kind = 'ass';
+    if (renderer.worker && this.preferences()?.diagnosticsEnabled === true)
+      this.removeAssComparison = attachAssColorComparison(this.video, renderer);
     // Octopus calls onReady on its first worker message, including logs.
     // Retire the dialogue only after the canvas contains painted pixels.
     const onFrame = event => {
