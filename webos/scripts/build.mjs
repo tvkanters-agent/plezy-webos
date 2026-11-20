@@ -44,7 +44,18 @@ const canvasFrameAnchor = "case 'renderCanvas': {\\n                        if (
 if (!octopus.includes(canvasFrameAnchor)) throw new Error('SubtitlesOctopus frame dispatch changed');
 octopus = octopus.replace(canvasFrameAnchor,
   canvasFrameAnchor.replace('self.lastRenderTime < data.time','self.lastRenderTime <= data.time'));
-octopus = octopus.replace(disposeAnchor, `    self.plezySuspendVideo = function () {
+octopus = octopus.replace(disposeAnchor, `    // Plezy supplies its own authoritative timestamp, buffering and seek
+    // state. The vendor's video listeners send *additional*, uncorrected
+    // timestamps that can rewind libass and flash subtitle frames.
+    // Keep resize/metadata handlers active; only remove clock listeners.
+    self.plezyUseExternalClock = function () {
+        if (self._plezySuspended || !self.video) return;
+        for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
+            ['seeking',onSeeking],['seeked',onSeeked],['ratechange',onRateChange],
+            ['waiting',onWaiting]])
+            self.video.removeEventListener(pair[0],pair[1],false);
+    };
+    self.plezySuspendVideo = function () {
         if (self._plezySuspended || !self.video) return;
         self._plezySuspended = true;
         for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
@@ -85,14 +96,9 @@ for (const legacy of [false, true]) {
     const wasm = await readFile(path.join(vendor, worker + '.wasm'));
     source = 'var Module = {wasmBinary:' + binaryExpression(wasm) + '};\n' + source;
   }
-  // A queued video timestamp must mean when the decoder reported it, not
-  // when the busy libass worker finally receives the message. Only the webOS
-  // overlay sends senderTime; upstream messages keep their existing behavior.
-  const clockCall = 'self.setCurrentTime(message.data.currentTime)';
-  if (!source.includes(clockCall)) throw new Error('libass worker clock integration changed');
-  source = source.replace(clockCall,
-    'self.setCurrentTime(message.data.currentTime+(message.data.senderTime&&message.data.isPaused===false' +
-    '?Math.max(0,Date.now()-message.data.senderTime)/1000*(message.data.rate||self.rate):0))');
+  // Handle Plezy's authoritative media clock in the narrow existing worker
+  // adapter below. Do not patch vendor source formatting: different compiled
+  // legacy/wasm worker variants may place these operations differently.
   // Workers launched by file-origin apps cannot reliably XHR even sibling
   // blob URLs. Install the bundled default font into libass's own filesystem.
   source += '\nvar loadExtraFont = self.loadFontFile;\n' +
@@ -106,6 +112,18 @@ for (const legacy of [false, true]) {
   // reparsing an ever-growing ASS script on every extracted MKV cluster.
   source += '\nvar originalAssWorkerMessage = self.onmessage;\n' +
     'self.onmessage = function(message) {\n' +
+    '  if (message.data.target === "video") {\n' +
+    '    // Apply state before the timestamp so seek frames never use an old rate/pause flag.\n' +
+    '    if (message.data.rate) self.rate = message.data.rate;\n' +
+    '    if (message.data.isPaused !== undefined) self.setIsPaused(message.data.isPaused);\n' +
+    '    if (message.data.currentTime !== undefined) {\n' +
+    '      var position = message.data.currentTime;\n' +
+    '      if (message.data.senderTime && message.data.isPaused === false)\n' +
+    '        position += Math.max(0, Date.now() - message.data.senderTime) / 1000 * (message.data.rate || self.rate);\n' +
+    '      self.setCurrentTime(position);\n' +
+    '    }\n' +
+    '    return;\n' +
+    '  }\n' +
     '  if (message.data.target === "plezy-force-frame") { self.getRenderMethod()(true); return; }\n' +
     '  if (message.data.target !== "create-events") return originalAssWorkerMessage(message);\n' +
     '  var events = message.data.events;\n' +
@@ -122,8 +140,9 @@ for (const legacy of [false, true]) {
     let end = Math.min(start + 256 * 1024, source.length);
     if (end < source.length && /[\uD800-\uDBFF]/.test(source[end - 1])) end--;
     const piece = JSON.stringify(source.slice(start, end));
-    await writeFile(path.join(libass, worker + '-' + count++ + '.js'),
-      'window.plezyAssParts.push(new Blob([' + piece + ']));\n');
+    await writeFile(path.join(libass, worker + '-' + count + '.js'),
+      'window.plezyAssParts[' + count + '] = new Blob([' + piece + ']);\n');
+    count++;
     start = end;
   }
   await writeFile(path.join(libass, worker + '-assets.js'), 'window.plezyAssPartCount = ' + count + ';\n');

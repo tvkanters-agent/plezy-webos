@@ -53,3 +53,20 @@ test('paused ASS event imports force a redraw after the worker installs the even
     'paused redraw must occur after the worker processes the new events');
   appender.dispose();
 });
+
+test('the fully initialized worker style reply installs pending events without a premature second query',()=>{
+  const sent=[];
+  const renderer={video:{currentTime:1.5,paused:false},timeOffset:0,
+    worker:{postMessage:message=>sent.push(message),
+      addEventListener(){throw new Error('Styles were already supplied');}},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const appender=new AssEventAppender(renderer,header+first+'\n');
+  appender.remember(header+first+'\n'+second+'\n');
+  assert.deepEqual(sent,[],'no event import while the worker is booting');
+  appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.deepEqual(sent.map(msg=>msg.target),['create-events','video']);
+  assert.equal(sent[0].events[0].Text,'Earlier dialogue');
+  appender.ready();
+  assert.equal(sent.length,2,'initialization must be idempotent');
+  appender.dispose();
+});

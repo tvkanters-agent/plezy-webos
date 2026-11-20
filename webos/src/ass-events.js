@@ -50,13 +50,14 @@ export class AssEventAppender {
     if (append) this.flush();
   }
 
-  ready() {
-    if (this.disposed) return;
+  ready(styles = null) {
+    if (this.disposed || this.styles) return;
     const receive = styles => {
       if (this.disposed) return;
       this.styles = new Map(styles.map(style => [String(style.Name).toLowerCase(), style._index]));
       this.flush();
     };
+    if (Array.isArray(styles)) { receive(styles); return; }
     if (!this.renderer.worker.addEventListener) {
       this.renderer.getStyles(receive, () => {});
       return;

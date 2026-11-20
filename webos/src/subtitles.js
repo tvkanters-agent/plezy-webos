@@ -47,7 +47,17 @@ async function ensureAssRenderer() {
         await loadAssScript(prefix + '-assets.js');
         window.plezyAssParts = [];
         try {
-          for (let i = 0; i < window.plezyAssPartCount; i++) await loadAssScript(prefix + '-' + i + '.js');
+          // Independent local chunks can load concurrently. Each writes its
+          // fixed array index so out-of-order script completion is safe.
+          for (let i = 0; i < window.plezyAssPartCount; i += 3) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + 3, window.plezyAssPartCount); j++)
+              batch.push(loadAssScript(prefix + '-' + j + '.js'));
+            await Promise.all(batch);
+          }
+          if (window.plezyAssParts.length !== window.plezyAssPartCount ||
+              window.plezyAssParts.some(part => !part))
+            throw new Error('Incomplete ASS worker asset bundle.');
           const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});
           window.plezyAssAssets = {workerUrl:URL.createObjectURL(blob)};
         } finally {
@@ -211,9 +221,13 @@ export class SubtitleOverlay {
       this.stopClock(); this.update(this.offsetMs); this.syncAssClock(); this.startAssClock();
     });
     listen('seeked', () => {
-      // Some LG decoders do not emit a second `playing` after a buffered seek.
-      // A prior waiting event must not freeze libass indefinitely.
-      this.assWaiting = false;
+      // seeked means the seek target was accepted, not necessarily that the
+      // decoder is advancing again. Keep the ASS clock frozen if only the
+      // current frame is buffered; timeupdate, playing or clock progress
+      // will release the latch without needing a second playing event.
+      this.assWaiting = !this.video.paused && Number.isFinite(this.video.readyState) &&
+        this.video.readyState < 3;
+      this.assWaitingPosition = this.video.currentTime;
       this.update(this.offsetMs); this.syncAssClock(true); this.startAssClock(); this.startClock();
     });
     listen('timeupdate', () => {
@@ -498,6 +512,7 @@ export class SubtitleOverlay {
       if (renderer.ctx && renderer.canvas)
         renderer.ctx.clearRect(0,0,renderer.canvas.width,renderer.canvas.height);
       renderer.plezyResumeVideo();
+      renderer.plezyUseExternalClock?.();
       renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
       if (renderer._plezyTrackContent !== content) {
         renderer.setTrack(content);
@@ -517,6 +532,7 @@ export class SubtitleOverlay {
         timeOffset: -this.offsetMs / 1000,
         onError
       });
+      renderer.plezyUseExternalClock?.();
       const onRuntimeReady = event => {
         // Upstream emits 'ready' immediately after releasing the worker-init
         // dependency, *before* libass has finished initializing. Requesting
@@ -529,6 +545,9 @@ export class SubtitleOverlay {
         renderer.worker?.removeEventListener('message',onRuntimeReady);
         renderer._plezyFullyReady = true;
         ready = true;
+        // A fresh worker must not receive incremental events or style
+        // queries before its track has initialized. Reuse this reply.
+        this.assAppender?.ready(event.data.styles);
         showReady();
       };
       renderer.worker?.addEventListener('message',onRuntimeReady);
@@ -578,26 +597,23 @@ export class SubtitleOverlay {
     // Retire the dialogue only after the canvas contains painted pixels.
     const onFrame = event => {
       if (event.data.target !== 'canvas' || !event.data.canvases?.length) return;
+      // libass reports no image when there is no visible cue. Its returned
+      // blended frame is already the visibility signal; a 160x90 downscale
+      // probe could miss fine/small signs and leave a valid ASS canvas hidden.
+      if (event.data.op !== 'renderCanvas' ||
+          !event.data.canvases.some(image => image.w > 0 && image.h > 0 && image.buffer?.byteLength > 0))
+        return;
       requestAnimationFrame(() => {
         if (generation !== this.generation || this.assPainted || this.assUnavailable || this.renderer !== renderer) return;
         if (renderer.canvas.style.visibility === 'hidden') renderer.canvas.style.visibility = 'visible';
-        const probe = document.createElement('canvas');
-        probe.width = 160; probe.height = 90;
-        const ctx = probe.getContext('2d');
-        ctx.drawImage(renderer.canvas, 0, 0, probe.width, probe.height);
-        const pixels = ctx.getImageData(0, 0, probe.width, probe.height).data;
-        for (let i = 3; i < pixels.length; i += 4) {
-          if (!pixels[i]) continue;
-          this.assPainted = true;
-          if (renderer.canvasParent) renderer.canvasParent.style.display = '';
-          clearTimeout(this.dialogueTimer);
-          renderer.worker.removeEventListener('message', onFrame);
-          if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
-          this.dialogue?.destroy();
-          this.dialogue = null;
-          this.stopClock();
-          break;
-        }
+        this.assPainted = true;
+        if (renderer.canvasParent) renderer.canvasParent.style.display = '';
+        clearTimeout(this.dialogueTimer);
+        renderer.worker.removeEventListener('message', onFrame);
+        if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
+        this.dialogue?.destroy();
+        this.dialogue = null;
+        this.stopClock();
       });
     };
     renderer.worker?.addEventListener('message', onFrame);
@@ -610,7 +626,7 @@ export class SubtitleOverlay {
       if (generation === this.generation && this.renderer === renderer)
         this.assFailure(new Error('ASS subtitle renderer did not become ready.'), generation);
     }, 20000);
-    this.assAppender?.ready();
+    if (ready) this.assAppender?.ready();
   }
 
   syncAssClock(force = false) {

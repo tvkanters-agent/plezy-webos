@@ -144,6 +144,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
     setRate(){}
     plezySuspendVideo(){this.suspended=true;}
     plezyResumeVideo(){this.suspended=false;}
+    plezyUseExternalClock(){this.externalClockCount=(this.externalClockCount||0)+1;}
     dispose(){this.destroyed=true;}
   }
   globalThis.window={SubtitlesOctopus:FakeOctopus};
@@ -154,6 +155,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
   const content='[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,A';
   await overlay.renderStyledAss({fonts:[font]},content,overlay.generation);
   const first=overlay.renderer;
+  assert.equal(first.externalClockCount,1,'built-in Octopus time listeners are disabled');
   first._plezyFullyReady=true;
   overlay.clear();
   assert.equal(first.suspended,true);
@@ -162,6 +164,7 @@ test('ASS renderer survives repeated playback of an identical track and font set
   assert.equal(overlay.renderer,first);
   assert.deepEqual(first.setTrackCalls,[]);
   assert.equal(first.suspended,false);
+  assert.equal(first.externalClockCount,2,'resume must re-disable native clock listeners');
   overlay.clear();
   await overlay.renderStyledAss({fonts:[font]},content+'\n',overlay.generation);
   assert.equal(overlay.renderer,first);
@@ -275,4 +278,68 @@ test('an ASS worker signals runtime ready before the startup timeout',async t=>{
     data.isPaused===false && data.rate===1.25));
   assert.equal(errors,0);
   overlay.clear();
+});
+
+test('tiny ASS signs reveal the styled canvas without lossy downsampled alpha probing',async t=>{
+  const previousWindow=globalThis.window, previousRaf=globalThis.requestAnimationFrame;
+  let worker;
+  class FakeOctopus {
+    constructor() {
+      this.fonts=[];
+      this.canvasParent={style:{display:'none'}};
+      this.canvas={style:{visibility:'hidden'}};
+      this.worker=worker={
+        handlers:new Set(),
+        addEventListener(type,cb){if(type==='message')this.handlers.add(cb);},
+        removeEventListener(type,cb){if(type==='message')this.handlers.delete(cb);},
+        postMessage(){},
+        emit(data){for(const cb of [...this.handlers])cb({data});}
+      };
+    }
+    setIsPaused(){}
+    setRate(){}
+    dispose(){}
+  }
+  globalThis.window={SubtitlesOctopus:FakeOctopus};
+  globalThis.requestAnimationFrame=cb=>{cb();return 1;};
+  t.after(()=>{globalThis.window=previousWindow;globalThis.requestAnimationFrame=previousRaf;});
+  const overlay=new SubtitleOverlay(
+    {currentTime:10,paused:true,ended:false,seeking:false,playbackRate:1,videoWidth:1920,videoHeight:1080},
+    {textContent:''});
+  const script='[Events]\\nDialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,{\\\\pos(300,75)}Small sign';
+  await overlay.renderStyledAss({fonts:[]},script,overlay.generation);
+  const renderer=overlay.renderer;
+  worker.emit({target:'canvas',op:'renderCanvas',canvases:[]});
+  assert.equal(overlay.assPainted,undefined);
+  const pixel=Uint8Array.of(255,255,255,255);
+  worker.emit({target:'canvas',op:'renderCanvas',
+    canvases:[{x:1,y:1,w:1,h:1,buffer:pixel.buffer}]});
+  assert.equal(overlay.assPainted,true);
+  assert.equal(renderer.canvasParent.style.display,'');
+  assert.equal(renderer.canvas.style.visibility,'visible');
+  assert.equal(worker.handlers.size,1,'stop observing frames after first valid render');
+  overlay.dispose();
+});
+
+test('ASS clock stays at the seek target until the decoder advances after an underbuffered seek',()=>{
+  const callbacks=new Map();
+  const video={currentTime:10,paused:false,readyState:4,seeking:false,ended:false,playbackRate:1,
+    addEventListener(name,handler){callbacks.set(name,handler);},
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const updates=[];
+  overlay.kind='ass';
+  overlay.renderer={timeOffset:0,setIsPaused:(paused,time)=>updates.push({paused,time}),
+    setRate(){},dispose(){}};
+  video.currentTime=180;video.seeking=true;
+  callbacks.get('seeking')();
+  video.seeking=false;video.readyState=1;
+  callbacks.get('seeked')();
+  assert.equal(overlay.assWaiting,true);
+  assert.deepEqual(updates[updates.length-1],{paused:true,time:180});
+  video.currentTime=180.125;
+  callbacks.get('timeupdate')();
+  assert.equal(overlay.assWaiting,false);
+  assert.deepEqual(updates[updates.length-1],{paused:false,time:180.125});
+  overlay.dispose();
 });
