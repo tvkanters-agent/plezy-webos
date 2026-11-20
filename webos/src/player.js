@@ -29,7 +29,9 @@ export class Player {
     this.sheet = root.querySelector('.player-sheet');
     this.subtitleSyncOffsetMs = 0;
     this.subtitleCueTimes = new WeakMap();
-    this.subtitleOverlay = new SubtitleOverlay(this.video, root.querySelector('.player-captions'));
+    // Compatibility mode must not instantiate a custom subtitle renderer.
+    this.subtitleOverlay = null;
+    this.enhancedPlaybackActive = false;
     this.status = root.querySelector('.player-status');
     this.buffering = root.querySelector('.player-buffering');
     this.seeking = false;
@@ -442,6 +444,7 @@ export class Player {
   }
   loadSubtitleSyncOffset() {
     this.subtitleSyncOffsetMs = 0;
+    if (!this.enhancedPlaybackActive) return;
     try {
       const key = this.subtitleSyncStorageKey();
       const value = key && Number(localStorage.getItem(key));
@@ -449,6 +452,7 @@ export class Player {
     } catch (_) {}
   }
   setSubtitleSyncOffset(offsetMs) {
+    if (!this.enhancedPlaybackActive || this.session?.subtitleBurnedIn) return;
     this.subtitleSyncOffsetMs = clamp(Math.round(Number(offsetMs) / 50) * 50, -60000, 60000);
     try {
       const key = this.subtitleSyncStorageKey();
@@ -471,7 +475,7 @@ export class Player {
   updateSubtitleSyncControls() {
     const label = this.formatSubtitleSyncOffset();
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
-    const legacyMode = this.preferences()?.enhancedPlayback === false;
+    const legacyMode = !this.enhancedPlaybackActive;
     const burnedIn = !!this.session?.subtitleBurnedIn;
     const disabled = legacyMode || burnedIn;
     if (settingsValue) settingsValue.textContent = legacyMode ? 'Enhanced playback off' : burnedIn ? 'Burned in' : label;
@@ -506,6 +510,7 @@ export class Player {
   }
   startSyncHold(direction) {
     this.stopSyncHold();
+    if (!this.enhancedPlaybackActive || this.session?.subtitleBurnedIn) return;
     this.syncHoldFired = false;
     this.syncHoldTimeout = setTimeout(() => {
       this.syncHoldFired = true;
@@ -514,7 +519,7 @@ export class Player {
     }, 400);
   }
   openSyncBar() {
-    if (this.preferences()?.enhancedPlayback === false) {
+    if (!this.enhancedPlaybackActive) {
       this.notify('Enable Enhanced playback in Settings to adjust subtitle timing');
       return;
     }
@@ -593,6 +598,7 @@ export class Player {
     slider.focus();
   }
   applySubtitleSyncOffset() {
+    if (!this.enhancedPlaybackActive) return;
     this.subtitleOverlay?.update(this.subtitleSyncOffsetMs);
     if (!this.video?.textTracks || !this.subtitleCueTimes) return;
     const offset = this.subtitleSyncOffsetMs / 1000;
@@ -756,6 +762,11 @@ export class Player {
     await cleanup;
     if (generation !== this.generation) return;
     this.api = api; this.item = item; this.options = options;
+    this.enhancedPlaybackActive = this.preferences()?.enhancedPlayback === true;
+    if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
+      this.subtitleOverlay.dispose();
+      this.subtitleOverlay = null;
+    }
     this.loadSubtitleSyncOffset();
     this.pauseAfterOpen = !this.openIntentPlaying;
     this.lastControlFocus = this.root.querySelector('[data-action="pause"]');
@@ -786,11 +797,17 @@ export class Player {
     let session;
     try {
       session = await api.playback(item, {...options,
-        enhancedPlayback: this.preferences()?.enhancedPlayback !== false,
+        enhancedPlayback: this.enhancedPlaybackActive,
         skipSettings: this.preferences()});
       if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
+      if (!this.enhancedPlaybackActive && session.enhancedPlayback === true) {
+        await api.stop(session).catch(() => {});
+        throw new Error('Enhanced playback is disabled in Settings.');
+      }
       this.session = session;
       this.trackCatalog = session;
+      if (this.enhancedPlaybackActive && session.subtitleAsset && !this.subtitleOverlay)
+        this.subtitleOverlay = new SubtitleOverlay(this.video, this.root.querySelector('.player-captions'));
       this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;
@@ -836,7 +853,8 @@ export class Player {
       if (generation !== this.generation || this.session !== session) return;
       // Embedded MKV is loaded from the same Plex part as the video. Let the
       // decoder secure its first frame before opening that second read.
-      if (session.subtitleAsset && !session.subtitleAsset.partUrl) this.loadSubtitleAsset(session, generation);
+      if (this.enhancedPlaybackActive && session.subtitleAsset && !session.subtitleAsset.partUrl)
+        this.loadSubtitleAsset(session, generation);
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       // On webOS a non-started video often never reaches canplay/seeked.
@@ -848,6 +866,7 @@ export class Player {
     }
   }
   async loadSubtitleAsset(session, generation) {
+    if (!this.enhancedPlaybackActive || !this.subtitleOverlay) return;
     const asset = this.options.skipMatroskaSubtitles ? {...session.subtitleAsset, partUrl:null} : session.subtitleAsset;
     const alive = () => generation === this.generation && this.session === session;
     this.subtitleOverlay.onError = error => {
@@ -949,7 +968,8 @@ export class Player {
         this.openIntentPlaying === false && this.hasFirstFrame) {
       this.startupComplete = true;
       clearTimeout(this.startTimeout);
-      if (this.session.subtitleAsset?.partUrl) this.loadSubtitleAsset(this.session, this.generation);
+      if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl)
+        this.loadSubtitleAsset(this.session, this.generation);
     }
   }
   position() {
@@ -1073,7 +1093,7 @@ export class Player {
     return this.open(this.api, this.item, options, true, trackSheetFocus, playing);
   }
   async subtitleFailed(error, session) {
-    if (!this.session || this.session !== session || this.recoveringSession === session ||
+    if (!this.enhancedPlaybackActive || !this.session || this.session !== session || this.recoveringSession === session ||
         session.subtitleBurnedIn || !session.subtitleAsset) return;
     // Both the Matroska reader and Plex's independent subtitle endpoint can
     // fail. Unlike MPV, LG's HTML player cannot then use an embedded track;

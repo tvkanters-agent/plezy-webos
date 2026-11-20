@@ -91,7 +91,7 @@ test('Plex native URL, MIME, sidecar and HLS fallback preserve version, position
     const calls=[];api.get=async(path,params,options)=>{
       calls.push({path,params,options});return {MediaContainer:{Metadata:[{}]}};
     };
-    const options={mediaIndex:1,start:125.25,subtitle:90,audio:21};
+  const options={enhancedPlayback:true,mediaIndex:1,start:125.25,subtitle:90,audio:21};
     const session=await api.playback(item,options);
     assert.equal(session.transcode,false);
     assert.equal(session.mimeType,'video/x-matroska');

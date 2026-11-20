@@ -2,6 +2,22 @@
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 
+let assRendererScript;
+async function ensureAssRenderer() {
+  if (typeof window.SubtitlesOctopus === 'function') return;
+  if (!assRendererScript) {
+    assRendererScript = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'libass/subtitles-octopus.js';
+      script.onload = () => typeof window.SubtitlesOctopus === 'function'
+        ? resolve() : reject(new Error('SubtitlesOctopus did not initialize.'));
+      script.onerror = () => reject(new Error('SubtitlesOctopus could not be loaded.'));
+      document.head.appendChild(script);
+    }).catch(error => { assRendererScript = null; throw error; });
+  }
+  await assRendererScript;
+}
+
 // Positive sync offsets delay subtitles, matching the native text-track editor.
 export function subtitleTime(videoTime, offsetMs) {
   return (Number(videoTime) || 0) - (Number(offsetMs) || 0) / 1000;
@@ -86,13 +102,24 @@ export class SubtitleOverlay {
     this.readyTimer = null;
     // timeupdate may arrive only four times a second. Keep SRT cue boundaries
     // aligned to the visible playback clock, including short cues.
-    video.addEventListener?.('playing', () => this.startClock());
+    this.listeners = [];
+    const listen = (type, handler) => {
+      video.addEventListener?.(type, handler);
+      this.listeners.push({type,handler});
+    };
+    listen('playing', () => this.startClock());
     for (const event of ['pause', 'ended', 'seeking']) {
-      video.addEventListener?.(event, () => { this.stopClock(); this.update(this.offsetMs); });
+      listen(event, () => { this.stopClock(); this.update(this.offsetMs); });
     }
-    video.addEventListener?.('seeked', () => {
+    listen('seeked', () => {
       this.update(this.offsetMs); this.startClock();
     });
+  }
+
+  dispose() {
+    this.clear();
+    for (const {type,handler} of this.listeners) this.video.removeEventListener?.(type, handler);
+    this.listeners = [];
   }
 
   stopClock() {
@@ -174,8 +201,8 @@ export class SubtitleOverlay {
         this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
         return;
       }
-      if (typeof window.SubtitlesOctopus !== 'function')
-        throw new Error('SubtitlesOctopus is unavailable');
+      await ensureAssRenderer();
+      if (generation !== this.generation) return;
       if (this.kind) this.releaseRenderer();
       // The worker is loaded only for ASS/SSA; webOS 4.x uses its non-WASM build.
       let renderer;

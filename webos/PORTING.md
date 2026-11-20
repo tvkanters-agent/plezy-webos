@@ -596,6 +596,22 @@ may preload/buffer twice, but avoids the problematic native-start variant.
 MP4 and enhanced-mode native resume remain unchanged. Hardware verification
 is still needed to confirm whether the affected LG reproduces this inference.
 
+As of 1.15.2 this switch is also enforced at every later boundary. Plex's
+playback API treats missing, malformed and false `enhancedPlayback` values as
+legacy; the expanded Direct Play and text-sidecar paths require literal
+`true`. The player snapshots the setting for each open/reopen (including
+track changes and decoder retries) and rejects an accidentally returned
+enhanced session while Off. Off never constructs the custom subtitle overlay,
+reads/applies subtitle offsets, starts Matroska extraction, starts a subtitle
+download or triggers a renderer-failure restart. The ASS/libass runtime is
+no longer loaded by the application shell; only an explicit enhanced ASS
+track loads its script and worker. Leaving On disposes old overlay listeners.
+This preserves the historical *MP4* direct-file decision while excluding all
+newly expanded native formats and custom subtitle processing. Unit and browser
+tests assert that MKV SRT/ASS in Off makes one original HLS/burn-in request,
+no decision/extraction call and no ASS runtime load. The double buffer on
+legacy *resume* remains the explicit LG black-video workaround above.
+
 The reviewed native expansion is documented in [DIRECT_PLAY_REVIEW.md](DIRECT_PLAY_REVIEW.md). Unlike desktop mpv, LG HTML5 cannot select arbitrary embedded tracks; multi-audio files stay on HLS. Native-only AVC/HEVC formats require stream evidence within the C8/webOS 4.0 limits and correct source MIME. Independent SRT/ASS does not force a video transcode. Startup recovery is scoped to the session and remains armed past metadata until video clock progress, so native failures cannot hide indefinitely or suppress replacement HLS errors. Browser event tests are not hardware decode validation.
 
 ### Subtitle sync on Chromium 53 and real Plex sidecar keys

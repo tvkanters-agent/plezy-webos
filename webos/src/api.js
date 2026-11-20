@@ -494,7 +494,9 @@ export class Plex {
     const part = media && (media.Part || [])[0];
     if (!part) throw new Error('This version has no playable media.');
     if (media.Part.length > 1) throw new Error('Multi-part files are not supported yet. Choose another version.');
-    if (options.enhancedPlayback === false)
+    // Enhanced playback is opt-in at the API boundary too. A caller that
+    // forgets the setting must never enable expanded Direct Play or renderers.
+    if (options.enhancedPlayback !== true)
       return this.playbackLegacy(item, options, mediaIndex, media, part);
     const sessionId = id();
     const selectedSubtitle = selectedPlexSubtitle(media, options);
@@ -576,6 +578,7 @@ export class Plex {
     }).catch(() => null);
     return {url: transcode ? this.url('/video/:/transcode/universal/start.m3u8', params) : this.url(part.key),
       sessionId, sourceId: String(part.id), transcode, mimeType, item, subtitleAsset, subtitleBurnedIn,
+      enhancedPlayback:true,
       start: Math.max(0, Number(options.start) || 0),
       ...plexNavigation(item.raw, options.skipSettings),
       extrasPromise,

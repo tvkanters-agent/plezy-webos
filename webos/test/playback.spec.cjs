@@ -72,31 +72,39 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   }
   return {calls,events};
 }
-test('compatibility mode uses one original Plex HLS burn-in request and disables subtitle timing',async({page})=>{
-  const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
-    Part:[{id:'part',key:'/video.webm',Stream:[
-      {streamType:3,id:32,codec:'srt',selected:1}]}]}]},undefined,[],{enhancedPlayback:false},
-      null,null,null,false);
-  // Chromium desktop cannot decode HLS; validate the URL and UI without
-  // treating a fake video/webm response as a functioning HLS stream.
-  await expect.poll(()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8')).length).toBe(1);
-  const starts=calls.filter(url=>url.pathname.endsWith('/start.m3u8'));
-  expect(starts).toHaveLength(1);
-  expect(starts[0].searchParams.get('subtitles')).toBe('burn');
-  expect(starts[0].searchParams.get('X-Plex-Platform')).toBe('Chrome');
-  expect(starts[0].searchParams.has('hasMDE')).toBe(false);
-  expect(calls.some(url=>url.pathname.endsWith('/transcode/universal/decision'))).toBe(false);
-  expect(calls.some(url=>url.pathname==='/subtitles/:/transcode/universal/start')).toBe(false);
-  expect(calls.some(url=>url.pathname.includes('/library/parts/embedded/file.mkv'))).toBe(false);
-  await page.getByRole('button',{name:'Playback settings'}).click();
-  const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
-  await expect(sync).toHaveAttribute('aria-disabled','true');
-  await expect(sync).toHaveClass(/is-disabled/);
-  await expect(page.locator('.player-settings-sync-value')).toHaveText('Enhanced playback off');
-  await sync.focus();
-  await page.keyboard.press('Enter');
-  await expect(page.locator('#toast')).toHaveText('Enable Enhanced playback in Settings to adjust subtitle timing');
-  await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+test('compatibility mode never activates enhanced subtitle or Direct Play pipelines for MKV SRT/ASS',async({page})=>{
+  for (const codec of ['srt','ass']) {
+    const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+      Part:[{id:'part',key:'/video.webm',Stream:[
+        {streamType:3,id:32,codec,selected:1}]}]}]},undefined,[],{enhancedPlayback:false},
+        null,null,null,false);
+    // Chromium desktop cannot decode HLS; validate the URL and UI without
+    // treating a fake video/webm response as a functioning HLS stream.
+    await expect.poll(()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8')).length).toBe(1);
+    const starts=calls.filter(url=>url.pathname.endsWith('/start.m3u8'));
+    expect(starts).toHaveLength(1);
+    expect(starts[0].searchParams.get('subtitles')).toBe('burn');
+    expect(starts[0].searchParams.get('X-Plex-Platform')).toBe('Chrome');
+    expect(starts[0].searchParams.has('hasMDE')).toBe(false);
+    expect(calls.some(url=>url.pathname.endsWith('/transcode/universal/decision'))).toBe(false);
+    expect(calls.some(url=>url.pathname==='/subtitles/:/transcode/universal/start')).toBe(false);
+    expect(calls.some(url=>url.pathname.includes('/library/parts/embedded/file.mkv'))).toBe(false);
+    const renderer=await page.evaluate(()=>({
+      assScript:!!document.querySelector('script[src="libass/subtitles-octopus.js"]'),
+      assRuntime:typeof window.SubtitlesOctopus,
+      captions:document.querySelector('.player-captions')?.childElementCount || 0
+    }));
+    expect(renderer).toEqual({assScript:false,assRuntime:'undefined',captions:0});
+    await page.getByRole('button',{name:'Playback settings'}).click();
+    const sync=page.getByRole('button',{name:'Subtitle sync',exact:true});
+    await expect(sync).toHaveAttribute('aria-disabled','true');
+    await expect(sync).toHaveClass(/is-disabled/);
+    await expect(page.locator('.player-settings-sync-value')).toHaveText('Enhanced playback off');
+    await sync.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#toast')).toHaveText('Enable Enhanced playback in Settings to adjust subtitle timing');
+    await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+  }
 });
 function buildBif(image) {
   const count=2, tableEnd=64+(count+1)*8;
