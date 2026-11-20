@@ -1,7 +1,14 @@
-## 1.12.2
+## 1.13.1
 
 - Render embedded Plex SRT and ASS/SSA locally so subtitle sync works without forcing video burn-in.
 - Explain when Plex has to burn a subtitle into the video and sync is unavailable.
+
+## 1.13.0 — Pre-play audio and subtitle selection for all video details
+
+- Choose source audio/subtitle tracks in movie More options before playback, respecting the selected Plex media version.
+- Choose from show/season More options using the episode their Play action would launch, carrying the language/track intent to matching sibling episodes.
+- Keep movie choices isolated to their title and version; do not request server stream changes until Play. Preserve the existing episode picker, focus restoration and session-only preferences.
+- Cover versioned movie stream IDs, show/season carry and real browser navigation.
 
 ## 1.12.1
 

@@ -70,6 +70,19 @@ At the user's request, the webOS episode More options disc renders only
 The pre-play track chooser stays open after a selection so audio and subtitles
 can be adjusted together without repeatedly opening the episode menu.
 
+The same existing pre-play TrackSheet adaptation is now offered from movie,
+show and season detail More options menus, as well as episode menus. Movies
+save source IDs for the selected media version only; no language preference
+leaks to other movies. Shows/seasons lack their own media streams, so their menu
+resolves the episode that the existing Play action would start (On Deck or the
+first available episode) and records that episode's choice. The established
+per-series language/role carry applies it to matching sibling episodes when
+played, without sending an arbitrary episode's stream IDs to another part.
+Changing a pre-play choice still makes no server request until playback starts.
+Native Plezy has a read-only playback-track preview on show/season details;
+this selectable menu is a user-requested webOS extension. Focus/Back and
+version/part ID forwarding have browser regression coverage, not TV validation.
+
 Native `TrackSheet` closes on an MPV track tile tap. The user explicitly
 requested the opposite for this port: the player TrackSheet remains visible
 after a track selection, even when webOS must restart HLS to apply it. The
