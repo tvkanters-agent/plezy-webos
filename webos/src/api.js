@@ -601,6 +601,9 @@ export class Plex {
         asset.partUrl = this.url(part.key);
         asset.partSize = part.size;
         asset.streamIndex = selectedPlexSubtitle(media, options).index;
+        // Stable across token/URL changes, but distinct for media revisions
+        // and different embedded streams. Never persist authentication URLs.
+        asset.partCacheKey = this.server.id + ':' + part.id + ':' + part.size + ':' + asset.streamIndex;
         // A series' similarly named fonts can be reused across episodes.
         asset.fontScope = this.server.id + ':' +
           (item.raw.grandparentRatingKey || item.raw.parentRatingKey || item.id);

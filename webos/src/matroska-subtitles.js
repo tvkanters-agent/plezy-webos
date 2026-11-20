@@ -457,7 +457,7 @@ async function attachedFonts(read, offset, scope) {
           bytes = await read(data.offset, data.length);
           assFontCache.put(scope, name, bytes, crc);
         }
-        fonts.push({name, bytes});
+        fonts.push({name, bytes, crc});
         remaining -= data.length;
       }
     }

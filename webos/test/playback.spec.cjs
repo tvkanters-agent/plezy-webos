@@ -2031,6 +2031,16 @@ test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
     };
     open.onerror=()=>resolve(0);
   }))).toBeGreaterThan(0);
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const open=indexedDB.open('plezy-ass-tracks-v1',1);
+    open.onsuccess=()=>{
+      const count=open.result.transaction('tracks').objectStore('tracks').count();
+      count.onsuccess=()=>{resolve(count.result);open.result.close();};
+      count.onerror=()=>resolve(0);
+    };
+    open.onerror=()=>resolve(0);
+  }))).toBeGreaterThan(0);
+  const indexedReads=ranges.filter(entry=>entry.start===0&&entry.length===32768).length;
   await page.reload();
   await page.getByRole('button',{name:'Test Movie',exact:true}).click();
   await page.getByRole('button',{name:'Play',exact:true}).first().click();
@@ -2038,6 +2048,82 @@ test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
   await paint();
   await expect.poll(painted,{timeout:30000}).toBe(true);
   expect(ranges.filter(entry=>entry.length===font.length)).toHaveLength(1);
+  expect(ranges.filter(entry=>entry.start===0&&entry.length===32768)).toHaveLength(indexedReads);
+});
+
+test('reopening ASS and switching episodes reuses the compiled worker and same-series fonts',async({page})=>{
+  await page.addInitScript(()=>{
+    window.WebAssembly=undefined;
+    window.assWorkerCreations=0;
+    const OriginalWorker=window.Worker;
+    window.Worker=function(url) {
+      window.assWorkerCreations++;
+      return new OriginalWorker(url);
+    };
+    window.Worker.prototype=OriginalWorker.prototype;
+  });
+  const font=await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
+  const fixture=assFixture(6000,'ass',font);
+  const reads=[];
+  const metadata={Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
+      {streamType:3,id:32,codec:'ass',index:0,selected:1}
+    ]}]}]};
+  const mkvFixture={source:fixture.source,onRange:(start,end)=>reads.push({start,length:end-start+1})};
+  const {calls}=await setup(page,metadata,undefined,[],{},null,null,null,true,
+    mkvFixture);
+  const paint=async()=>page.locator('video').evaluate(video=>{video.currentTime=0.5;});
+  const hasGlyph=()=>page.locator('#player canvas.libassjs-canvas').evaluate(canvas=>{
+    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+    for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
+    return false;
+  });
+  await page.locator('[data-action="pause"]').click();
+  await paint();
+  await expect.poll(hasGlyph,{timeout:30000}).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const open=indexedDB.open('plezy-ass-tracks-v1',1);
+    open.onsuccess=()=>{
+      const request=open.result.transaction('tracks').objectStore('tracks').count();
+      request.onsuccess=()=>{resolve(request.result);open.result.close();};
+      request.onerror=()=>resolve(0);
+    };
+    open.onerror=()=>resolve(0);
+  }))).toBeGreaterThan(0);
+  const firstWorkers=await page.evaluate(()=>window.assWorkerCreations);
+  const firstIndexReads=reads.filter(entry=>entry.start===0&&entry.length===32768).length;
+  expect(firstWorkers).toBe(1);
+  await page.locator('[data-action="stop"]').click();
+  await expect(page.locator('#player')).toBeHidden();
+  await page.getByRole('button',{name:'Play',exact:true}).first().click();
+  await page.locator('[data-action="pause"]').click();
+  await paint();
+  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
+  await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
+  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
+  expect(reads.filter(entry=>entry.start===0&&entry.length===32768).length).toBe(firstIndexReads);
+  // A sibling episode has different timed dialogue, but identical font bytes.
+  // Its new track must replace the prior events without recompiling libass.
+  const sibling=assFixture(7000,'ass',font);
+  metadata.Media[0].Part[0].id='embedded-sibling';
+  metadata.Media[0].Part[0].size=sibling.source.length;
+  mkvFixture.source=sibling.source;
+  const priorMetadataReads=calls.filter(url=>url.pathname==='/library/metadata/movie').length;
+  await page.locator('[data-action="stop"]').click();
+  await expect(page.locator('#player')).toBeHidden();
+  // playbackClosed refreshes the detail's in-place item before the next Play.
+  await expect.poll(()=>calls.filter(url=>url.pathname==='/library/metadata/movie').length)
+    .toBeGreaterThan(priorMetadataReads);
+  await page.getByRole('button',{name:'Play',exact:true}).first().click();
+  await page.locator('[data-action="pause"]').click();
+  await paint();
+  await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
+  await page.locator('video').evaluate(video=>{video.currentTime=6.5;});
+  await expect.poll(hasGlyph).toBe(false);
+  await page.locator('video').evaluate(video=>{video.currentTime=7.5;});
+  await expect.poll(hasGlyph).toBe(true);
+  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
+  expect(reads.filter(entry=>entry.length===font.length)).toHaveLength(1);
 });
 
 test('embedded MKV SRT displays the first cue while later cluster reads are blocked', async ({page}) => {
