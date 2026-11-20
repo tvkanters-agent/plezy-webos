@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-export const VERSION = '1.16.1';
+import {subtitleStyle} from './subtitle-style.js';
+export const VERSION = '1.17.0';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -103,11 +104,13 @@ export function readState(storage) {
       librariesHidden: state.librariesHidden === true,
       sidebarCollapsed: state.sidebarCollapsed === true,
       hiddenLibraryIds: Array.isArray(state.hiddenLibraryIds)
-        ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : []};
+        ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : [],
+      ...subtitleStyle(state)};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', enhancedPlayback: false,
     skipIntroMode: 'button', skipCreditsMode: 'button',
     autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
-    simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: []}; }
+    simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: [],
+    ...subtitleStyle()}; }
 }
 export function saveState(storage, state) {
   storage.setItem('plezy.webos', JSON.stringify(state));

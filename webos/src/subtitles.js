@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
+import {applySrtStyle, applySrtPosition, resetSrtStyle} from './subtitle-style.js';
 
 function loadAssScript(src) {
   return new Promise((resolve, reject) => {
@@ -103,9 +104,10 @@ async function downloadSubtitle(asset, signal, position, preview) {
 }
 
 export class SubtitleOverlay {
-  constructor(video, element) {
+  constructor(video, element, preferences = () => ({})) {
     this.video = video;
     this.element = element;
+    this.preferences = preferences;
     this.generation = 0;
     this.renderer = null;
     this.kind = null;
@@ -127,12 +129,21 @@ export class SubtitleOverlay {
     listen('seeked', () => {
       this.update(this.offsetMs); this.startClock();
     });
+    listen('loadedmetadata', () => this.refreshStyle());
+    this.resizeStyle = () => this.refreshStyle();
+    if (typeof window !== 'undefined') window.addEventListener?.('resize', this.resizeStyle);
   }
 
   dispose() {
     this.clear();
     for (const {type,handler} of this.listeners) this.video.removeEventListener?.(type, handler);
     this.listeners = [];
+    if (typeof window !== 'undefined') window.removeEventListener?.('resize',this.resizeStyle);
+  }
+
+  refreshStyle() {
+    if (this.kind !== 'srt') return;
+    applySrtStyle(this.element, this.video, this.preferences(),this.aspectRatio);
   }
 
   stopClock() {
@@ -170,6 +181,7 @@ export class SubtitleOverlay {
     const renderer = this.renderer;
     this.renderer = null;
     this.kind = null;
+    this.aspectRatio = null;
     if (renderer) {
       try {
         if (typeof renderer.destroy === 'function') renderer.destroy();
@@ -178,6 +190,9 @@ export class SubtitleOverlay {
     }
     this.dialogue?.destroy();
     this.dialogue = null;
+    // ASS may fall back to plain dialogue text in this same element. Remove
+    // only the local SRT overrides so ASS retains its original presentation.
+    resetSrtStyle(this.element);
     this.element.textContent = '';
   }
 
@@ -204,9 +219,16 @@ export class SubtitleOverlay {
       if (!track.cues.length) throw new Error('Subtitle file contains no readable cues.');
       if (generation !== this.generation) return;
       if (this.dialogue || this.kind && this.kind !== 'srt') this.releaseRenderer();
+      this.aspectRatio = asset.aspectRatio;
+      // Layout must have its styled geometry before CaptionsRenderer captures
+      // the bounding box; SRT uses snapping text rows for sub-pos < 100.
+      const style=applySrtStyle(this.element,this.video,this.preferences(),this.aspectRatio);
+      applySrtPosition(track,style.subtitlePosition,this.element.offsetHeight,
+        parseFloat(this.element.style.fontSize));
       const renderer = this.renderer || new CaptionsRenderer(this.element);
       this.renderer = renderer;
       this.kind = 'srt';
+      this.aspectRatio = asset.aspectRatio;
       renderer.changeTrack(track);
       this.update(this.offsetMs);
       this.startClock();

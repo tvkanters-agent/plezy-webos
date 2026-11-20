@@ -88,6 +88,68 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   })).toEqual([true,'transcode',12,'']);
 });
 
+test('Subtitle Styling matches native Text/Border groups with TV-friendly editors and persists choices',async({page},testInfo)=>{
+  await connected(page);
+  await page.getByRole('button',{name:'Video Playback',exact:true}).click();
+  const link=page.getByRole('button',{name:'Subtitle Styling',exact:true});
+  await link.click();
+  await expect(page.getByRole('heading',{name:'Subtitle Styling',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Text',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Border',exact:true})).toBeVisible();
+  await expect(page.locator('.settings-group-items').first().locator('.settings-tile')).toHaveCount(6);
+  await expect(page.locator('.settings-group-items').last().locator('.settings-tile')).toHaveCount(2);
+  await expect(page.getByRole('button',{name:'Background Color'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'ASS Override'})).toHaveCount(0);
+  await page.screenshot({path:testInfo.outputPath('subtitle-styling.png')});
+
+  const size=page.getByRole('button',{name:'Font Size',exact:true});
+  await size.click();
+  const spinner=page.getByRole('dialog').getByRole('button',{name:'Font Size'});
+  await expect(spinner).toBeFocused();
+  await expect(spinner).toHaveText('38');
+  await page.keyboard.press('ArrowRight');
+  await expect(spinner).toHaveText('39');
+  await expect(spinner).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(size).toBeFocused();
+  await expect(size.locator('.settings-tile-subtitle')).toHaveText('39');
+
+  const textColor=page.getByRole('button',{name:'Text Color',exact:true});
+  await textColor.click();
+  await expect(page.getByRole('dialog').getByRole('button',{name:'Hue'})).toBeFocused();
+  await expect(page.getByRole('dialog').getByRole('button',{name:'Saturation'})).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('button',{name:'Brightness'})).toBeVisible();
+  const hex=page.getByRole('dialog').getByRole('textbox',{name:'Hex Color'});
+  await hex.fill('FF0088');
+  await page.getByRole('dialog').getByRole('button',{name:'Save'}).click();
+  await expect(textColor.locator('.settings-color-swatch')).toHaveCSS('background-color','rgb(255, 0, 136)');
+  await expect(textColor).toBeFocused();
+
+  const margin=page.getByRole('button',{name:'Use margins',exact:true});
+  await expect(margin).toHaveAttribute('aria-pressed','true');
+  await margin.click();
+  await expect(margin).toHaveAttribute('aria-pressed','false');
+  await page.getByRole('button',{name:'Bold',exact:true}).click();
+  await page.getByRole('button',{name:'Italic',exact:true}).click();
+  const border=page.getByRole('button',{name:'Border Size',exact:true});
+  await border.click();
+  const control=page.getByRole('dialog').getByRole('button',{name:'Border Size'});
+  await page.keyboard.press('ArrowLeft');
+  await expect(control).toHaveText('2');
+  await page.keyboard.press('Enter');
+
+  await page.keyboard.press('Escape');
+  await expect(link).toBeFocused();
+  await link.click();
+  await expect(size.locator('.settings-tile-subtitle')).toHaveText('39');
+  await expect(page.getByRole('button',{name:'Use margins'})).toHaveAttribute('aria-pressed','false');
+  expect(await page.evaluate(()=>{
+    const s=JSON.parse(localStorage.getItem('plezy.webos'));
+    return [s.subtitleFontSize,s.subtitleTextColor,s.subtitleUseMargins,
+      s.subtitleBold,s.subtitleItalic,s.subtitleBorderSize];
+  })).toEqual([39,'#FF0088',false,true,true,2]);
+});
+
 test('Manage Libraries switches update the rail without rebuilding or losing remote focus',async({page})=>{
   await connected(page);
   const manage=page.getByRole('button',{name:'Manage Libraries',exact:true});
@@ -112,7 +174,7 @@ test('TV remote reaches lower settings rows by scrolling without losing focus',a
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
   const first=page.getByRole('button',{name:'Enhanced playback (Direct Play + subtitle renderers)'});
   await expect(first).toBeFocused();
-  for(let i=0;i<7;i++)await page.keyboard.press('ArrowDown');
+  for(let i=0;i<8;i++)await page.keyboard.press('ArrowDown');
   const last=page.getByRole('button',{name:'Credits chapter pattern',exact:true});
   await expect(last).toBeFocused();
   expect(await last.evaluate(node=>{
