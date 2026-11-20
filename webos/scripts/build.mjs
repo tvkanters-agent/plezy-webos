@@ -36,6 +36,14 @@ if (!octopus.includes(canvasSizeAnchor)) throw new Error('SubtitlesOctopus canva
 octopus = octopus.replace(canvasSizeAnchor,
   'if (self.canvas.width !== width) self.canvas.width = width;\n' +
   '            if (self.canvas.height !== height) self.canvas.height = height;');
+// Two valid canvas updates may have the same Date.now() millisecond value.
+// Upstream's strict < check drops the latter, including the only empty frame
+// that should clear a paused-seek subtitle. Worker messages already arrive
+// in order for the non-lossy render mode; accept equal timestamps.
+const canvasFrameAnchor = "case 'renderCanvas': {\\n                        if (self.lastRenderTime < data.time) {".replace('\\n','\n');
+if (!octopus.includes(canvasFrameAnchor)) throw new Error('SubtitlesOctopus frame dispatch changed');
+octopus = octopus.replace(canvasFrameAnchor,
+  canvasFrameAnchor.replace('self.lastRenderTime < data.time','self.lastRenderTime <= data.time'));
 octopus = octopus.replace(disposeAnchor, `    self.plezySuspendVideo = function () {
         if (self._plezySuspended || !self.video) return;
         self._plezySuspended = true;
