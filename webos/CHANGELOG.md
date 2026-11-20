@@ -1,3 +1,13 @@
+## 1.22.4 — Improve ASS startup reliability and synchronize renderer timing
+
+- Use the player’s authoritative decoded-video clock exclusively while styled ASS is active. The bundled SubtitlesOctopus no longer sends a second set of conflicting timeupdate, pause, seek and buffering messages; its resize/metadata listeners remain attached.
+- Apply pause and playback-rate state before updating the libass worker clock, preventing a transient frame rendered with the previous seek or rate.
+- Do not send incremental ASS event/style messages until the worker finishes loading its track; reuse its ready style response.
+- Start embedded ASS extraction without the extra 200 ms timer once playback supplies its first frame, including paused opens and dimensionless native video. Preserve the native resume/first-frame gate, compatibility mode and SRT timing behavior.
+- Add regression tests for cold/warm worker clock ownership, incremental event readiness, paused ASS opening and native zero-dimension video.
+
+Real LG TV seek timing and first-render latency remain to be verified.
+
 ## 1.22.3 — Reduce ASS flicker, timing latency and cached-track startup
 
 - Invalidate stale ASS canvas pixels at the start of a video seek, including paused seeks that land between subtitle cues, without blanking ordinary playback.
