@@ -179,6 +179,75 @@ test('episode detail More options exposes the same source choices and Back resto
   await expect(more).toBeFocused();
 });
 
+test('detail action-row status shows playable stream choices and updates without moving focus',async({page})=>{
+  const calls=await seasonServer(page,true);
+  await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+  const status=page.locator('.detail-playback-tracks');
+  await expect(status).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, English · AAC, Off');
+  await expect(status.locator('svg')).toHaveCount(2);
+  await expect(status).not.toHaveAttribute('data-focus',/./);
+  const row=page.locator('.detail-actions');
+  const geometry=await page.evaluate(()=>{
+    const status=document.querySelector('.detail-playback-tracks').getBoundingClientRect();
+    const row=document.querySelector('.detail-actions').getBoundingClientRect();
+    const hero=document.querySelector('.detail').getBoundingClientRect();
+    return {right:hero.right-status.right, bottom:row.bottom-status.bottom,
+      left:status.left-hero.left, width:hero.width};
+  });
+  expect(geometry.right).toBeGreaterThanOrEqual(-1);
+  expect(geometry.right).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.bottom)).toBeLessThanOrEqual(1);
+  expect(geometry.left).toBeGreaterThanOrEqual(geometry.width*.6-1);
+  const more=page.getByRole('button',{name:'More options',exact:true});
+  await more.click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.episode-track-column').first().getByRole('button',{name:'French'}).click();
+  await page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}).click();
+  await expect(status).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await page.getByRole('button',{name:/Season 1/}).click();
+  await expect(page.locator('.detail-playback-tracks')).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
+  await page.getByRole('button',{name:/The First Episode/}).first().click();
+  await expect(page.locator('.detail-playback-tracks')).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
+  // Back restores a detached detail DOM rather than rebuilding its route.
+  // Its status must still respond to choices made after the restoration.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(status).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
+  await more.click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.episode-track-column').last().getByRole('button',{name:'Off'}).click();
+  await expect(status).toHaveAttribute('aria-label',
+    'Audio & Subtitles: 1080p, H.264, French · AC3, Off');
+  await page.setViewportSize({width:920,height:600});
+  await expect(status.locator('.detail-playback-tracks-line')).toContainText('Off');
+  const fitted=await status.evaluate(node=>({
+    rendered:node.querySelector('.detail-playback-tracks-line').getBoundingClientRect().width,
+    available:node.clientWidth
+  }));
+  expect(fitted.rendered).toBeLessThanOrEqual(fitted.available+1);
+});
+
+test('movie track status follows version changes and selected subtitles including Off',async({page})=>{
+  await movieServer(page);
+  await page.getByRole('button',{name:'Example Movie'}).first().click();
+  const status=page.locator('.detail-playback-tracks');
+  await expect(status).toHaveAttribute('aria-label', 'Audio & Subtitles: H.264, English · AAC, Off');
+  await page.getByRole('combobox',{name:'Media version'}).selectOption('1');
+  await expect(status).toHaveAttribute('aria-label', 'Audio & Subtitles: H.264, French · AAC, Off');
+  await page.getByRole('button',{name:'More options',exact:true}).click();
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}).click();
+  await expect(status).toHaveAttribute('aria-label','Audio & Subtitles: H.264, French · AAC, Spanish · SRT');
+});
+
 test('movie context menu selects tracks for the chosen version before starting playback',async({page})=>{
   const calls=await movieServer(page);
   await page.getByRole('button',{name:'Example Movie'}).first().click();

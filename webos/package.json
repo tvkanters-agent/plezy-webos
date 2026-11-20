@@ -1,6 +1,6 @@
 {
   "name": "plezy-webos",
-  "version": "1.13.2",
+  "version": "1.14.0",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",

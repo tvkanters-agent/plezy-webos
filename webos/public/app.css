@@ -464,6 +464,17 @@ nav button svg { width:27px; height:27px; flex:0 0 27px; }
 .detail-actions button svg { width:30px; height:30px; flex:0 0 30px; }
 .detail-actions button.detail-icon svg { width:30px; height:30px; flex:0 0 30px; }
 .detail-actions button.detail-play { min-height:56px; height:56px; padding:0 22px; }
+.detail-playback-tracks { position:absolute; right:0; height:56px;
+  display:-webkit-flex; display:flex; -webkit-align-items:flex-end; align-items:flex-end;
+  -webkit-justify-content:flex-end; justify-content:flex-end;
+  color:#ededed; font-size:15px; font-weight:600; letter-spacing:.1px;
+  line-height:1.2; white-space:nowrap; pointer-events:none; }
+.detail-playback-tracks-line { display:-webkit-inline-flex; display:inline-flex;
+  -webkit-flex:0 0 auto; flex:0 0 auto; -webkit-align-items:center; align-items:center; }
+.detail-track-unit { display:-webkit-inline-flex; display:inline-flex;
+  -webkit-align-items:center; align-items:center; }
+.detail-track-unit svg { width:17px; height:17px; margin-right:4px; flex:0 0 17px; }
+.detail-track-separator { white-space:pre; }
 .library-toolbar-button { min-height:54px; padding:10px 20px; border-radius:27px; }
 .library-toolbar-button svg { width:29px; height:29px; flex:0 0 29px; margin-right:10px; }
 .player-buttons .transport-icon { width:52px; height:52px; min-width:52px; border-radius:26px; }

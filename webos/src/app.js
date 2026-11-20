@@ -4,6 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, mediaSourceTracks, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {EpisodeTrackPreferences} from './episode-track-preferences.js';
+import {previewDetailTracks} from './detail-track-status.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
@@ -41,6 +42,8 @@ let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = n
 let episodeTrackReturnFocus = null;
 let episodeTrackGeneration = 0;
 const episodeTrackChoices = new EpisodeTrackPreferences();
+let updateDetailTrackStatus = null;
+window.addEventListener('resize', () => updateDetailTrackStatus?.());
 let activeAlphabet = null;
 const simklTracker = new SimklTracker(() => state.simkl, session => {
   state.simkl = session; persist();
@@ -89,6 +92,7 @@ function playbackClosed() {
     refreshDetailAction(main.querySelector('.detail-actions .detail-watched'),
       updated.watched ? 'Mark unwatched' : 'Mark watched',
       updated.watched ? 'unwatched' : 'watched');
+    updateDetailTrackStatus?.(updated);
   }).catch(() => { /* Keep the mounted page usable if metadata is offline. */ });
 }
 let rememberedPaneFocus = null;
@@ -256,22 +260,35 @@ const iconShapes = {
     ['path',{d:'M18 2l4 4-4 4 M18 14l4 4-4 4 M2 18h2.5c6 0 6-12 12-12H22 M2 6h2.5c2.8 0 4.3 2.6 5.8 5.4 M14.3 14.2c1.3 2.4 2.7 3.8 6.2 3.8H22',
       fill:'none',stroke:'currentColor','stroke-width':'2',
       'stroke-linecap':'round','stroke-linejoin':'round'}]
+  ],
+  volume: [
+    ['path',{d:'M3 9v6h4l5 5V4L7 9H3z',fill:'currentColor'}],
+    ['path',{d:'M15 8a5 5 0 0 1 0 8 M17.5 5.5a8.5 8.5 0 0 1 0 13',
+      fill:'none',stroke:'currentColor','stroke-width':'2','stroke-linecap':'round'}]
+  ],
+  subtitles: [
+    ['rect',{x:'2',y:'4',width:'20',height:'16',rx:'2',fill:'currentColor'}],
+    ['path',{d:'M5 13h6 M5 16h8 M14 13h5 M16 16h3',
+      stroke:'#15171b','stroke-width':'1.6','stroke-linecap':'round'}]
   ]
 };
+function detailSvg(symbol) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox','0 0 24 24');
+  svg.setAttribute('aria-hidden','true');
+  iconShapes[symbol].forEach(([tag, attributes]) => {
+    const shape = document.createElementNS('http://www.w3.org/2000/svg',tag);
+    Object.keys(attributes).forEach(name => shape.setAttribute(name,attributes[name]));
+    svg.appendChild(shape);
+  });
+  return svg;
+}
 function detailButton(label, action, symbol, className = '') {
   const control = button(label, action, className);
   control.setAttribute('aria-label', label);
   control.setAttribute('title', label);
   if (symbol && iconShapes[symbol]) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox','0 0 24 24');
-    svg.setAttribute('aria-hidden','true');
-    iconShapes[symbol].forEach(([tag, attributes]) => {
-      const shape = document.createElementNS('http://www.w3.org/2000/svg',tag);
-      Object.keys(attributes).forEach(name => shape.setAttribute(name,attributes[name]));
-      svg.appendChild(shape);
-    });
-    control.insertBefore(svg,control.firstChild);
+    control.insertBefore(detailSvg(symbol),control.firstChild);
   }
   return control;
 }
@@ -561,6 +578,7 @@ async function showMediaTrackSheet(item, resolveEpisode = null) {
         const label = track.primary || track.label;
         const choice = button('', () => {
           episodeTrackChoices.record(detailed, mediaIndex, kind, track);
+          updateDetailTrackStatus?.(detailed);
           // Keep both columns open so audio and subtitle can be chosen in one
           // visit. Update only this column's tick and pressed state.
           Array.from(column.querySelectorAll('button')).forEach(option => {
@@ -826,6 +844,7 @@ function restoreRootPage(entry) {
   cancelAuth(); detailMenu = null;
   main.textContent = '';
   main.appendChild(entry.snapshot);
+  updateDetailTrackStatus = null;
   main.scrollTop = route.scroll || 0;
   restoreShelfScrolls(route.shelfScrolls);
   main.classList.toggle('has-alpha-bar', !!entry.alphabet);
@@ -969,6 +988,9 @@ function back() {
       cancelAuth();
       main.textContent = '';
       main.appendChild(previous.snapshot);
+      const restoredTracks = main.querySelector('.detail-playback-tracks');
+      updateDetailTrackStatus = restoredTracks?._updateTracks || null;
+      if (restoredTracks?.hidden) restoredTracks._probeTracks?.();
       forEachPagedGrid(main, node => node._resumeCatalog(revision));
       navigation();
       main.scrollTop = route.scroll || 0;
@@ -1591,6 +1613,7 @@ async function render(prepared = null) {
   const focusFromRail = enterPaneAfterNavigation;
   enterPaneAfterNavigation = false;
   let preferredFocus = null, detailRefresh = null;
+  updateDetailTrackStatus = null;
   cancelAuth(); detailMenu = null;
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
@@ -2187,6 +2210,78 @@ async function render(prepared = null) {
         if(firstEpisode)return firstEpisode;
         return null;
       };
+      // Native _buildPlaybackTracksStatus sits at the far right of the hero's
+      // action row, outside its 60% text column. It is not a focus target.
+      const trackStatus = el('div', undefined, 'detail-playback-tracks');
+      trackStatus.hidden = true;
+      trackStatus.setAttribute('role','note');
+      const statusLine = el('div', undefined, 'detail-playback-tracks-line');
+      trackStatus.append(statusLine);
+      let statusTarget = null, trackProbeGeneration = 0;
+      const trackStatusLive = () => currentApi === api && route.type === 'detail' &&
+        String(route.id) === String(detailRoute.id) && trackStatus.isConnected;
+      const paintTrackStatus = incoming => {
+        if (!trackStatusLive()) return;
+        if (incoming && statusTarget && String(incoming.id) === String(statusTarget.id))
+          Object.assign(statusTarget, incoming);
+        const index = item.folder ? 0 : route.mediaIndex || 0;
+        const preview = statusTarget && previewDetailTracks(statusTarget, index, episodeTrackChoices);
+        trackStatus.hidden = !preview;
+        if (!preview) return;
+        trackStatus.setAttribute('aria-label', preview.label);
+        // The action row and the right-side note share a baseline. Avoid
+        // stretching the left action row or adding a sixth D-pad stop.
+        const container = content.getBoundingClientRect();
+        const buttons = Array.from(actions.children).filter(node => !node.hidden);
+        const last = buttons[buttons.length - 1]?.getBoundingClientRect();
+        const left = Math.max(container.width * .60, last ? last.right - container.left + 12 : 0);
+        trackStatus.style.left = Math.min(container.width, left) + 'px';
+        trackStatus.style.top = (actions.getBoundingClientRect().bottom - container.top - 56) + 'px';
+        // FittedMetadataLine's priority order: long codec details, picture
+        // labels, audio language, then the subtitle decision. Never clip the
+        // trailing subtitle text because a preceding quality label is long.
+        const units = preview.parts.map(part => ({...part, visible:true, showDetail:!!part.detail}));
+        const draw = () => {
+          statusLine.textContent = '';
+          units.filter(part => part.visible).forEach((part, i) => {
+            if (i) statusLine.append(el('span', '  •  ', 'detail-track-separator'));
+            const unit = el('span', undefined, 'detail-track-unit');
+            if (part.kind) unit.append(detailSvg(part.kind === 'audio' ? 'volume' : 'subtitles'));
+            unit.append(el('span', part.primary));
+            if (part.showDetail) unit.append(el('span', ' · ' + part.detail));
+            statusLine.append(unit);
+          });
+        };
+        draw();
+        for (let attempt = 0; attempt < units.length * 2 &&
+             statusLine.getBoundingClientRect().width > trackStatus.clientWidth + 1; attempt++) {
+          let candidate = -1, priority = -1;
+          units.forEach((part, i) => {
+            const next = part.showDetail ? 3 : part.visible ? part.priority : -1;
+            if (next >= priority && next >= 0) { priority = next; candidate = i; }
+          });
+          if (candidate < 0) break;
+          if (units[candidate].showDetail) units[candidate].showDetail = false;
+          else units[candidate].visible = false;
+          draw();
+        }
+      };
+      updateDetailTrackStatus = paintTrackStatus;
+      const probeTrackStatus = async () => {
+        const generation = ++trackProbeGeneration;
+        try {
+          const target = item.folder ? await chooseEpisode() : item;
+          if (!target || !trackStatusLive() || generation !== trackProbeGeneration) return;
+          const index = item.folder ? 0 : route.mediaIndex || 0;
+          const detailed = sourceStreamsComplete(target,index) ? target :
+            await currentApi.detail(target.id,target.type);
+          if (!trackStatusLive() || generation !== trackProbeGeneration) return;
+          statusTarget = detailed;
+          paintTrackStatus();
+        } catch (_) { /* A failed metadata probe must not prevent Play. */ }
+      };
+      trackStatus._updateTracks = paintTrackStatus;
+      trackStatus._probeTracks = probeTrackStatus;
       if (item.folder && (isPlexShow || isSeason)) {
         const expectedRevision = revision, currentApi = api;
         actions.append(detailButton('Play', async () => {
@@ -2239,7 +2334,11 @@ async function render(prepared = null) {
             option.value = String(index); select.append(option);
           });
           select.value = String(route.mediaIndex || 0);
-          select.onchange = () => { route.mediaIndex = Number(select.value); };
+          select.onchange = () => {
+            route.mediaIndex = Number(select.value);
+            trackStatus.hidden = true;
+            probeTrackStatus();
+          };
           version.append(select); actions.append(version);
         }
         const restart = detailButton('Play from beginning',
@@ -2276,6 +2375,7 @@ async function render(prepared = null) {
         }, () => { ++detailWatchEpoch; }).concat(extra) : extra));
       }
       info.append(actions);
+      content.append(trackStatus);
       // The parent-show link precedes season and episode actions. Start TV
       // focus on Play/Resume, keeping the link available via D-pad navigation.
       if (isSeason || isEpisode) preferredFocus = actions.querySelector('.detail-play');
@@ -2286,6 +2386,9 @@ async function render(prepared = null) {
       else if (isSeason && item.background)
         content.append(poster(item.poster ? item : (parentShow || item), {detail:true}));
       main.append(content);
+      // As in native _scheduleTargetProbe, allow the detail to paint before
+      // fetching the playable episode's stream catalog.
+      setTimeout(() => { if (valid() && content.isConnected) probeTrackStatus(); }, 350);
       if (item.folder) {
         const currentApi = api;
         const grouped = currentApi instanceof Plex && item.type === 'collection';
