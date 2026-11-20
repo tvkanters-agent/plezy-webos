@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {subtitleStyle} from './subtitle-style.js';
-export const VERSION = '1.18.0';
+export const VERSION = '1.18.1';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -92,7 +92,9 @@ export function readState(storage) {
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
       // Existing installs start on the known pre-Direct-Play Plex pipeline.
       enhancedPlayback: state.enhancedPlayback === true,
-      subtitleDiagnostics: state.subtitleDiagnostics === true,
+      // One opt-in switch gates all current and future diagnostic features.
+      // Honor users who enabled the SRT-specific v1.18.0 switch on upgrade.
+      diagnosticsEnabled: state.diagnosticsEnabled === true || state.subtitleDiagnostics === true,
       skipIntroMode: ['off','button','auto'].includes(state.skipIntroMode) ? state.skipIntroMode : 'button',
       skipCreditsMode: ['off','button','auto'].includes(state.skipCreditsMode) ? state.skipCreditsMode : 'button',
       autoSkipDelay: Number.isInteger(state.autoSkipDelay) && state.autoSkipDelay >= 1 && state.autoSkipDelay <= 30
@@ -108,7 +110,7 @@ export function readState(storage) {
         ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : [],
       ...subtitleStyle(state)};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto', enhancedPlayback: false,
-    subtitleDiagnostics: false,
+    diagnosticsEnabled: false,
     skipIntroMode: 'button', skipCreditsMode: 'button',
     autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
     simkl: null, mdblistApiKey: '', librariesHidden: false, sidebarCollapsed: false, hiddenLibraryIds: [],

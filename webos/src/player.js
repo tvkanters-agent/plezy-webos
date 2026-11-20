@@ -764,7 +764,7 @@ export class Player {
     this.api = api; this.item = item; this.options = options;
     const playbackPreferences = this.preferences();
     this.enhancedPlaybackActive = playbackPreferences?.enhancedPlayback === true;
-    const diagnosticOpenedAt = playbackPreferences?.subtitleDiagnostics === true ? Date.now() : 0;
+    const diagnosticOpenedAt = playbackPreferences?.diagnosticsEnabled === true ? Date.now() : 0;
     if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
       this.subtitleOverlay.dispose();
       this.subtitleOverlay = null;

@@ -32,12 +32,13 @@ test('enhanced playback is opt-in and persists only an explicit enabled setting'
   }
   assert.equal(readState({getItem:()=>'{broken'}).enhancedPlayback,false);
 });
-test('subtitle diagnostics requires an explicit true setting',()=>{
+test('general diagnostics defaults off, requires true and upgrades the previous SRT setting',()=>{
   for (const [saved,expected] of [
-    [{},false],[{subtitleDiagnostics:false},false],[{subtitleDiagnostics:true},true],
-    [{subtitleDiagnostics:'true'},false],[{subtitleDiagnostics:1},false]
-  ]) assert.equal(readState({getItem:()=>JSON.stringify(saved)}).subtitleDiagnostics,expected);
-  assert.equal(readState({getItem:()=>'{broken'}).subtitleDiagnostics,false);
+    [{},false],[{diagnosticsEnabled:false},false],[{diagnosticsEnabled:true},true],
+    [{diagnosticsEnabled:'true'},false],[{diagnosticsEnabled:1},false],
+    [{subtitleDiagnostics:true},true],[{subtitleDiagnostics:'true'},false]
+  ]) assert.equal(readState({getItem:()=>JSON.stringify(saved)}).diagnosticsEnabled,expected);
+  assert.equal(readState({getItem:()=>'{broken'}).diagnosticsEnabled,false);
 });
 test('HTTP failures are actionable and do not expose token URLs', async () => {
   const restore=mock(async()=>new Response('',{status:401}));

@@ -1866,7 +1866,7 @@ for (const enabled of [false,true]) {
       await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
         Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
           {streamType:3,id:31,codec:'srt',index:2,selected:1}
-        ]}]}]},undefined,[],{subtitleDiagnostics:enabled});
+        ]}]}]},undefined,[],{diagnosticsEnabled:enabled});
       const panel=page.locator('.player-subtitle-diagnostics');
       if (!enabled) await expect(panel).toHaveCount(0);
       await page.locator('[data-action="pause"]').click();

@@ -2864,9 +2864,7 @@ function settingsSubpage(page,serverId) {
     ]);
     settingsGroup('Subtitles',[
       settingsTile('Subtitle Styling','Customize subtitle appearance','subtitles',
-        ()=>go({type:'settings-page',page:'subtitle-styling'}),'subtitle-styling'),
-      settingsToggle('subtitleDiagnostics','Subtitle diagnostics',
-        'Off by default. Show on-screen timing for embedded SRT while playing; applies to the next playback.','info')
+        ()=>go({type:'settings-page',page:'subtitle-styling'}),'subtitle-styling')
     ]);
     const skipModes=[['off','Off'],['button','Show skip button'],['auto','Automatic skip']];
     settingsGroup('Auto-play & Skip',[
@@ -2990,6 +2988,10 @@ function settingsSubpage(page,serverId) {
     about.append(logo,el('h2','Plezy'),el('p','Version '+VERSION,'muted'),
       el('p','Community port for webOS 4.x and newer. Account tokens are stored on this TV; passwords are not. Removing a connection clears its token.'));
     main.append(about);
+    settingsGroup('Diagnostics',[
+      settingsToggle('diagnosticsEnabled','Enable diagnostics',
+        'Show optional on-screen diagnostics during playback. Off by default; applies to the next playback.','info')
+    ]);
   }
 }
 function field(form, text, type = 'text', value = '') {
