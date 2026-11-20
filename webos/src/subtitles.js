@@ -18,18 +18,54 @@ function embeddedSubtitleType(content) {
   throw new Error('Plex did not return a text subtitle file.');
 }
 
-async function downloadSubtitle(asset, signal) {
+async function subtitleRequest(signal, run) {
+  const controller = new AbortController();
+  let timer;
+  let refresh;
+  let cancel;
+  const deadline = new Promise((_, reject) => {
+    cancel = () => {
+      const error = new Error('Subtitle request was aborted.');
+      error.name = 'AbortError';
+      reject(error);
+      controller.abort();
+    };
+    refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        reject(new Error('Subtitle download timed out.'));
+        controller.abort();
+      }, 30000);
+    };
+    refresh();
+  });
+  if (signal.aborted) cancel();
+  else signal.addEventListener('abort', cancel);
+  try {
+    return await Promise.race([run(controller.signal, refresh), deadline]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', cancel);
+  }
+}
+
+async function downloadSubtitle(asset, signal, position, preview) {
   if (asset.partUrl) {
     try {
-      return await extractMatroskaSubtitle(asset, signal);
+      return await subtitleRequest(signal, (requestSignal, refresh) =>
+        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, async preview(content) {
+          if (!requestSignal.aborted) await preview(content);
+        }}));
     } catch (error) {
       if (signal.aborted) throw error;
       console.info('Could not read embedded subtitle from MKV:', error.message);
     }
   }
-  const response = await fetch(asset.url, {signal});
-  if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
-  return response.text();
+  return subtitleRequest(signal, async requestSignal => {
+    const response = await fetch(asset.url, {signal:requestSignal});
+    if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
+    return response.text();
+  });
 }
 
 export class SubtitleOverlay {
@@ -74,9 +110,13 @@ export class SubtitleOverlay {
 
   clear() {
     ++this.generation;
-    this.stopClock();
     if (this.abort) this.abort.abort();
     this.abort = null;
+    this.releaseRenderer();
+  }
+
+  releaseRenderer() {
+    this.stopClock();
     const renderer = this.renderer;
     this.renderer = null;
     this.kind = null;
@@ -89,43 +129,44 @@ export class SubtitleOverlay {
     this.element.textContent = '';
   }
 
-  async load(asset, offsetMs) {
+  async load(asset, offsetMs, position = this.video.currentTime) {
     this.clear();
     if (!asset) return;
     const generation = this.generation;
     this.offsetMs = offsetMs;
-    this.abort = new AbortController();
-    const controller = this.abort;
-    let timer;
-    let content;
+    const controller = this.abort = new AbortController();
+    const render = content => this.render(asset, content, generation);
     try {
-      const download = downloadSubtitle(asset, controller.signal);
-      const deadline = new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error('Subtitle download timed out.'));
-          controller.abort();
-        }, 30000);
-      });
-      content = await Promise.race([download, deadline]);
+      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render);
+      await render(content);
     } finally {
-      clearTimeout(timer);
       if (this.abort === controller) this.abort = null;
     }
+  }
+
+  async render(asset, content, generation) {
     if (generation !== this.generation) return;
     const type = asset.embedded ? embeddedSubtitleType(content) : asset.format === 'ass' ? 'ssa' : 'srt';
     if (asset.format === 'srt' || type === 'srt' || type === 'vtt') {
       const track = await parseText(content, {type});
       if (!track.cues.length && content.trim()) throw new Error('Subtitle file contains no readable cues.');
       if (generation !== this.generation) return;
-      const renderer = new CaptionsRenderer(this.element);
+      if (this.kind && this.kind !== 'srt') this.releaseRenderer();
+      const renderer = this.renderer || new CaptionsRenderer(this.element);
       this.renderer = renderer;
       this.kind = 'srt';
       renderer.changeTrack(track);
       this.update(this.offsetMs);
       this.startClock();
     } else if (asset.format === 'ass') {
+      if (this.kind === 'ass') {
+        this.renderer.setTrack(content);
+        this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+        return;
+      }
       if (typeof window.SubtitlesOctopus !== 'function')
         throw new Error('SubtitlesOctopus is unavailable');
+      if (this.kind) this.releaseRenderer();
       // The worker is loaded only for ASS/SSA; webOS 4.x uses its non-WASM build.
       const renderer = new window.SubtitlesOctopus({
         video: this.video, subContent: content, debug:true,

@@ -1,3 +1,7 @@
+## 1.14.1
+
+- Render indexed MKV subtitles near the playback position as they arrive. Read compressed ASS/SRT and cue indexes without relative block offsets.
+
 ## 1.13.2
 
 - Read indexed MKV subtitles directly from Plex media byte ranges so embedded SRT and ASS sync can work even if the Plex subtitle endpoint fails.

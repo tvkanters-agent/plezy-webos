@@ -819,7 +819,7 @@ export class Player {
         if (generation === this.generation && this.session === session)
           this.subtitleFailed(error, session);
       };
-      if (session.subtitleAsset) this.subtitleOverlay.load(session.subtitleAsset, this.subtitleSyncOffsetMs)
+      if (session.subtitleAsset) this.subtitleOverlay.load(session.subtitleAsset, this.subtitleSyncOffsetMs, session.start)
         .catch(error => {
           if (generation === this.generation && this.session === session && error.name !== 'AbortError')
             this.subtitleFailed(error, session);

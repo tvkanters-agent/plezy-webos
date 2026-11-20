@@ -1,22 +1,24 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {assFixture} from './fixtures/matroska.cjs';
 import {extractMatroskaSubtitle} from '../src/matroska-subtitles.js';
 
 const movie = await readFile(new URL('./fixtures/embedded-subtitles.mkv', import.meta.url));
 const asset = {partUrl:'http://plex.test/library/parts/27/file.mkv', partSize:movie.length};
 
-function serveRanges(t) {
+function serveRanges(t, source = movie, beforeRead = () => {}) {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, asset.partUrl);
     const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
     assert.ok(match, 'download a range of the original media, without starting any transcode');
     const start = Number(match[1]);
-    const end = Math.min(Number(match[2]) + 1, movie.length);
+    const end = Math.min(Number(match[2]) + 1, source.length);
     requests.push({start, end});
-    return new Response(movie.subarray(start, end), {status:206,
-      headers:{'Content-Range':'bytes ' + start + '-' + (end - 1) + '/' + movie.length}});
+    await beforeRead(start);
+    return new Response(source.subarray(start, end), {status:206,
+      headers:{'Content-Range':'bytes ' + start + '-' + (end - 1) + '/' + source.length}});
   });
   return requests;
 }
@@ -35,6 +37,28 @@ test('extracts actual indexed SRT and ASS blocks with full-title times and style
   assert.match(ass, /^\[V4\+ Styles\]/m);
   assert.match(ass, /Dialogue: 0,0:00:03\.00,0:00:05\.00,Default,,0,0,0,,\{\\pos\(300,75\)\}Embedded ASS/);
   assert.doesNotMatch(ass, /Embedded SRT/);
+});
+
+test('reads compressed MKV ASS without relative cue offsets or a stored Events section', async t => {
+  const {source, firstCluster} = assFixture();
+  let release;
+  let sawPreview;
+  const pending = new Promise(resolve => { release = resolve; });
+  const preview = new Promise(resolve => { sawPreview = resolve; });
+  serveRanges(t, source, start => start === firstCluster ? pending : undefined);
+  const reading = extractMatroskaSubtitle({...asset,partSize:source.length,streamIndex:0,format:'ass'},
+    new AbortController().signal, {position:160, preview:sawPreview});
+  // Playback can already present the resumed cue while early distant clusters
+  // are still waiting on the server.
+  try {
+    const firstCaptions = await Promise.race([preview, reading.then(() => '')]);
+    assert.match(firstCaptions, /\[Events\]\nFormat: Layer, Start, End/);
+    assert.match(firstCaptions, /0:02:40\.01,0:02:41\.01,Default,,0,0,0,,Subtitle 16/);
+    assert.doesNotMatch(firstCaptions, /Subtitle 0\b/);
+  } finally {
+    release();
+  }
+  assert.match(await reading, /0:00:00\.01,0:00:01\.01,Default,,0,0,0,,Subtitle 0/);
 });
 
 test('refuses mismatched track IDs, ignored ranges and cancellation', async t => {
