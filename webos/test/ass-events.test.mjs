@@ -110,7 +110,8 @@ test('paused ASS imports redraw nearby cues without repainting every distant bat
     'Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Old sign '+i);
   appender.remember(header+first+'\n'+[important,...unrelated].join('\n')+'\n');
   appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
-  t.mock.timers.tick(100);
+  // Node's mocked timers execute newly enqueued callbacks on the next tick.
+  for(let i=0;i<4;i++) t.mock.timers.tick(8);
   const batches=sent.filter(value=>value.target==='create-events');
   const force=sent.filter(value=>value.target==='plezy-force-frame');
   assert.equal(batches.length,3,'large tracks must still import all their events');
