@@ -1655,8 +1655,8 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     subtitleFontSize:40,subtitleTextColor:'#AA3311',subtitleBorderSize:2,
     subtitleBorderColor:'#00FF00',subtitlePosition:50,
     subtitleUseMargins:false,subtitleBold:true,subtitleItalic:true
-  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nSTYLE CUE\n');
-  await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
+  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nSTYLE CUE WAVY V\n');
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=10.5;});
   const captions=page.locator('.player-captions');
   await expect(captions).toContainText('STYLE CUE');
   await page.screenshot({path:testInfo.outputPath('srt-border-stroke.png')});
@@ -1669,32 +1669,56 @@ test('SRT playback applies saved Plezy text and border styling, including letter
     return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
       italic:computed.fontStyle,bg:computed.backgroundColor,
       shadow:computed.textShadow,strokeWidth:computed.webkitTextStrokeWidth,
-      strokeColor:computed.webkitTextStrokeColor,top:parseFloat(node.style.top),
+      top:parseFloat(node.style.top),
       cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
       cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
         node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
   });
   assertStyle(style);
-  const widths=await captions.evaluate(node=>{
-    const cue=node.querySelector('[part="cue"]');
-    const original=node.style.getPropertyValue('--cue-stroke-width');
-    const result=[0,2,5].map(value=>{
-      node.style.setProperty('--cue-stroke-width',value+'px');
-      return parseFloat(getComputedStyle(cue).webkitTextStrokeWidth);
-    });
-    node.style.setProperty('--cue-stroke-width',original);
-    return result;
-  });
-  expect(widths).toEqual([0,2,5]);
+  // A stroke on the glyph itself would cover its coloured fill and produce
+  // spikes at sharp letters. Compare pixels with/without the outline: the
+  // red fill must remain intact, while green outline pixels appear around it.
+  const originalShadow=await captions.evaluate(node=>node.style.getPropertyValue('--cue-text-shadow'));
+  const outlined=(await captions.screenshot()).toString('base64');
+  await captions.evaluate(node=>node.style.setProperty('--cue-text-shadow','none'));
+  const plain=(await captions.screenshot()).toString('base64');
+  const counts=await page.evaluate(async images=>{
+    const results=[];
+    for(const base64 of images){
+      const image=new Image();image.src='data:image/png;base64,'+base64;
+      await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;});
+      const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+      const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
+      const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+      let red=0,green=0;
+      for(let i=0;i<pixels.length;i+=4){
+        if(pixels[i]>160&&pixels[i+1]<65&&pixels[i+2]<40)red++;
+        if(pixels[i+1]>140&&pixels[i]<80&&pixels[i+2]<80)green++;
+      }
+      results.push({red,green});
+    }
+    return results;
+  },[outlined,plain]);
+  expect(counts[0].red).toBeGreaterThan(200);
+  expect(counts[0].red).toBeGreaterThanOrEqual(counts[1].red*0.98);
+  expect(counts[0].green).toBeGreaterThan(100);
+  expect(counts[1].green).toBe(0);
+  // Save a readable black-on-grey example containing W/V for visual review.
+  await captions.evaluate((node,shadow)=>{
+    node.style.setProperty('--cue-color','#FFFFFF');
+    node.style.setProperty('--cue-text-shadow',shadow.replace(/#00FF00/g,'#000000'));
+    node.parentElement.style.backgroundColor='#777777';
+    node.parentElement.querySelector('video').style.opacity='0';
+  },originalShadow);
+  await page.screenshot({path:testInfo.outputPath('srt-rounded-wavy-outline.png')});
   function assertStyle(actual){
     expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
     expect(actual.color).toBe('rgb(170, 51, 17)');
     expect(actual.weight).toBe('700');
     expect(actual.italic).toBe('italic');
     expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
-    expect(actual.shadow).toBe('none');
-    expect(parseFloat(actual.strokeWidth)).toBeGreaterThan(0);
-    expect(actual.strokeColor).toBe('rgb(0, 255, 0)');
+    expect(actual.shadow).toContain('rgb(0, 255, 0)');
+    expect(parseFloat(actual.strokeWidth)).toBe(0);
     expect(actual.top).toBeGreaterThan(12);
     expect(actual.cuePosition).not.toBe('');
     expect(actual.cueTopFraction).toBeGreaterThan(0.35);

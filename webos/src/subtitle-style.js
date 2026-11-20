@@ -28,6 +28,23 @@ export function subtitleStyle(values = {}) {
   return result;
 }
 
+// MPV's outline is drawn behind the glyph fill with rounded joins. WebKit
+// text-stroke is centred over the glyph and has sharp mitres on W/V, which
+// makes the text itself black and introduces spikes. Text shadows paint under
+// the text. Distribute their offsets around a circle (not a square), with
+// enough samples to avoid gaps even on diagonal strokes.
+export function subtitleOutline(size, color) {
+  if (!(size > 0)) return 'none';
+  const samples=Math.min(96,Math.max(12,Math.ceil(2*Math.PI*size/1.2)));
+  const shadows=[];
+  for (let i=0;i<samples;i++) {
+    const angle=2*Math.PI*i/samples;
+    shadows.push((size*Math.cos(angle)).toFixed(2)+'px '+
+      (size*Math.sin(angle)).toFixed(2)+'px 0 '+color);
+  }
+  return shadows.join(', ');
+}
+
 // object-fit:contain uses the video's decoded aspect ratio; with margins off
 // the overlay is clipped to the video frame rather than the letterbox bars.
 export function videoInsets(video, useMargins, fallbackAspect) {
@@ -48,13 +65,8 @@ export function applySrtStyle(element, video, values, fallbackAspect) {
   element.style.fontWeight=style.subtitleBold?'700':'400';
   element.style.fontStyle=style.subtitleItalic?'italic':'normal';
   element.style.setProperty('--cue-color',style.subtitleTextColor);
-  // CSS text shadows look uneven on glyph edges (especially at the top and
-  // bottom) and make adjacent border widths hard to distinguish. webOS's
-  // Chromium supports WebKit text strokes, which follow the glyph contour.
-  // A stroke is centred on the edge, hence 2x the requested outer width.
-  element.style.setProperty('--cue-stroke-width',(2*style.subtitleBorderSize*scale).toFixed(2)+'px');
-  element.style.setProperty('--cue-stroke-color',style.subtitleBorderColor);
-  element.style.setProperty('--cue-text-shadow','none');
+  element.style.setProperty('--cue-text-shadow',
+    subtitleOutline(style.subtitleBorderSize*scale,style.subtitleBorderColor));
   // Upstream's text settings contain no background, and unstyled SRT should
   // not acquire an artificial opaque box from Media Captions' defaults.
   element.style.setProperty('--cue-bg-color','transparent');
@@ -68,8 +80,7 @@ export function resetSrtStyle(element) {
   if (!element.style) return;
   for (const field of ['fontSize','fontWeight','fontStyle','top','right','bottom','left'])
     element.style[field]='';
-  for (const field of ['--cue-color','--cue-stroke-width','--cue-stroke-color',
-    '--cue-text-shadow','--cue-bg-color'])
+  for (const field of ['--cue-color','--cue-text-shadow','--cue-bg-color'])
     element.style.removeProperty(field);
 }
 
