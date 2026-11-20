@@ -733,3 +733,11 @@ even when it was Plex's default rather than an explicit user choice. If that
 PUT fails, abort the burn attempt: success on the HLS URL alone cannot prove
 any subtitle pixels were encoded. Browser and unit tests verify this request
 ordering for both embedded formats; live PMS output remains TV verification.
+
+### Enhanced subtitles with unavailable video dimensions
+
+MPV owns subtitle composition in Plezy. The webOS overlay waits for video
+startup before reading MKV ranges. Decoded-frame counters can establish video
+output while the hardware plane still reports zero intrinsic dimensions.
+Libass then sizes its canvas using the selected Plex media aspect ratio and
+the video element's layout box until intrinsic dimensions become available.

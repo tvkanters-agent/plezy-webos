@@ -541,6 +541,10 @@ export class Plex {
         subtitleAsset.streamIndex = selectedSubtitle.index;
       }
     }
+    if (subtitleAsset && subtitle.format === 'ass') {
+      const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);
+      if (Number.isFinite(aspect) && aspect > 0) subtitleAsset.aspectRatio = aspect;
+    }
     // Plezy's PlexClient.selectSubtitleStreamForBurn does this before its
     // transcode decision: the universal transcoder ignores subtitleStreamID
     // on the HLS URL and burns the part's *stored* selected stream instead.

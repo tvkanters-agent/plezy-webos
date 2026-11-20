@@ -1686,12 +1686,16 @@ test('failed MKV byte ranges and Plex extraction silently retry HLS with burned 
 });
 
 for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
-  test('MKV ' + codec.toUpperCase() + ' sync works from original file when Plex subtitle endpoint is unavailable',async({page})=>{
+  test('MKV ' + codec.toUpperCase() + ' sync works from original file when the decoder omits dimensions and Plex extraction is unavailable',async({page})=>{
     await page.addInitScript(()=>{
       window.WebAssembly=undefined;
+      // The hardware video plane can decode frames before exposing its size.
+      for (const key of ['videoWidth','videoHeight'])
+        Object.defineProperty(HTMLVideoElement.prototype,key,{get:()=>0});
+
       Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
     });
-    const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    const {calls}=await setup(page,{Media:[{aspectRatio:2.4,container:'mkv',videoCodec:'h264',audioCodec:'aac',
       Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
         {streamType:3,id:31,codec:'srt',index:2,selected:index===2},
         {streamType:3,id:32,codec:'ass',index:3,selected:index===3}
@@ -1709,6 +1713,13 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
         return false;
       });
     await expect.poll(cueDrawn,{timeout:10000}).toBe(true);
+    if (codec === 'ass') {
+      const ratio = await canvas.evaluate(el => el.clientWidth / el.clientHeight);
+      expect(ratio).toBeCloseTo(2.4, 2);
+    } else {
+      await expect(srt.locator('[part="cue"]')).toBeVisible();
+    }
+
 
     await page.getByRole('button',{name:'Playback settings'}).click();
     await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
