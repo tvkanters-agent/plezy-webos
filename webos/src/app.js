@@ -485,8 +485,8 @@ function detailMoreOptions(options, iconOnly = false) {
 }
 // EpisodeCard's context menu offers the watched actions for the fresh item
 // state, including BOTH actions for partially watched episodes (upstream
-// MediaContextMenu._buildItemMenuActions). Source track choices are available
-// before playback as a TV-specific entry to the original TrackSheet controls.
+// MediaContextMenu._buildItemMenuActions). Pre-play source choices reuse the
+// original TrackSheet controls for movies and playable episodes.
 function episodeMenuActions(item, onChanged = () => {}, onMarkStarted = () => {}) {
   const progress = item.resume > 0;
   const entries = [];
@@ -503,7 +503,7 @@ function episodeMenuActions(item, onChanged = () => {}, onMarkStarted = () => {}
   }
   if (!item.watched || progress) entries.push({label:'Mark as Watched',action:() => mark(true)});
   if (item.watched || progress) entries.push({label:'Mark as Unwatched',action:() => mark(false)});
-  entries.push({label:'Audio & Subtitles', action:() => showEpisodeTrackSheet(item)});
+  entries.push({label:'Audio & Subtitles', action:() => showMediaTrackSheet(item)});
   return entries;
 }
 function closeEpisodeTrackSheet() {
@@ -517,10 +517,12 @@ function closeEpisodeTrackSheet() {
 }
 // Pre-play track selection is a narrow webOS adaptation. The desktop
 // TrackSheet changes an already running MPV stream; the TV stores the same
-// source stream IDs on this episode and passes them to playback negotiation.
-async function showEpisodeTrackSheet(item) {
+// source IDs for the selected playable item and applies them on launch.
+// Show/season menus resolve the very episode their Play action would launch.
+async function showMediaTrackSheet(item, resolveEpisode = null) {
   const sourceApi = api, openedAt = revision, generation = ++episodeTrackGeneration;
-  const mediaIndex = route.type === 'detail' ? route.mediaIndex || 0 : 0;
+  const mediaIndex = !resolveEpisode && route.type === 'detail' && String(route.id) === String(item.id)
+    ? route.mediaIndex || 0 : 0;
   episodeTrackReturnFocus = document.activeElement;
   dialog.textContent = '';
   dialog.classList.add('episode-track-dialog');
@@ -532,12 +534,17 @@ async function showEpisodeTrackSheet(item) {
   dialog.hidden = false;
   focusWithoutJump(close, false);
   try {
-    // Plex listing rows commonly omit Stream. Never infer "no tracks" from
-    // a season's lightweight children response.
-    const detailed = episodeStreamsComplete(item, mediaIndex) ? item : await sourceApi.detail(item.id, 'episode');
+    const target = resolveEpisode ? await resolveEpisode() : item;
+    if (!target) throw new Error('No playable episodes were found.');
+    if (api !== sourceApi || revision !== openedAt || generation !== episodeTrackGeneration || dialog.hidden) return;
+    if (target !== item) heading.textContent = 'Audio & Subtitles · ' + target.title;
+    // Plex library cards and season rows commonly omit Part.Stream. Never
+    // infer "no tracks" from lightweight metadata, for movies or episodes.
+    const detailed = sourceStreamsComplete(target, mediaIndex) ? target :
+      await sourceApi.detail(target.id, target.type);
     if (api !== sourceApi || revision !== openedAt || generation !== episodeTrackGeneration || dialog.hidden ||
         !episodeTrackReturnFocus) return;
-    if (detailed !== item) Object.assign(item, detailed);
+    if (detailed !== target) Object.assign(target, detailed);
     const tracks = mediaSourceTracks(detailed, mediaIndex);
     const prior = episodeTrackChoices.resolve(detailed, mediaIndex, tracks);
     columns.textContent = '';
@@ -2214,6 +2221,7 @@ async function render(prepared = null) {
         const extra = [];
         if (parentShow) extra.push({label:'View series', action:() =>
           go({type:'detail',id:parentShow.id,kind:'show'})});
+        extra.push({label:'Audio & Subtitles', action:() => showMediaTrackSheet(item, chooseEpisode)});
         if (extra.length) actions.append(detailMoreOptions(extra));
       } else if (!item.folder) {
         const versions = api instanceof Plex ? item.raw.Media || [] : [];
@@ -2257,6 +2265,7 @@ async function render(prepared = null) {
         const extra = [
           {label:'Compatible playback', action:() => play(item, item.resume, true)}
         ];
+        if (!isEpisode) extra.push({label:'Audio & Subtitles', action:() => showMediaTrackSheet(item)});
         if (parentShow) extra.push({label:'View series', action:() =>
           go({type:'detail',id:parentShow.id,kind:'show'})});
         if (isEpisode && raw.parentRatingKey) extra.push({label:'View season', action:() =>
@@ -2387,18 +2396,19 @@ async function render(prepared = null) {
       focusFirst(main, focusFromRail ? preferredPaneControl() : preferredFocus, focusFromRail);
   }
 }
-function episodeStreamsComplete(item, mediaIndex) {
+function sourceStreamsComplete(item, mediaIndex) {
   return !!(item.raw?.Media?.[mediaIndex]?.Part?.[0]?.Stream ||
     item.raw?.MediaSources?.[mediaIndex]?.MediaStreams || item.raw?.MediaStreams);
 }
 async function play(item, start, transcode = false) {
   const sourceApi = api, sourceRoute = route, mediaIndex = route.mediaIndex || 0;
   const launch = ++playbackLaunch;
-  // Stream IDs are per-episode. Load the target episode's real catalog before
-  // carrying the player's semantic audio/subtitle choice from its siblings.
-  if (String(item.type).toLowerCase() === 'episode' && !episodeStreamsComplete(item, mediaIndex)) {
+  // Stream IDs belong to a specific media part. Resolve the complete catalog
+  // for movie and episode launch, including from lightweight Home cards.
+  const playable = ['movie','episode'].includes(String(item.type).toLowerCase());
+  if (playable && !sourceStreamsComplete(item, mediaIndex)) {
     try {
-      const detailed = await sourceApi.detail(item.id, 'episode');
+      const detailed = await sourceApi.detail(item.id, item.type);
       if (sourceApi !== api || sourceRoute !== route || launch !== playbackLaunch) return;
       Object.assign(item, detailed);
     } catch (error) {
@@ -2414,8 +2424,7 @@ async function play(item, start, transcode = false) {
   };
   return player.open(api, item, {start, mediaIndex,
     transcode: transcode || state.quality === 'transcode',
-    ...(String(item.type).toLowerCase() === 'episode'
-      ? episodeTrackChoices.resolve(item, mediaIndex, tracks) : {})});
+    ...(playable ? episodeTrackChoices.resolve(item, mediaIndex, tracks) : {})});
 }
 function settings() {
   title(api ? 'Settings' : 'Welcome to Plezy', 'Configure the media server, playback and library navigation.');
