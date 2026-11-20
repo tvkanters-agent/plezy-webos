@@ -768,22 +768,15 @@ longer subtitle tracks load while playback and the timing control stay active.
 For embedded SRT, the first preview now publishes after **one** nearest cue
 cluster, rather than waiting for 12. Remaining clusters still fill in batches
 without dropping any cues, and native webOS range reads remain serialized to
-protect video decoding. The optional range-read callback exposes elapsed
-milliseconds and byte counts for request-timing diagnostics without logging
-authenticated part URLs. Styled ASS retains its established initial batching
+protect video decoding. Styled ASS retains its established initial batching
 to avoid repeated heavy renderer initialization. This improves time-to-first
 SRT cue after the video starts; MKV index discovery and the decoder-first gate
 are unchanged. A delayed distant-cluster test covers early preview and final
 full-track fidelity; actual latency on LG hardware remains to be measured.
 
-Since the first-cluster optimization did not noticeably change SRT startup on
-the target TV, the player now logs one `Plezy embedded SRT timing:` JSON line
-when the first local cue renders. It measures the decoder-first gate after
-`video.load()`, the MKV index, first cue extraction, first render, and serial
-range requests/bytes. If the MKV reader fails and Plex supplies a standalone
-subtitle, `source` reports `plex-fallback`. The log never includes Plex part
-URLs or tokens; no additional network requests or altered playback decisions
-are introduced. These on-device measurements determine the next optimization.
+The diagnostic console logging added in v1.17.5 was removed in v1.17.7 at the
+user's request after the legacy webOS inspector proved unusable on their PC.
+The extraction and playback behavior remains the same as before the logging.
 
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time

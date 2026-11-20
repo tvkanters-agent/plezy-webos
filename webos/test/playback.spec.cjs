@@ -1940,11 +1940,6 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
 
 test('embedded MKV SRT displays the first cue while later cluster reads are blocked', async ({page}) => {
   const fixture = srtFixture(6000);
-  const timings = [];
-  page.on('console',message => {
-    if (message.text().startsWith('Plezy embedded SRT timing:'))
-      timings.push(JSON.parse(message.text().slice('Plezy embedded SRT timing:'.length).trim()));
-  });
   let releaseNext;
   const next = new Promise(resolve => { releaseNext = resolve; });
   const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
@@ -1957,14 +1952,6 @@ test('embedded MKV SRT displays the first cue while later cluster reads are bloc
     await page.locator('[data-action="pause"]').click();
     await page.locator('video').evaluate(element => { element.currentTime = 0.5; });
     await expect(page.locator('.player-captions [part="cue"]')).toContainText('Subtitle 0', {timeout:5000});
-    await expect.poll(() => timings.length).toBe(1);
-    expect(timings[0].source).toBe('mkv');
-    expect(timings[0].videoGateMs).toBeGreaterThanOrEqual(0);
-    expect(timings[0].indexMs).toBeGreaterThanOrEqual(0);
-    expect(timings[0].firstCueMs).toBeGreaterThanOrEqual(timings[0].indexMs);
-    expect(timings[0].firstRenderMs).toBeGreaterThanOrEqual(timings[0].firstCueMs);
-    expect(timings[0].rangeRequests).toBeGreaterThan(0);
-    expect(timings[0].rangeRequestMs).toBeGreaterThanOrEqual(0);
     expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
   } finally {
     releaseNext();
