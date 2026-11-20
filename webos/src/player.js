@@ -873,9 +873,13 @@ export class Player {
       // A decoder retry can deliberately disable MKV range reads while the
       // session still exposes its original partUrl. Its Plex sidecar is an
       // independent request and must not wait for the new video-ready gate.
-      if (this.enhancedPlaybackActive && session.subtitleAsset &&
-          (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles))
-        this.loadSubtitleAsset(session, generation);
+      if (this.enhancedPlaybackActive && session.subtitleAsset) {
+        if (session.subtitleAsset.format === 'ass' && session.subtitleAsset.partUrl &&
+            !this.options.skipMatroskaSubtitles)
+          this.startEmbeddedAssPreload(session, generation);
+        else if (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles)
+          this.loadSubtitleAsset(session, generation);
+      }
       this.report('start');
       this.interval = setInterval(() => this.report(this.video.paused ? 'paused' : 'playing'), 10000);
       // On webOS a non-started video often never reaches canplay/seeked.
@@ -908,18 +912,40 @@ export class Player {
       } : null;
       if (onTiming) onTiming('source', asset.partUrl ? 'MKV byte ranges' :
         this.options.skipMatroskaSubtitles ? 'Plex sidecar (decoder retry)' : 'Plex sidecar');
-      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position(), onTiming);
+      const gate = this.assSubtitleNetworkGate;
+      const networkReady = gate?.session === session ? gate.promise : null;
+      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs,
+        this.position(), onTiming, networkReady);
     } catch (error) {
       if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
     } finally {
       if (this.matroskaSubtitleSession === session) this.matroskaSubtitleSession = null;
     }
   }
+  startEmbeddedAssPreload(session, generation) {
+    if (!this.enhancedPlaybackActive || !this.subtitleOverlay ||
+        !session?.subtitleAsset?.partUrl || session.subtitleAsset.format !== 'ass' ||
+        this.options?.skipMatroskaSubtitles) return;
+    // Load cached track/font bytes and initialize libass in parallel with a
+    // native resume seek. A cache miss is held at the network gate until the
+    // video decoder produces its first frame.
+    let release;
+    const promise = new Promise(resolve => { release = resolve; });
+    this.assSubtitleNetworkGate = {session, generation, promise, release};
+    this.loadSubtitleAsset(session, generation);
+  }
   scheduleEmbeddedSubtitle() {
     if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset?.partUrl ||
         this.options?.skipMatroskaSubtitles ||
         this.initialSeekPending || this.pendingStart ||
-        this.subtitleLoadSession === this.session || this.embeddedSubtitleTimer != null) return;
+        this.embeddedSubtitleTimer != null) return;
+    const gate = this.assSubtitleNetworkGate;
+    if (gate?.session === this.session) {
+      this.assSubtitleNetworkGate = null;
+      gate.release();
+      return;
+    }
+    if (this.subtitleLoadSession === this.session) return;
     const session=this.session, generation=this.generation;
     this.embeddedSubtitleTimer=setTimeout(() => {
       this.embeddedSubtitleTimer=null;
@@ -993,6 +1019,9 @@ export class Player {
     if (this.skipButton) this.update();
     this.checkStartupProgress();
     this.showBuffering(false);
+    // Native resumed playback can land without dispatching another playing
+    // event. Release an uncached ASS read gate on a confirmed first frame.
+    this.scheduleEmbeddedSubtitle();
   }
   armStartupTimeout(session = this.session, generation = this.generation) {
     clearTimeout(this.startTimeout);
@@ -1030,7 +1059,7 @@ export class Player {
       if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('video', Date.now() - this.subtitleDiagnostics.openedAt);
       if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl &&
           !this.options.skipMatroskaSubtitles)
-        this.loadSubtitleAsset(this.session, this.generation);
+        this.scheduleEmbeddedSubtitle();
     }
   }
   position() {
@@ -1085,6 +1114,8 @@ export class Player {
     this.subtitleLoadSession = null;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
+    this.assSubtitleNetworkGate?.release();
+    this.assSubtitleNetworkGate = null;
     this.subtitleDiagnostics?.dispose();
     this.subtitleDiagnostics = null;
     this.matroskaSubtitleSession = null;
@@ -1156,6 +1187,8 @@ export class Player {
     this.embeddedSubtitleTimer = null;
     this.subtitleLoadSession = null;
     this.matroskaSubtitleSession = null;
+    this.assSubtitleNetworkGate?.release();
+    this.assSubtitleNetworkGate = null;
     this.subtitleOverlay.clear();
     this.subtitleDiagnostics?.dispose();
     this.subtitleDiagnostics = prefs?.diagnosticsEnabled === true && asset?.partUrl && asset.format === 'srt'
