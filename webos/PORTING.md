@@ -83,6 +83,24 @@ Native Plezy has a read-only playback-track preview on show/season details;
 this selectable menu is a user-requested webOS extension. Focus/Back and
 version/part ID forwarding have browser regression coverage, not TV validation.
 
+### Detail-page playback track status
+
+Native `media_detail/playback_tracks_status.dart` places a non-focusable,
+single-line preview at the right edge of the action row. It probes the source
+of the episode Play would start on a show/season and projects its video labels,
+selected audio with `volume_up_rounded` and subtitles (including `Off`) with
+`subtitles_rounded`. `FittedMetadataLine` drops technical details and picture
+labels before the subtitle choice when horizontal space is limited. The webOS
+status uses the same source catalog and the existing session track carry,
+updates after version/menu changes, and remains live after a detached detail
+screen is restored with Back. It never takes focus or starts playback.
+Chromium 53 renders equivalent inline SVGs and measured flex-line shedding in
+place of Flutter's icon font and `LayoutBuilder`. webOS has no native Plezy
+account-profile selection ladder; the preview follows the port's current
+pre-play stream resolution (explicit carry, server selected, then first audio),
+not an unimplemented profile preference. Browser geometry and behavior are
+tested; TV rendering remains unverified.
+
 Native `TrackSheet` closes on an MPV track tile tap. The user explicitly
 requested the opposite for this port: the player TrackSheet remains visible
 after a track selection, even when webOS must restart HLS to apply it. The
