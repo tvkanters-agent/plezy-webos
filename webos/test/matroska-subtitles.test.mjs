@@ -81,6 +81,48 @@ test('reads compressed MKV ASS without relative cue offsets or a stored Events s
   assert.match(await reading, /0:00:00\.01,0:00:01\.01,Default,,0,0,0,,Subtitle 0/);
 });
 
+test('reuses same-series ASS font attachments instead of downloading their bytes again', async t => {
+  const font = Buffer.alloc(8192, 0x41);
+  const {source} = assFixture(6000, 'ass', font);
+  const requests = serveRanges(t, source);
+  const selected = {...asset,partSize:source.length,streamIndex:0,format:'ass',fontScope:'plex:series-725'};
+  let loaded;
+  const read = () => extractMatroskaSubtitle(selected,new AbortController().signal,
+    {onFonts:fonts => {loaded = fonts;}});
+  await read();
+  assert.equal(loaded[0].bytes.length,font.length);
+  const firstReadCount = requests.filter(range => range.end - range.start === font.length).length;
+  assert.equal(firstReadCount,1,'the initial episode must read the embedded font once');
+  await read();
+  assert.equal(requests.filter(range => range.end - range.start === font.length).length,1,
+    'a sibling episode with the same font identity must reuse the cached bytes');
+  assert.deepEqual(Buffer.from(loaded[0].bytes),font);
+});
+
+test('same-sized updated ASS fonts are fetched instead of using stale cached glyphs', async t => {
+  const a=assFixture(6000,'ass',Buffer.alloc(8192,0x11));
+  const b=assFixture(6000,'ass',Buffer.alloc(8192,0x22));
+  let source=a.source;
+  let fullFontReads=0;
+  t.mock.method(globalThis,'fetch',async (url,options)=>{
+    assert.equal(url,asset.partUrl);
+    const [,begin,last]=/^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+    const start=Number(begin),end=Math.min(Number(last)+1,source.length);
+    if (end-start === 8192) fullFontReads++;
+    return new Response(source.subarray(start,end),{status:206,
+      headers:{'Content-Range':`bytes ${start}-${end-1}/${source.length}`}});
+  });
+  let fonts;
+  const read=()=>extractMatroskaSubtitle({...asset,partSize:source.length,
+    streamIndex:0,format:'ass',fontScope:'plex:series-updated'},
+  new AbortController().signal,{onFonts:value=>{fonts=value;}});
+  await read();
+  source=b.source;
+  await read();
+  assert.equal(fullFontReads,2,'the changed attachment must be read in full');
+  assert.equal(fonts[0].bytes[0],0x22,'the new glyph data must replace the stale cache entry');
+});
+
 test('embedded SRT previews the resume cue before reading distant clusters', async t => {
   const {source, firstCluster} = srtFixture();
   let release;
@@ -135,6 +177,7 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
   let maximum = 0;
   let aborted = 0;
   let mode = 'partial';
+  let source = movie;
   globalThis.XMLHttpRequest = class {
     open(method, url) {
       assert.equal(method,'GET');
@@ -144,11 +187,11 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
       assert.equal(name,'Range');
       const [, start, end] = /^bytes=(\d+)-(\d+)$/.exec(value);
       this.start = Number(start);
-      this.end = Math.min(Number(end), movie.length - 1);
+      this.end = Math.min(Number(end), source.length - 1);
     }
     getResponseHeader(name) {
-      if (name === 'Content-Range') return `bytes ${this.start}-${this.end}/${movie.length}`;
-      if (name === 'Content-Length' && mode === 'inflated length') return String(movie.length);
+      if (name === 'Content-Range') return `bytes ${this.start}-${this.end}/${source.length}`;
+      if (name === 'Content-Length' && mode === 'inflated length') return String(source.length);
       return null;
     }
     send() {
@@ -164,7 +207,7 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
           return;
         }
         assert.equal(this.responseType,'arraybuffer');
-        this.response = Uint8Array.from(movie.subarray(this.start,this.end + 1)).buffer;
+        this.response = Uint8Array.from(source.subarray(this.start,this.end + 1)).buffer;
         --active;
         this.onload();
       });
@@ -191,4 +234,12 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
   await assert.rejects(reading,{name:'AbortError'});
   assert.equal(aborted,3);
   assert.equal(active,0);
+  source=assFixture(6000,'ass',Buffer.alloc(8192,0x51)).source;
+  mode='partial';
+  let fonts;
+  assert.match(await extractMatroskaSubtitle({...asset,partSize:source.length,
+    streamIndex:0,format:'ass',fontScope:'native:series'},new AbortController().signal,
+  {onFonts:value=>{fonts=value;}}),/Dialogue:.*한/);
+  assert.equal(fonts[0].bytes.length,8192);
+  assert.equal(maximum,1,'font and subtitle XHRs must share the same native request queue');
 });

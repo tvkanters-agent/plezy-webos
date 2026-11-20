@@ -19,17 +19,17 @@ test('positive subtitle sync offsets delay SRT and ASS relative to video', () =>
   assert.equal(srt.currentTime, 18.75, 'SRT follows playback without reparsing on every frame');
 
   const times = [];
-  const ass = {timeOffset:0, setCurrentTime:value => times.push(value)};
+  const ass = {timeOffset:0, setIsPaused:(paused,value) => times.push([paused,value]),setRate:()=>{}};
   overlay.renderer = ass;
   overlay.kind = 'ass';
   overlay.update(1000);
   assert.equal(ass.timeOffset, -1);
-  assert.deepEqual(times, [19]);
+  assert.deepEqual(times, [[false,19]]);
   overlay.update(1000);
   assert.equal(times.length, 1, 'libass listens to video timeupdate itself');
   overlay.update(-500);
   assert.equal(ass.timeOffset, 0.5);
-  assert.deepEqual(times, [19, 20.5]);
+  assert.deepEqual(times, [[false,19],[false,20.5]]);
 });
 
 test('switching subtitle files releases the previous renderer and pending download', () => {
@@ -58,11 +58,44 @@ test('disabling enhanced playback disposes subtitle video listeners and renderin
   let destroyed=false;
   overlay.renderer={destroy(){destroyed=true;}};
   overlay.dispose();
-  assert.deepEqual(attached.map(entry=>entry.type),['playing','pause','ended','seeking','seeked','loadedmetadata']);
+  assert.deepEqual(attached.map(entry=>entry.type),
+    ['playing','pause','ended','seeking','waiting','seeked','ratechange','loadedmetadata']);
   assert.deepEqual(detached,attached);
   assert.equal(overlay.listeners.length,0);
   assert.equal(destroyed,true);
   assert.equal(element.textContent,'');
+});
+
+test('ASS sync restores video time, paused state and rate immediately after seeking', () => {
+  const listeners=new Map();
+  const video={currentTime:10,paused:false,ended:false,seeking:false,playbackRate:1,
+    addEventListener(type,callback){listeners.set(type,callback);},
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const clocks=[],rates=[];
+  overlay.kind='ass';
+  overlay.renderer={timeOffset:0,setIsPaused:(paused,time)=>clocks.push([paused,time]),
+    setRate:rate=>rates.push(rate),dispose(){}};
+  video.seeking=true;
+  listeners.get('seeking')();
+  assert.deepEqual(clocks.pop(),[true,10]);
+  video.currentTime=160;
+  video.seeking=false;
+  listeners.get('seeked')();
+  assert.deepEqual(clocks.pop(),[false,160],
+    'seeked must restore playing state, not only send the timestamp');
+  listeners.get('waiting')();
+  assert.deepEqual(clocks.pop(),[true,160], 'buffering must freeze the worker clock');
+  video.currentTime=161;
+  listeners.get('playing')();
+  assert.deepEqual(clocks.pop(),[false,161], 'playing must unfreeze the worker clock');
+  video.paused=true;
+  listeners.get('pause')();
+  assert.deepEqual(clocks.pop(),[true,161]);
+  video.playbackRate=1.25;
+  listeners.get('ratechange')();
+  assert.equal(rates.pop(),1.25);
+  overlay.dispose();
 });
 
 test('a sync adjustment during download supplies the current offset to ASS', async t => {

@@ -788,6 +788,25 @@ SRT cue after the video starts; MKV index discovery and the decoder-first gate
 are unchanged. A delayed distant-cluster test covers early preview and final
 full-track fidelity; actual latency on LG hardware remains to be measured.
 
+As of 1.21.0, styled ASS also previews from the nearest cluster. It now
+creates the libass track only once: the 4.1.0 event API is batched through a
+small worker-side adapter so subsequent MKV events are appended without
+reparsing the cumulative script. New events retain authored styles, override
+tags, layers and full-title cue timing; the worker's style query waits for
+actual initialization rather than the wrapper's five-second timeout. The
+font attachment reader overlaps metadata/cluster I/O, avoids individual
+requests for adjacent short EBML headers, and uses an IndexedDB font cache.
+Cache matches are scoped to the Plex series using filename, length and the
+first bytes; when an attachment has an EBML CRC, identical fonts can be reused
+across titles. Changed/missing fonts are fetched again. Font storage is
+opportunistic and cannot prevent playback if unavailable or out of quota.
+Libass workers are still recreated on each playback session, so native font
+parsing and legacy JS-worker startup costs have not been eliminated.
+ASS video-state updates additionally transmit their send timestamp, paused
+state, and rate; a small bundled-worker adaptation projects queued updates
+to receipt time while suppressing this projection during pauses/buffering.
+No other playback mode instantiates the custom ASS runtime.
+
 The diagnostic console logging added in v1.17.5 was removed in v1.17.7 at the
 user's request after the legacy webOS inspector proved unusable on their PC.
 The extraction and playback behavior remains the same as before the logging.

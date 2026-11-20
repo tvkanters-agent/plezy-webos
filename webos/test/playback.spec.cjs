@@ -42,7 +42,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
       const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range || '');
       if (!range) return route.fulfill({status:416,body:''});
       const start = +range[1], end = Math.min(+range[2], mkv.length - 1);
-      const status = await mkvFixture?.beforeRead(start);
+      mkvFixture?.onRange?.(start,end);
+      const status = await mkvFixture?.beforeRead?.(start);
       if (status) return route.fulfill({status,body:''});
       return route.fulfill({status:206,contentType:'video/x-matroska',
         headers:{'Content-Range':`bytes ${start}-${end}/${mkv.length}`},
@@ -1997,6 +1998,46 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
   expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
     .toEqual(['none']);
   expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
+});
+
+test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
+  const font=await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
+  const fixture=assFixture(6000,'ass',font);
+  const ranges=[];
+  const metadata={Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
+      {streamType:3,id:32,codec:'ass',index:0,selected:1}
+    ]}]}]};
+  await setup(page,metadata,undefined,[],{},null,null,null,true,
+    {source:fixture.source,onRange:(start,end)=>ranges.push({start,length:end-start+1})});
+  const paint=async()=>page.locator('video').evaluate(video=>{video.currentTime=0.5;});
+  const painted=()=>page.locator('#player canvas.libassjs-canvas').evaluate(canvas=>{
+    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+    for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
+    return false;
+  });
+  await page.locator('[data-action="pause"]').click();
+  await paint();
+  await expect.poll(painted,{timeout:30000}).toBe(true);
+  await expect.poll(()=>ranges.filter(entry=>entry.length===font.length).length).toBe(1);
+  // Wait for the asynchronous IndexedDB write; the next load is a new JS
+  // process context and cannot use the previous module's in-memory cache.
+  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+    const open=indexedDB.open('plezy-ass-fonts-v1',1);
+    open.onsuccess=()=>{
+      const count=open.result.transaction('fonts').objectStore('fonts').count();
+      count.onsuccess=()=>{resolve(count.result);open.result.close();};
+      count.onerror=()=>resolve(0);
+    };
+    open.onerror=()=>resolve(0);
+  }))).toBeGreaterThan(0);
+  await page.reload();
+  await page.getByRole('button',{name:'Test Movie',exact:true}).click();
+  await page.getByRole('button',{name:'Play',exact:true}).first().click();
+  await page.locator('[data-action="pause"]').click();
+  await paint();
+  await expect.poll(painted,{timeout:30000}).toBe(true);
+  expect(ranges.filter(entry=>entry.length===font.length)).toHaveLength(1);
 });
 
 test('embedded MKV SRT displays the first cue while later cluster reads are blocked', async ({page}) => {

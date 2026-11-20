@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {attachAssColorComparison} from './ass-color-diagnostics.js';
+import {AssEventAppender} from './ass-events.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
 import {PixiSrtRenderer} from './pixi-subtitles.js';
@@ -146,6 +147,7 @@ export class SubtitleOverlay {
     this.abort = null;
     this.frame = null;
     this.readyTimer = null;
+    this.assWaiting = false;
     // timeupdate may arrive only four times a second. Keep SRT cue boundaries
     // aligned to the visible playback clock, including short cues.
     this.listeners = [];
@@ -153,13 +155,17 @@ export class SubtitleOverlay {
       video.addEventListener?.(type, handler);
       this.listeners.push({type,handler});
     };
-    listen('playing', () => this.startClock());
+    listen('playing', () => { this.assWaiting = false; this.syncAssClock(); this.startClock(); });
     for (const event of ['pause', 'ended', 'seeking']) {
-      listen(event, () => { this.stopClock(); this.update(this.offsetMs); });
+      listen(event, () => { this.stopClock(); this.update(this.offsetMs); this.syncAssClock(); });
     }
-    listen('seeked', () => {
-      this.update(this.offsetMs); this.startClock();
+    listen('waiting', () => {
+      this.assWaiting = true; this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
     });
+    listen('seeked', () => {
+      this.update(this.offsetMs); this.syncAssClock(); this.startClock();
+    });
+    listen('ratechange', () => this.syncAssClock());
     listen('loadedmetadata', () => this.refreshStyle());
     this.resizeStyle = () => this.refreshStyle();
     if (typeof window !== 'undefined') window.addEventListener?.('resize', this.resizeStyle);
@@ -202,11 +208,14 @@ export class SubtitleOverlay {
     if (this.abort) this.abort.abort();
     this.abort = null;
     this.releaseRenderer();
+    this.assWaiting = false;
     this.assContent = null;
     this.assUnavailable = this.assPainted = false;
   }
 
   releaseRenderer() {
+    this.assAppender?.dispose();
+    this.assAppender = null;
     this.removeAssComparison?.();
     this.removeAssComparison = null;
     clearTimeout(this.readyTimer);
@@ -323,6 +332,8 @@ export class SubtitleOverlay {
   async assFailure(error, generation) {
     if (generation !== this.generation || this.assUnavailable) return;
     this.assUnavailable = true;
+    this.assAppender?.dispose();
+    this.assAppender = null;
     this.removeAssComparison?.();
     this.removeAssComparison = null;
     clearTimeout(this.dialogueTimer);
@@ -342,8 +353,8 @@ export class SubtitleOverlay {
 
   async renderStyledAss(asset, content, generation) {
     if (this.kind === 'ass') {
-      this.renderer.setTrack(content);
-      this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+      if (this.assAppender) this.assAppender.remember(content);
+      else this.renderer.setTrack(content);
       return;
     }
     const resources = await ensureAssRenderer();
@@ -355,7 +366,7 @@ export class SubtitleOverlay {
       clearTimeout(this.readyTimer);
       this.readyTimer = null;
       const time = subtitleTime(this.video.currentTime, this.offsetMs);
-      renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended), time);
+      renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting), time);
       renderer.setRate(this.video.playbackRate || 1);
     };
     renderer = new window.SubtitlesOctopus({
@@ -378,6 +389,18 @@ export class SubtitleOverlay {
       }
     });
     if (generation !== this.generation) { renderer.dispose(); return; }
+    // The bundled libass worker normally timestamps video events only when
+    // it receives them. Under load that means a stale seek clock can appear
+    // current. Attach the source clock and playback state to every update.
+    if (renderer.worker) {
+      renderer.setCurrentTime = time => renderer.worker.postMessage({target:'video',
+        currentTime:time, senderTime:Date.now(),
+        isPaused:!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),
+        rate:this.video.playbackRate || 1});
+      renderer.setIsPaused = (paused,time) => renderer.worker.postMessage({target:'video',
+        currentTime:time, senderTime:Date.now(), isPaused:paused,
+        rate:this.video.playbackRate || 1});
+    }
     // libass divides videoWidth by videoHeight. On the LG hardware plane
     // both can be zero even after decoding starts, leaving its canvas hidden.
     if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
@@ -396,6 +419,8 @@ export class SubtitleOverlay {
     }
     this.renderer = renderer;
     this.kind = 'ass';
+    if (asset.partUrl && renderer.worker && renderer.getStyles)
+      this.assAppender = new AssEventAppender(renderer, content);
     if (renderer.worker && this.preferences()?.diagnosticsEnabled === true)
       this.removeAssComparison = attachAssColorComparison(this.video, renderer);
     // Octopus calls onReady on its first worker message, including logs.
@@ -429,6 +454,14 @@ export class SubtitleOverlay {
       if (generation === this.generation && this.renderer === renderer)
         this.assFailure(new Error('ASS subtitle renderer did not become ready.'), generation);
     }, 20000);
+    this.assAppender?.ready();
+  }
+
+  syncAssClock() {
+    if (this.kind !== 'ass' || !this.renderer) return;
+    const current = subtitleTime(this.video.currentTime, this.offsetMs);
+    this.renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),current);
+    this.renderer.setRate(this.video.playbackRate || 1);
   }
 
   update(offsetMs) {
@@ -440,7 +473,7 @@ export class SubtitleOverlay {
     if (this.kind === 'srt') this.renderer.currentTime = currentTime;
     if (this.kind === 'ass' && changed) {
       this.renderer.timeOffset = -offsetMs / 1000;
-      this.renderer.setCurrentTime(currentTime);
+      this.syncAssClock();
     }
   }
 }
