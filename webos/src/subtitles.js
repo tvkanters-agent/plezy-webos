@@ -221,9 +221,13 @@ export class SubtitleOverlay {
       this.stopClock(); this.update(this.offsetMs); this.syncAssClock(); this.startAssClock();
     });
     listen('seeked', () => {
-      // Some LG decoders do not emit a second `playing` after a buffered seek.
-      // A prior waiting event must not freeze libass indefinitely.
-      this.assWaiting = false;
+      // seeked means the seek target was accepted, not necessarily that the
+      // decoder is advancing again. Keep the ASS clock frozen if only the
+      // current frame is buffered; timeupdate, playing or clock progress
+      // will release the latch without needing a second playing event.
+      this.assWaiting = !this.video.paused && Number.isFinite(this.video.readyState) &&
+        this.video.readyState < 3;
+      this.assWaitingPosition = this.video.currentTime;
       this.update(this.offsetMs); this.syncAssClock(true); this.startAssClock(); this.startClock();
     });
     listen('timeupdate', () => {
