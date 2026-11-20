@@ -1,3 +1,8 @@
+## 1.19.2 — Early Plex sidecar after MKV decoder retry
+
+- When the decoder restarts with MKV range reads disabled, begin the Plex subtitle sidecar immediately instead of waiting for the replacement video's first-frame gate.
+- With general Diagnostics enabled, identify the subtitle source and MKV read failure in the on-TV panel. Keep all timing and diagnostic reporting inactive when disabled.
+
 ## 1.19.1 — General Diagnostics setting
 
 - Place the opt-in diagnostics switch under Settings → About, where it can gate SRT timing and future diagnostic features. Remove the SRT-specific playback-setting toggle.

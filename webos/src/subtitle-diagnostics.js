@@ -22,7 +22,12 @@ export class SubtitleDiagnostics {
       // Repainting for every range request would skew the timings being measured.
       if (this.requests % 5 !== 0) return;
     } else if (event === 'video') this.videoMs = milliseconds;
-    else if (event === 'index') this.indexMs = milliseconds;
+    else if (event === 'source') this.source = milliseconds;
+    else if (event === 'fallback') {
+      this.source = 'Plex sidecar (MKV failed)';
+      // A Plex URL may contain a server token. Never show it in a TV photo.
+      this.fallbackReason = String(milliseconds).replace(/https?:\/\/\S+/g, '[URL]').slice(0, 150);
+    } else if (event === 'index') this.indexMs = milliseconds;
     else if (event === 'first') {
       this.firstMs = milliseconds;
       this.sincePlayMs = Date.now() - this.openedAt;
@@ -34,6 +39,8 @@ export class SubtitleDiagnostics {
     const ms = value => value === undefined ? 'waiting' : Math.round(value) + ' ms';
     this.element.textContent = [
       'Embedded SRT diagnostics',
+      'Source: ' + (this.source || 'waiting'),
+      ...(this.fallbackReason ? ['MKV failed: ' + this.fallbackReason] : []),
       'Video ready: ' + ms(this.videoMs) + ' from Play',
       'MKV index: ' + ms(this.indexMs) + ' from subtitle request',
       'First render: ' + ms(this.firstMs) + ' from subtitle request',

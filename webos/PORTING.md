@@ -795,6 +795,14 @@ should use the same `diagnosticsEnabled` switch. All diagnostic clock reads,
 callbacks, aggregation and DOM creation are guarded behind the switch. Off
 leaves normal playback without diagnostic work or visuals.
 
+In v1.19.2, a retry with `skipMatroskaSubtitles` loads the independent Plex
+subtitle sidecar as soon as the source starts, as external subtitles already
+do. The previous raw `partUrl` check incorrectly waited for the decoder's
+first-frame gate even after range reads were disabled. The optional diagnostics
+panel also identifies whether the SRT came from MKV ranges, a decoder retry,
+or an MKV read failure, including its error. This avoids ambiguous zero-range
+readouts without introducing any measurements in normal (diagnostics-off) mode.
+
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
 and cancels a full-file response at the header boundary. If the decoder
