@@ -56,16 +56,20 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
   }
   await waitFor('Plex never finished starting',async () => (await get('/library/sections')).ok);
   const params = new URLSearchParams({name:'Plezy Subtitle Fixture',type:'movie',
-    agent:'com.plexapp.agents.none',scanner:'Plex Video Files Scanner',language:'en-US',location:library});
+    agent:'tv.plex.agents.movie',scanner:'Plex Movie',language:'en-US',location:library});
   const added = await get('/library/sections?' + params,{method:'POST'});
-  if (!added.ok) throw Error('Could not create a fixture library: HTTP ' + added.status);
+  if (!added.ok) throw Error('Could not create a fixture library: HTTP ' + added.status + ' ' +
+    (await added.text()).replaceAll(token,'[fixture token]').slice(0,350));
   const sections = (await (await get('/library/sections')).json()).MediaContainer.Directory;
   const section = sections.find(x => x.title === 'Plezy Subtitle Fixture');
   if (!section) throw Error('Could not find the fixture library');
   await get('/library/sections/' + section.key + '/refresh?force=1');
   const entry = await waitFor('Plex did not scan the fixture', async () =>
     (await (await get('/library/sections/' + section.key + '/all')).json()).MediaContainer.Metadata?.[0]);
-  const raw = (await (await get('/library/metadata/' + entry.ratingKey)).json()).MediaContainer.Metadata[0];
+  const raw = await waitFor('Plex did not analyze the fixture tracks', async () => {
+    const item = (await (await get('/library/metadata/' + entry.ratingKey)).json()).MediaContainer.Metadata[0];
+    return item.Media?.[0]?.Part?.[0]?.Stream?.some(track => track.streamType === 3) && item;
+  });
   const part = raw.Media[0].Part[0];
   const tracks = part.Stream.filter(x => x.streamType === 3);
   console.log('Plex fixture streams:', JSON.stringify(tracks.map(x=>({codec:x.codec,index:x.index,subIndex:x.subIndex}))));
@@ -95,7 +99,7 @@ test('temporary live Plex subtitle transport probe', {skip:!process.env.GITHUB_A
         const response = await fetch(url,{signal:AbortSignal.timeout(12000)});
         const text = await response.text();
         console.log('Plex sidecar:',track.codec,variant,response.status,response.headers.get('content-type'),
-          text.includes('Embedded'),text.length);
+          text.includes('Embedded'),text.length, response.ok ? '' : text.replaceAll(token,'[fixture token]').slice(0,180));
       } catch (error) { console.log('Plex sidecar:',track.codec,variant,error.name); }
     }
   }
