@@ -2716,7 +2716,7 @@ function settingsNumber(field,label,icon,format) {
     let value=state[field];
     const spinner=el('div',undefined,'settings-number-value');
     spinner.setAttribute('role','button');spinner.tabIndex=0;
-    spinner.addEventListener('click',()=>focusWithoutJump(save,false));
+    spinner.addEventListener('click',()=>focusWithoutJump(spinner,false));
     spinner.setAttribute('aria-label',label);
     const update=()=>{spinner.textContent=String(value);};
     const adjust=step=>{value=Math.max(min,Math.min(max,value+step));update();};
@@ -2725,25 +2725,40 @@ function settingsNumber(field,label,icon,format) {
     const plus=el('span','+','settings-number-step');
     minus.addEventListener('click',()=>adjust(-1));
     plus.addEventListener('click',()=>adjust(1));
-    spinner.addEventListener('keydown',event=>{
-      if(event.keyCode===37 || event.keyCode===39){
-        event.preventDefault();event.stopPropagation();adjust(event.keyCode===37?-1:1);
-        // Chromium's TV spatial-navigation fallback may still move focus to
-        // a dialog action after changing a synthetic spinner value.
-        setTimeout(()=>{if(!dialog.hidden && spinner.isConnected)focusWithoutJump(spinner,false);},0);
-      } else if(event.keyCode===13){
-        event.preventDefault();event.stopPropagation();
-        save.click();
-      }
-    });
     update();input.append(minus,spinner,plus);
     const actions=el('div',undefined,'settings-dialog-actions');
+    const cancel=button('Cancel',closeSettingsDialog,'settings-cancel');
     const save=button('Save',()=>{
       state[field]=value;persist();row.querySelector('.settings-tile-subtitle').textContent=format(value);
       closeSettingsDialog();
     },'primary');
-    actions.append(button('Cancel',closeSettingsDialog,'settings-cancel'),save);
-    dialog.append(input,el('p','Range: '+min+'–'+max,'settings-dialog-description'),actions);
+    actions.append(cancel,save);
+    // Numeric dialogs have just three focus stops. Explicit D-pad routes
+    // prevent geometry navigation (and TV spatial navigation) from skipping
+    // the value or trapping focus on the actions.
+    const editor=el('div',undefined,'settings-number-editor');
+    editor.addEventListener('keydown',event=>{
+      // Some webOS engines move document.activeElement during the keydown
+      // dispatch, before handlers run. The event target still identifies the
+      // control which received the key, so use it as the navigation source.
+      const current=event.target, key=event.keyCode;
+      let next=null;
+      if(current===spinner){
+        if(key===37 || key===39)adjust(key===37?-1:1);
+        else if(key===40)next=save;
+        else if(key===13){save.click();event.preventDefault();event.stopPropagation();return;}
+        else if(key!==38)return;
+      } else if(current===save || current===cancel){
+        if(key===38)next=spinner;
+        else if(key===37 && current===save)next=cancel;
+        else if(key===39 && current===cancel)next=save;
+        else if(![37,39,40].includes(key))return;
+      } else return;
+      event.preventDefault();event.stopPropagation();
+      focusWithoutJump(next || current,false);
+    },true);
+    editor.append(input,el('p','Range: '+min+'–'+max,'settings-dialog-description'),actions);
+    dialog.append(editor);
     focusWithoutJump(spinner,false);
   },field);
   return row;

@@ -28,22 +28,6 @@ export function subtitleStyle(values = {}) {
   return result;
 }
 
-// Approximate a round MPV subtitle border via eight overlapping shadows at
-// each radius. Native webOS Chromium 53 lacks CSS paint-order, so text-stroke
-// would paint over the glyph fill and make small captions look too heavy.
-export function subtitleOutline(size, color) {
-  if (size <= 0) return 'none';
-  const shadows=[];
-  for (let radius=1;radius<=Math.ceil(size);radius++) {
-    const r=Math.min(radius,size).toFixed(2)+'px';
-    for (const [x,y] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
-      const offset=n=>n===0?'0':n<0?'-'+r:r;
-      shadows.push(offset(x)+' '+offset(y)+' 0 '+color);
-    }
-  }
-  return shadows.join(', ');
-}
-
 // object-fit:contain uses the video's decoded aspect ratio; with margins off
 // the overlay is clipped to the video frame rather than the letterbox bars.
 export function videoInsets(video, useMargins, fallbackAspect) {
@@ -64,7 +48,13 @@ export function applySrtStyle(element, video, values, fallbackAspect) {
   element.style.fontWeight=style.subtitleBold?'700':'400';
   element.style.fontStyle=style.subtitleItalic?'italic':'normal';
   element.style.setProperty('--cue-color',style.subtitleTextColor);
-  element.style.setProperty('--cue-text-shadow',subtitleOutline(style.subtitleBorderSize*scale,style.subtitleBorderColor));
+  // CSS text shadows look uneven on glyph edges (especially at the top and
+  // bottom) and make adjacent border widths hard to distinguish. webOS's
+  // Chromium supports WebKit text strokes, which follow the glyph contour.
+  // A stroke is centred on the edge, hence 2x the requested outer width.
+  element.style.setProperty('--cue-stroke-width',(2*style.subtitleBorderSize*scale).toFixed(2)+'px');
+  element.style.setProperty('--cue-stroke-color',style.subtitleBorderColor);
+  element.style.setProperty('--cue-text-shadow','none');
   // Upstream's text settings contain no background, and unstyled SRT should
   // not acquire an artificial opaque box from Media Captions' defaults.
   element.style.setProperty('--cue-bg-color','transparent');
@@ -78,7 +68,8 @@ export function resetSrtStyle(element) {
   if (!element.style) return;
   for (const field of ['fontSize','fontWeight','fontStyle','top','right','bottom','left'])
     element.style[field]='';
-  for (const field of ['--cue-color','--cue-text-shadow','--cue-bg-color'])
+  for (const field of ['--cue-color','--cue-stroke-width','--cue-stroke-color',
+    '--cue-text-shadow','--cue-bg-color'])
     element.style.removeProperty(field);
 }
 

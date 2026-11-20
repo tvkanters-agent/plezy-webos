@@ -998,6 +998,8 @@ main.settings-view { padding-top:38px; }
   color: var(--cue-color); white-space: var(--cue-white-space, pre-wrap);
   box-shadow: var(--cue-box-shadow); outline: var(--cue-outline);
   text-shadow: var(--cue-text-shadow); box-sizing: border-box;
+  -webkit-text-stroke-width: var(--cue-stroke-width, 0px);
+  -webkit-text-stroke-color: var(--cue-stroke-color, #000);
 }
 /* SubtitlesOctopus positions signs in native ASS coordinates. Keep its canvas
    over the video, but below Plezy's controls, without moving signs on reveal. */
