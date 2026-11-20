@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {assFixture} from './fixtures/matroska.cjs';
+import {assFixture, srtFixture} from './fixtures/matroska.cjs';
 import {extractMatroskaSubtitle} from '../src/matroska-subtitles.js';
 
 const movie = await readFile(new URL('./fixtures/embedded-subtitles.mkv', import.meta.url));
@@ -59,6 +59,34 @@ test('reads compressed MKV ASS without relative cue offsets or a stored Events s
     release();
   }
   assert.match(await reading, /0:00:00\.01,0:00:01\.01,Default,,0,0,0,,Subtitle 0/);
+});
+
+test('embedded SRT previews the resume cue before reading distant clusters', async t => {
+  const {source, firstCluster} = srtFixture();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const requests = serveRanges(t, source, start => start === firstCluster ? pending : undefined);
+  let firstPreview;
+  const visible = new Promise(resolve => { firstPreview = resolve; });
+  const timings = [];
+  const reading = extractMatroskaSubtitle({...asset, partSize:source.length, streamIndex:0, format:'srt'},
+    new AbortController().signal, {position:160, preview:firstPreview, onRead:timing => timings.push(timing)});
+  try {
+    const captions = await Promise.race([visible, reading.then(() => {
+      throw new Error('SRT finished without publishing nearby cues');
+    }), new Promise((_, reject) => setTimeout(() => reject(new Error('SRT preview waited for distant cues')), 1000))]);
+    assert.match(captions, /00:02:40,010 --> 00:02:41,010\nSubtitle 16/);
+    assert.doesNotMatch(captions, /Subtitle 0\b/);
+    assert.ok(!requests.some(range => range.start === firstCluster),
+      'the first preview should not request a distant cluster');
+    assert.ok(timings.length > 0 && timings.every(read => read.elapsedMs >= 0 && read.length > 0),
+      'range timing can be measured without logging authenticated URLs');
+  } finally {
+    release();
+  }
+  const captions = await reading;
+  assert.match(captions, /00:00:00,010 --> 00:00:01,010\nSubtitle 0/);
+  assert.match(captions, /00:02:40,010 --> 00:02:41,010\nSubtitle 16/);
 });
 
 test('refuses mismatched track IDs, ignored ranges and cancellation', async t => {
