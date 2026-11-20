@@ -1531,6 +1531,11 @@ export class Player {
     if (shouldResume) this.queueResumeAfterSeek(target);
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
+    // The hardware media clock can remain at its previous timestamp for
+    // several frames after a seek. Give libass the authoritative seek target
+    // immediately, instead of waiting for webOS timeupdate to catch up.
+    if (this.enhancedPlaybackActive && this.session.subtitleAsset?.format === 'ass')
+      this.subtitleOverlay?.requestAssSeek(target);
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
       try { this.video.currentTime = target; }
