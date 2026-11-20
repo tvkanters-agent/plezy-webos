@@ -772,3 +772,10 @@ worker in a lazily loaded classic script. The selected worker runs from a Blob
 URL, initializes the default font directly in its filesystem and, on newer
 engines, receives the bundled WASM bytes. Browser tests open the built local HTML
 and check drawn ASS pixels and timing for both worker variants.
+
+SubtitlesOctopus reports ready on its first worker message. On webOS that
+can leave the viewer without dialogue even though playback and the sync
+control are active. Enhanced playback uses Media Captions for timed ASS
+dialogue until a nonempty libass frame paints the canvas. The styled canvas
+is anchored to the player viewport. If the worker fails, dialogue continues
+locally with the selected track and offset. The HTML fallback omits typesetting.

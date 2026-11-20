@@ -1720,6 +1720,10 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
     if (codec === 'ass') {
       const ratio = await canvas.evaluate(el => el.clientWidth / el.clientHeight);
       expect(ratio).toBeCloseTo(2.4, 2);
+      await expect(srt.locator('[part="cue"]')).toHaveCount(0);
+      const box = await canvas.boundingBox();
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize().height + 1);
     } else {
       await expect(srt.locator('[part="cue"]')).toBeVisible();
     }
@@ -1736,6 +1740,44 @@ for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
     await expect.poll(cueDrawn).toBe(true);
     expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
     expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(false);
+    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
+      .toEqual(['none']);
+  });
+}
+
+for (const blocked of [false,true]) {
+  test('selected MKV ASS dialogue survives a ' + (blocked ? 'blocked' : 'ready but blank') + ' worker', async ({page}) => {
+    await page.addInitScript(blocked => {
+      String.prototype.padEnd = undefined;
+      window.Worker = class extends EventTarget {
+        constructor() {
+          super();
+          if (blocked) throw new Error('Worker creation blocked');
+        }
+        postMessage(message) {
+          if (message.target === 'worker-init')
+            Promise.resolve().then(() => this.dispatchEvent(new MessageEvent('message',{data:{target:'ready'}})));
+        }
+        terminate() {}
+      };
+    },blocked);
+    const {calls} = await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+      Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+        {streamType:3,id:32,codec:'ass',index:3,selected:1}
+      ]}]}]},undefined,[],{},null,null,null,true,null,packagedEntry);
+    await page.locator('[data-action="pause"]').click();
+    await page.locator('video').evaluate(video=>{video.currentTime=3.5;});
+    const cue = page.locator('.player-captions [part="cue"]');
+    await expect(cue).toContainText('Embedded ASS');
+    await expect(cue).toBeVisible();
+    await page.getByRole('button',{name:'Playback settings'}).click();
+    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+    await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(slider=>{
+      slider.value='3000'; slider.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await expect(cue).toHaveCount(0);
+    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+    await expect(cue).toContainText('Embedded ASS');
     expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
       .toEqual(['none']);
   });
