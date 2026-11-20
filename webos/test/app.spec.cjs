@@ -1286,7 +1286,7 @@ test('connected Simkl movie and series rating rows read existing user score and 
  expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
 });
 
-test('series Play resumes classic Plex HLS after initial video data, without native mediaOption',async({page})=>{
+test('series Play resumes classic Plex HLS at the correct native timestamp without a second seek',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
@@ -1334,17 +1334,19 @@ test('series Play resumes classic Plex HLS after initial video data, without nat
  expect(url.pathname).toBe('/video/:/transcode/universal/start.m3u8');
  expect(url.searchParams.has('offset')).toBe(false);
  expect(url.searchParams.get('path')).toBe('/library/metadata/episode2');
- expect(opens[0].type).toBe('application/vnd.apple.mpegurl');
+ const [mime,encoded]=opens[0].type.split(';mediaOption=');
+ expect(mime).toBe('application/vnd.apple.mpegurl');
+ expect(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start).toBe(125000);
  await expect(page.locator('video')).toHaveCSS('visibility','hidden');
- // A real LG video decoder performs this transition after fetching segment
- // zero; do not jump at loadedmetadata, and show the picture only on landing.
+ // The native decoder opens at 125s and reports its first video data there.
+ // There must be no second HTML seek after it has already buffered.
  await page.locator('video').evaluate(video=>{
    Object.defineProperty(video,'readyState',{configurable:true,value:2});
    Object.defineProperty(video,'currentTime',{configurable:true,
-     get(){return window.soughtAt||0;},set(value){window.soughtAt=value;}});
+     get(){return 125;},set(value){window.unexpectedSeek=value;}});
    video.dispatchEvent(new Event('loadeddata'));
  });
- expect(await page.evaluate(()=>window.soughtAt)).toBe(125);
+ expect(await page.evaluate(()=>window.unexpectedSeek)).toBeUndefined();
  await expect(page.locator('video')).toHaveCSS('visibility','visible');
  // Preserve the target in progress reports while the decoder is opening.
  await expect.poll(()=>times.includes('125000')).toBe(true);

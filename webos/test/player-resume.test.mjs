@@ -4,8 +4,8 @@ import {Player} from '../src/player.js';
 
 // Exercise the LG source contract without pretending desktop Chromium implements
 // the native pipeline. Decoder/network behaviour still requires a real TV.
-for (const transcode of [false, true]) {
-  test(`LG ${transcode ? 'HLS' : 'direct'} opens at resume position without a second seek`, () => {
+for (const enhanced of [false,true]) for (const transcode of [false, true]) {
+  test(`LG ${enhanced ? 'enhanced' : 'legacy'} ${transcode ? 'HLS' : 'direct'} opens at resume position without a second seek`, () => {
     const oldWindow = globalThis.window, oldDocument = globalThis.document;
     const sources = [], operations = [];
     globalThis.window = {PalmSystem: {}};
@@ -24,7 +24,8 @@ for (const transcode of [false, true]) {
       const player = Object.assign(Object.create(Player.prototype), {
         video, generation: 1, initialSeekTarget: 720.125, initialSeekPending: true,
         pendingStart: 720.125, item: {duration: 1800},
-        session: {url: 'https://plex.test/video', start: 720.125, transcode},
+        session: {url: 'https://plex.test/video', start: 720.125, transcode,
+          enhancedPlayback:enhanced,legacyPlexPlayback:!enhanced},
         showBuffering(show) {operations.push(show ? 'buffering' : 'ready');}
       });
       player.loadSource(player.session);

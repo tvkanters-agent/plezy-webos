@@ -57,8 +57,6 @@ export class Player {
       this.startAfterInitialSeek();
     });
     this.video.addEventListener('loadeddata', () => {
-      // LG's HLS compatibility resume seeks only after its first data event.
-      // Seeking at metadata can leave the pipeline with audio but no picture.
       this.resume();
       if (!this.initialSeekPending) { this.hasFirstFrame = true; this.update(); }
       if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
@@ -884,29 +882,24 @@ export class Player {
   loadSource(session) {
     const nativeResume = typeof window.PalmSystem !== 'undefined' ||
       /web0s|webos|netcast/i.test(navigator.userAgent);
-    // On the affected LG HLS pipeline, a nonzero mediaOption playTime leaves
-    // the video black while audio plays. Keep native fast resume for other
-    // sources; for the classic Plex HLS path use LG's documented loadeddata
-    // + currentTime resume instead, accepting the extra initial buffer.
-    this.legacyHlsResume = nativeResume && !!session.legacyPlexPlayback &&
-      !!session.transcode && this.initialSeekTarget > 0;
     if (nativeResume) {
       // LG's equivalent of Plezy's Media(start:): pass milliseconds to the
-      // pipeline BEFORE load/play. A later currentTime assignment buffers twice.
+      // pipeline BEFORE load/play. This was the working one-buffer legacy
+      // behavior before the custom playback/subtitle pipeline was introduced.
       const source = document.createElement('source');
       source.setAttribute('src', session.url);
       const mime = session.transcode ? 'application/vnd.apple.mpegurl' : (session.mimeType || 'video/mp4');
-      source.setAttribute('type', mime + (this.legacyHlsResume ? '' :
+      source.setAttribute('type', mime +
         ';mediaOption=' + encodeURIComponent(JSON.stringify({option: {
           transmission: {playTime: {start: this.initialSeekTarget * 1000}}
-        }}))));
+        }})));
       const generation = this.generation;
       source.addEventListener('error', () => {
         if (generation === this.generation && this.session === session) this.failed();
       });
       this.video.appendChild(source);
       // Native startup owns the seek; metadata/canplay must not seek again.
-      this.pendingStart = this.legacyHlsResume ? this.initialSeekTarget : 0;
+      this.pendingStart = 0;
     } else {
       // Desktop preview has no LG pipeline; retain the HTML media seek path.
       this.video.src = session.url;
@@ -928,7 +921,6 @@ export class Player {
     }
   }
   resume() {
-    if (this.legacyHlsResume && this.video.readyState < 2) return;
     if (this.pendingStart && this.session && this.video.readyState>=1) {
       try {
         const available=Math.max(Number.isFinite(this.video.duration)?this.video.duration:0,
@@ -956,12 +948,25 @@ export class Player {
   armStartupTimeout(session = this.session, generation = this.generation) {
     clearTimeout(this.startTimeout);
     this.startTimeout = setTimeout(() => {
-      if (generation === this.generation && this.session === session && !this.startupComplete) this.failed('startup timed out');
+      if (generation !== this.generation || this.session !== session || this.startupComplete) return;
+      // The original Plex pipeline completed startup on the first decoded
+      // frame, without relying on videoWidth or clock-progress heuristics.
+      if (session?.legacyPlexPlayback && this.video.readyState >= 2 && !this.initialSeekPending) return;
+      this.failed('startup timed out');
     }, 30000);
   }
   checkStartupProgress() {
-    if (!this.session || this.startupComplete || this.initialSeekPending || this.pendingStart ||
-        !(this.video.videoWidth > 0)) return;
+    if (!this.session || this.startupComplete || this.initialSeekPending || this.pendingStart) return;
+    if (this.session.legacyPlexPlayback) {
+      // Restore the pre-renderer gate: LG can show valid HLS frames even
+      // without reporting a videoWidth or an advancing clock immediately.
+      if (this.hasFirstFrame || this.video.readyState >= 2) {
+        this.startupComplete = true;
+        clearTimeout(this.startTimeout);
+      }
+      return;
+    }
+    if (!(this.video.videoWidth > 0)) return;
     // loadedmetadata/loadeddata/canplay (and even a resolved Play) are not
     // proof the video clock advances. Paused reopens need just one frame.
     if (this.video.currentTime > this.initialSeekTarget + 0.1 ||
