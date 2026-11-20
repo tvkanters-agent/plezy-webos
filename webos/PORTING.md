@@ -928,3 +928,10 @@ query. The native first-frame and resume seek gates remain authoritative;
 once either loaded video or first-frame playback is confirmed, embedded ASS
 extraction does not wait another 200ms, and paused title opens may read the
 subtitle track. Physical C8 tests are needed to verify these changes.
+
+To reduce worker startup time, its bounded local script pieces are loaded in
+parallel groups with stable part indices before being concatenated into a Blob
+worker. This does not change the bundled libass runtime or fonts. For worker
+first-frame detection, the renderer trusts libass's nonempty blended image
+payload rather than downsampling the drawn canvas to 160 × 90 pixels, which
+could miss a very small sign. Both changes are exclusive to enhanced ASS.
