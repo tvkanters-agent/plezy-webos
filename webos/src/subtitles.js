@@ -583,26 +583,23 @@ export class SubtitleOverlay {
     // Retire the dialogue only after the canvas contains painted pixels.
     const onFrame = event => {
       if (event.data.target !== 'canvas' || !event.data.canvases?.length) return;
+      // libass reports no image when there is no visible cue. Its returned
+      // blended frame is already the visibility signal; a 160x90 downscale
+      // probe could miss fine/small signs and leave a valid ASS canvas hidden.
+      if (event.data.op !== 'renderCanvas' ||
+          !event.data.canvases.some(image => image.w > 0 && image.h > 0 && image.buffer?.byteLength > 0))
+        return;
       requestAnimationFrame(() => {
         if (generation !== this.generation || this.assPainted || this.assUnavailable || this.renderer !== renderer) return;
         if (renderer.canvas.style.visibility === 'hidden') renderer.canvas.style.visibility = 'visible';
-        const probe = document.createElement('canvas');
-        probe.width = 160; probe.height = 90;
-        const ctx = probe.getContext('2d');
-        ctx.drawImage(renderer.canvas, 0, 0, probe.width, probe.height);
-        const pixels = ctx.getImageData(0, 0, probe.width, probe.height).data;
-        for (let i = 3; i < pixels.length; i += 4) {
-          if (!pixels[i]) continue;
-          this.assPainted = true;
-          if (renderer.canvasParent) renderer.canvasParent.style.display = '';
-          clearTimeout(this.dialogueTimer);
-          renderer.worker.removeEventListener('message', onFrame);
-          if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
-          this.dialogue?.destroy();
-          this.dialogue = null;
-          this.stopClock();
-          break;
-        }
+        this.assPainted = true;
+        if (renderer.canvasParent) renderer.canvasParent.style.display = '';
+        clearTimeout(this.dialogueTimer);
+        renderer.worker.removeEventListener('message', onFrame);
+        if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
+        this.dialogue?.destroy();
+        this.dialogue = null;
+        this.stopClock();
       });
     };
     renderer.worker?.addEventListener('message', onFrame);
