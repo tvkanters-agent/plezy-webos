@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SubtitleOverlay, subtitleTime} from '../src/subtitles.js';
+import {assFontCache} from '../src/ass-font-cache.js';
+import {assTrackCache} from '../src/ass-track-cache.js';
 
 test('positive subtitle sync offsets delay SRT and ASS relative to video', () => {
   assert.equal(subtitleTime(9, 1500), 7.5);
@@ -341,5 +343,101 @@ test('ASS clock stays at the seek target until the decoder advances after an und
   callbacks.get('timeupdate')();
   assert.equal(overlay.assWaiting,false);
   assert.deepEqual(updates[updates.length-1],{paused:false,time:180.125});
+  overlay.dispose();
+});
+
+test('cached ASS fonts and opening cues load before the decoder network gate at a saved timestamp',async t=>{
+  const oldWindow=globalThis.window;
+  const options=[];
+  class FakeOctopus {
+    constructor(value){
+      options.push(value);
+      this.fonts=value.fonts;
+      this.video=value.video;
+      this.canvas={style:{visibility:'hidden'}};
+      this.canvasParent={style:{}};
+      this.worker={addEventListener(){},removeEventListener(){},postMessage(){}};
+    }
+    plezyUseExternalClock(){}
+    setIsPaused(){}
+    setRate(){}
+    getStyles(){}
+    dispose(){}
+  }
+  globalThis.window={SubtitlesOctopus:FakeOctopus};
+  t.after(()=>{globalThis.window=oldWindow;});
+  let networkCalls=0;
+  t.mock.method(globalThis,'fetch',async()=>{networkCalls++;throw new Error('Cache path used the network');});
+  const font=Uint8Array.of(0,1,2,3,4,5);
+  const scope='resume-cache-test';
+  const fontName='resume-sign.ttf';
+  const cacheKey='resume-cache-test-track';
+  const script='[Script Info]\nScriptType: v4.00+\n'+
+    '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
+    'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Past cue\n'+
+    'Dialogue: 0,0:02:05.00,0:02:07.00,Default,,0,0,0,,Resume cue\n';
+  assFontCache.put(scope,fontName,font);
+  assTrackCache.put(cacheKey,script,[{name:fontName,length:font.byteLength}]);
+  const video={currentTime:0,paused:true,ended:false,seeking:false,
+    playbackRate:1,videoWidth:1920,videoHeight:1080};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  const asset={partUrl:'http://plex.test/episode.mkv',partCacheKey:cacheKey,
+    fontScope:scope,format:'ass'};
+  const neverReady=new Promise(()=>{});
+  await overlay.load(asset,0,125,null,neverReady);
+  assert.equal(networkCalls,0,'verified persistent cache needs no Plex range request');
+  assert.equal(overlay.kind,'ass');
+  assert.equal(options.length,1);
+  assert.equal(options[0].fonts[0].bytes,font,'verified cached custom font reaches libass');
+  assert.match(options[0].subContent,/Resume cue/);
+  assert.doesNotMatch(options[0].subContent,/Past cue/);
+  assert.deepEqual(overlay.assClockSample(),{time:125,held:true},
+    'a resumed ASS preview must not be rewound to the old native 0:00 clock');
+  video.currentTime=125.125;
+  assert.deepEqual(overlay.assClockSample(),{time:125.125,held:false},
+    'the overlay follows the decoder again as soon as it reaches the target');
+  overlay.dispose();
+});
+
+test('closing playback cancels a cache miss waiting for decoder-safe MKV reads',async t=>{
+  const oldWindow=globalThis.window;
+  globalThis.window={SubtitlesOctopus:class FakeOctopus{}};
+  t.after(()=>{globalThis.window=oldWindow;});
+  let networkCalls=0;
+  t.mock.method(globalThis,'fetch',async()=>{networkCalls++;throw new Error('Unexpected MKV read');});
+  const overlay=new SubtitleOverlay({currentTime:0,paused:true},{textContent:''});
+  const attempt=overlay.load({partUrl:'http://plex.test/episode.mkv',partCacheKey:'missing-ass-track-for-test',
+    fontScope:'missing',format:'ass'},0,125,null,new Promise(()=>{}));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(networkCalls,0);
+  overlay.clear();
+  await assert.rejects(attempt,{name:'AbortError'});
+  assert.equal(networkCalls,0,'an aborted preload must never access the old Plex file');
+  overlay.dispose();
+});
+
+test('ASS holds a requested seek target while LG reports its previous media clock',()=>{
+  const listeners=new Map(),messages=[],clocks=[];
+  const video={currentTime:12,paused:false,seeking:false,ended:false,playbackRate:1,
+    addEventListener:(type,callback)=>listeners.set(type,callback),
+    removeEventListener(){}};
+  const overlay=new SubtitleOverlay(video,{textContent:''});
+  overlay.kind='ass';
+  overlay.renderer={worker:{postMessage:message=>messages.push(message)},
+    _plezyFullyReady:true,
+    setIsPaused:(paused,time)=>clocks.push({paused,time}),
+    setRate(){},dispose(){}};
+  overlay.requestAssSeek(180);
+  assert.deepEqual(clocks[clocks.length-1],{paused:true,time:180},
+    'libass holds the requested target instead of the stale old timestamp');
+  assert.equal(messages[messages.length-1].target,'plezy-force-frame');
+  video.currentTime=12.125;
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks[clocks.length-1],{paused:true,time:180},
+    'stale decoder timeupdate must not rewind the ASS worker');
+  video.currentTime=179.9;
+  listeners.get('timeupdate')();
+  assert.deepEqual(clocks[clocks.length-1],{paused:false,time:179.9},
+    'the overlay releases its latch once the decoder actually lands');
   overlay.dispose();
 });

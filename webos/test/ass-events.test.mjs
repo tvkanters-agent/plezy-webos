@@ -49,8 +49,8 @@ test('paused ASS event imports force a redraw after the worker installs the even
   appender.ready();
   stylesReply([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
   assert.deepEqual(sent.map(msg=>msg.target),
-    ['create-events','plezy-force-frame','video'],
-    'paused redraw must occur after the worker processes the new events');
+    ['create-events','video','plezy-force-frame'],
+    'paused redraw must receive the new subtitle time before forcing a frame');
   appender.dispose();
 });
 
@@ -68,5 +68,56 @@ test('the fully initialized worker style reply installs pending events without a
   assert.equal(sent[0].events[0].Text,'Earlier dialogue');
   appender.ready();
   assert.equal(sent.length,2,'initialization must be idempotent');
+  appender.dispose();
+});
+
+test('long ASS streams import events near the resume or seek timestamp first',()=>{
+  const sent=[];
+  const renderer={video:{currentTime:125.5,paused:false,seeking:false},timeOffset:0,
+    worker:{postMessage:message=>sent.push(message)},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const headerScript=header+first+'\n';
+  const distant='Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,Distant';
+  const resumed='Dialogue: 0,0:02:05.00,0:02:12.00,Default,,0,0,0,,Resume subtitle';
+  const seeking='Dialogue: 0,0:03:40.00,0:03:41.00,Default,,0,0,0,,Seek subtitle';
+  const appender=new AssEventAppender(renderer,headerScript,125.5);
+  appender.remember(headerScript+distant+'\n'+seeking+'\n'+resumed+'\n');
+  appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.equal(sent[0].events[0].Text,'Resume subtitle');
+  assert.deepEqual(sent[0].events.slice(1).map(event=>event.Text),
+    ['Distant','Seek subtitle']);
+  appender.dispose();
+
+  const next=new AssEventAppender(renderer,headerScript,125.5);
+  next.remember(headerScript+distant+'\n'+resumed+'\n'+seeking+'\n');
+  next.prioritize(220.5);
+  sent.length=0;
+  next.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.equal(sent[0].events[0].Text,'Seek subtitle',
+    'a seek overtakes unrelated unimported vector-sign events');
+  next.dispose();
+});
+
+test('paused ASS imports redraw nearby cues without repainting every distant batch',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const sent=[];
+  const renderer={video:{currentTime:125.5,paused:true,seeking:false},timeOffset:0,
+    worker:{postMessage:value=>sent.push(value)},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const appender=new AssEventAppender(renderer,header+first+'\n',125.5);
+  const important='Dialogue: 0,0:02:05.00,0:02:08.00,Default,,0,0,0,,Important sign';
+  const unrelated=Array.from({length:270},(_,i)=>
+    'Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Old sign '+i);
+  appender.remember(header+first+'\n'+[important,...unrelated].join('\n')+'\n');
+  appender.ready([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  // Node's mocked timers execute newly enqueued callbacks on the next tick.
+  for(let i=0;i<4;i++) t.mock.timers.tick(8);
+  const batches=sent.filter(value=>value.target==='create-events');
+  const force=sent.filter(value=>value.target==='plezy-force-frame');
+  assert.equal(batches.length,3,'large tracks must still import all their events');
+  assert.equal(batches[0].events[0].Text,'Important sign');
+  assert.equal(force.length,2,'do not re-render dozens of distant inactive sign batches');
+  const firstForce=sent.indexOf(force[0]);
+  assert.equal(sent[firstForce-1].target,'video','frame forcing follows the current clock');
   appender.dispose();
 });

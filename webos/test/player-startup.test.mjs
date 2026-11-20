@@ -29,6 +29,36 @@ test('paused reopen needs one decoded frame while a resume target stays gated',(
   player.checkStartupProgress();assert.notEqual(player.startupComplete,true);
   player.initialSeekPending=false;player.checkStartupProgress();assert.equal(player.startupComplete,true);
 });
+test('initial-resume ASS prewarm starts the cache before native frames but gates uncached range reads',async()=>{
+  const session={subtitleAsset:{format:'ass',partUrl:'http://plex.test/episode.mkv'}};
+  const seen=[];
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,generation:8,enhancedPlaybackActive:true,options:{},
+    initialSeekPending:true,initialSeekTarget:125,pendingStart:0,
+    subtitleSyncOffsetMs:0,video:{currentTime:0},
+    subtitleOverlay:{load:async(asset,offset,position,timing,networkReady)=>{
+      seen.push({stage:'cache',asset,position,networkReady});
+      await networkReady;
+      seen.push({stage:'network'});
+    }}
+  });
+  player.startEmbeddedAssPreload(session,8);
+  assert.equal(seen.length,1,'persistent ASS/cache work begins while initial seek is pending');
+  assert.equal(seen[0].position,125,'the initial cache preview targets the resume position');
+  assert.equal(seen[0].asset,session.subtitleAsset);
+  player.scheduleEmbeddedSubtitle();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(seen.length,1,'no MKV range request before the video resumes');
+  player.initialSeekPending=false;
+  player.video.currentTime=125;
+  player.scheduleEmbeddedSubtitle();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(seen.length,2,'decoder readiness releases only the MKV network stage');
+  assert.equal(player.assSubtitleNetworkGate,null);
+  player.scheduleEmbeddedSubtitle();
+  assert.equal(seen.length,2,'the same subtitle is not reloaded');
+});
+
 test('an active LG decoder schedules MKV subtitles before the later clock gate, only once', t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const session={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'}};
@@ -336,9 +366,10 @@ test('a hung Plex timeline cannot indefinitely block release and native fallback
   assert.equal(aborted,true);
 });
 
-test('a dimensionless LG video with a known first frame can finish subtitle startup',()=>{
+test('a dimensionless LG video with a known first frame can finish subtitle startup',t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
   const player=Object.assign(Object.create(Player.prototype),{
-    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv'}},
+    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv',format:'ass'}},
     video:{videoWidth:0,webkitDecodedFrameCount:0,currentTime:0,readyState:2},
     initialSeekTarget:0,initialSeekPending:false,pendingStart:0,hasFirstFrame:true,
     openIntentPlaying:false,enhancedPlaybackActive:true,options:{},
@@ -347,5 +378,6 @@ test('a dimensionless LG video with a known first frame can finish subtitle star
   });
   player.checkStartupProgress();
   assert.equal(player.startupComplete,true);
+  t.mock.timers.tick(0);
   assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
 });

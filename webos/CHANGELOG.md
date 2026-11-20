@@ -1,3 +1,13 @@
+## 1.22.6 — Faster ASS subtitles on initial resume and after seeks
+
+- Begin reading verified, persistent ASS subtitle and font caches and warming the libass renderer while the native video pipeline resumes. Previously the player waited for the seek to finish before even checking its cached subtitles. Cached ASS preview now targets the saved resume position rather than 0:00.
+- Preserve decoder-first network priority on the LG C8: a cache miss holds native MKV byte-range requests until the first decoded frame, and pending reads are canceled if the player switches tracks or closes.
+- Prioritize newly extracted ASS events intersecting the current playhead or next eight seconds when a large subtitle track is still importing; on seeks reprioritize pending events instead of waiting for unrelated scenes and vector signs.
+- Update libass to the precise seek timestamp before requesting a forced paused redraw, including when the decoder is underbuffered.
+- Add tests for cached startup at a saved timestamp, cancellation and seek-event priority.
+
+Retains v1.22.5's versioned worker assets and persistent font cache. Hardware-specific buffering timing needs testing on LG webOS 4.4.
+
 ## 1.22.5 — Fix broken ASS worker/font loading after IPK updates
 
 - Package the ASS worker, wrapper and all JavaScript chunks under a unique versioned asset directory. Previously 1.22.4 changed the worker chunk format while retaining the same URLs; stale scripts from previous installations could be mixed into an invalid worker on webOS, leaving custom ASS fonts unloaded.

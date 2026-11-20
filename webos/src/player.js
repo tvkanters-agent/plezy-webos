@@ -866,13 +866,18 @@ export class Player {
       // Arm before load/play: synchronous errors and never-settling Play
       // promises must not leave startup without a recovery deadline.
       this.armStartupTimeout(session, generation);
+      // Install the ASS decoder-network gate before video.load(): a native
+      // player can dispatch loadeddata/playing immediately when resuming a
+      // cached source. Otherwise that one-shot event could be missed and
+      // leave an uncached ASS load waiting forever.
+      if (this.enhancedPlaybackActive && session.subtitleAsset?.format === 'ass' &&
+          session.subtitleAsset.partUrl && !this.options.skipMatroskaSubtitles)
+        this.startEmbeddedAssPreload(session, generation);
       this.loadSource(session);
       if (generation !== this.generation || this.session !== session) return;
-      // Embedded MKV is loaded from the same Plex part as the video. Let the
-      // decoder secure its first frame before opening that second read.
-      // A decoder retry can deliberately disable MKV range reads while the
-      // session still exposes its original partUrl. Its Plex sidecar is an
-      // independent request and must not wait for the new video-ready gate.
+      // The MKV subtitle cache can warm in parallel with video startup.
+      // Uncached MKV reads still wait for the decoder-ready network gate.
+      // Sidecar subtitles are an independent download, so start immediately.
       if (this.enhancedPlaybackActive && session.subtitleAsset &&
           (!session.subtitleAsset.partUrl || this.options.skipMatroskaSubtitles))
         this.loadSubtitleAsset(session, generation);
@@ -908,18 +913,40 @@ export class Player {
       } : null;
       if (onTiming) onTiming('source', asset.partUrl ? 'MKV byte ranges' :
         this.options.skipMatroskaSubtitles ? 'Plex sidecar (decoder retry)' : 'Plex sidecar');
-      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position(), onTiming);
+      const gate = this.assSubtitleNetworkGate;
+      const networkReady = gate?.session === session ? gate.promise : null;
+      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs,
+        this.position(), onTiming, networkReady);
     } catch (error) {
       if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
     } finally {
       if (this.matroskaSubtitleSession === session) this.matroskaSubtitleSession = null;
     }
   }
+  startEmbeddedAssPreload(session, generation) {
+    if (!this.enhancedPlaybackActive || !this.subtitleOverlay ||
+        !session?.subtitleAsset?.partUrl || session.subtitleAsset.format !== 'ass' ||
+        this.options?.skipMatroskaSubtitles) return;
+    // Load cached track/font bytes and initialize libass in parallel with a
+    // native resume seek. A cache miss is held at the network gate until the
+    // video decoder produces its first frame.
+    let release;
+    const promise = new Promise(resolve => { release = resolve; });
+    this.assSubtitleNetworkGate = {session, generation, promise, release};
+    this.loadSubtitleAsset(session, generation);
+  }
   scheduleEmbeddedSubtitle() {
     if (!this.enhancedPlaybackActive || !this.session?.subtitleAsset?.partUrl ||
         this.options?.skipMatroskaSubtitles ||
         this.initialSeekPending || this.pendingStart ||
-        this.subtitleLoadSession === this.session || this.embeddedSubtitleTimer != null) return;
+        this.embeddedSubtitleTimer != null) return;
+    const gate = this.assSubtitleNetworkGate;
+    if (gate?.session === this.session) {
+      this.assSubtitleNetworkGate = null;
+      gate.release();
+      return;
+    }
+    if (this.subtitleLoadSession === this.session) return;
     const session=this.session, generation=this.generation;
     this.embeddedSubtitleTimer=setTimeout(() => {
       this.embeddedSubtitleTimer=null;
@@ -993,6 +1020,9 @@ export class Player {
     if (this.skipButton) this.update();
     this.checkStartupProgress();
     this.showBuffering(false);
+    // Native resumed playback can land without dispatching another playing
+    // event. Release an uncached ASS read gate on a confirmed first frame.
+    this.scheduleEmbeddedSubtitle();
   }
   armStartupTimeout(session = this.session, generation = this.generation) {
     clearTimeout(this.startTimeout);
@@ -1030,7 +1060,7 @@ export class Player {
       if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('video', Date.now() - this.subtitleDiagnostics.openedAt);
       if (this.enhancedPlaybackActive && this.session.subtitleAsset?.partUrl &&
           !this.options.skipMatroskaSubtitles)
-        this.loadSubtitleAsset(this.session, this.generation);
+        this.scheduleEmbeddedSubtitle();
     }
   }
   position() {
@@ -1085,6 +1115,8 @@ export class Player {
     this.subtitleLoadSession = null;
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
+    this.assSubtitleNetworkGate?.release();
+    this.assSubtitleNetworkGate = null;
     this.subtitleDiagnostics?.dispose();
     this.subtitleDiagnostics = null;
     this.matroskaSubtitleSession = null;
@@ -1156,6 +1188,8 @@ export class Player {
     this.embeddedSubtitleTimer = null;
     this.subtitleLoadSession = null;
     this.matroskaSubtitleSession = null;
+    this.assSubtitleNetworkGate?.release();
+    this.assSubtitleNetworkGate = null;
     this.subtitleOverlay.clear();
     this.subtitleDiagnostics?.dispose();
     this.subtitleDiagnostics = prefs?.diagnosticsEnabled === true && asset?.partUrl && asset.format === 'srt'
@@ -1497,6 +1531,11 @@ export class Player {
     if (shouldResume) this.queueResumeAfterSeek(target);
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
+    // The hardware media clock can remain at its previous timestamp for
+    // several frames after a seek. Give libass the authoritative seek target
+    // immediately, instead of waiting for webOS timeupdate to catch up.
+    if (this.enhancedPlaybackActive && this.session.subtitleAsset?.format === 'ass')
+      this.subtitleOverlay?.requestAssSeek(target);
     if (this.video.readyState < 1) this.pendingStart = target;
     else {
       try { this.video.currentTime = target; }
