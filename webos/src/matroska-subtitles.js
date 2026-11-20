@@ -424,7 +424,8 @@ async function attachedFonts(read, offset, scope) {
     throw invalid('invalid attachment index');
   const end = offset + header.end;
   let count = 0;
-  for (let pos = offset + header.start; pos < end && count++ < 256;) {
+  let pos = offset + header.start;
+  for (; pos < end && count++ < 256;) {
     const window = pos + 12 <= offset + rootWindow.length
       ? rootWindow.subarray(pos - offset) : await read(pos, Math.min(4096, end - pos));
     const file = element(window, 0);
@@ -466,6 +467,7 @@ async function attachedFonts(read, offset, scope) {
     }
     pos += file.end;
   }
+  if (pos < end) throw invalid('font attachment catalog exceeds the supported entry count');
   return fonts;
 }
 
