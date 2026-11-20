@@ -142,11 +142,11 @@ export class SubtitleOverlay {
 
   startClock() {
     this.stopClock();
-    if (this.kind !== 'srt' || this.video.paused || this.video.ended || this.video.seeking ||
+    if ((this.kind !== 'srt' && !this.dialogue) || this.video.paused || this.video.ended || this.video.seeking ||
         typeof requestAnimationFrame !== 'function') return;
     const tick = () => {
       this.frame = null;
-      if (this.kind !== 'srt') return;
+      if (this.kind !== 'srt' && !this.dialogue) return;
       this.update(this.offsetMs);
       if (!this.video.paused && !this.video.ended && !this.video.seeking)
         this.frame = requestAnimationFrame(tick);
@@ -159,6 +159,8 @@ export class SubtitleOverlay {
     if (this.abort) this.abort.abort();
     this.abort = null;
     this.releaseRenderer();
+    this.assContent = null;
+    this.assUnavailable = this.assPainted = false;
   }
 
   releaseRenderer() {
@@ -174,6 +176,8 @@ export class SubtitleOverlay {
         else if (typeof renderer.dispose === 'function') renderer.dispose();
       } catch (error) { console.warn('Subtitle renderer cleanup failed:', error); }
     }
+    this.dialogue?.destroy();
+    this.dialogue = null;
     this.element.textContent = '';
   }
 
@@ -199,7 +203,7 @@ export class SubtitleOverlay {
       const track = await parseText(content, {type});
       if (!track.cues.length) throw new Error('Subtitle file contains no readable cues.');
       if (generation !== this.generation) return;
-      if (this.kind && this.kind !== 'srt') this.releaseRenderer();
+      if (this.dialogue || this.kind && this.kind !== 'srt') this.releaseRenderer();
       const renderer = this.renderer || new CaptionsRenderer(this.element);
       this.renderer = renderer;
       this.kind = 'srt';
@@ -209,73 +213,143 @@ export class SubtitleOverlay {
     } else if (asset.format === 'ass') {
       if (!/\[Events\]/i.test(content) || !/^Dialogue:/mi.test(content))
         throw new Error('ASS subtitle file contains no readable dialogue.');
-      if (this.kind === 'ass') {
-        this.renderer.setTrack(content);
-        this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
-        return;
+      if (this.kind && this.kind !== 'ass') this.releaseRenderer();
+      this.assContent = content;
+      if (!this.assPainted) await this.prepareDialogue(content, generation);
+      if (generation !== this.generation || this.assUnavailable) return;
+      try {
+        await this.renderStyledAss(asset, content, generation);
+      } catch (error) {
+        await this.assFailure(error, generation);
       }
-      const resources = await ensureAssRenderer();
-      if (generation !== this.generation) return;
-      if (this.kind) this.releaseRenderer();
-      // The worker is loaded only for ASS/SSA; webOS 4.x uses its non-WASM build.
-      let renderer;
-      let ready = false;
-      const showReady = () => {
-        if (generation !== this.generation || this.renderer !== renderer) return;
-        clearTimeout(this.readyTimer);
-        this.readyTimer = null;
-        renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
-      };
-      renderer = new window.SubtitlesOctopus({
-        video: this.video, subContent: content, debug:true,
-        // Debug mode avoids an uncaught global throw after a handled worker
-        // failure; the player retries using Plex burn-in through onError.
-        workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
-        timeOffset: -this.offsetMs / 1000,
-        onReady: () => {
-          ready = true;
-          showReady();
-        },
-        onError: error => {
-          if (generation === this.generation && this.onError) this.onError(error);
-        }
-      });
-      if (generation !== this.generation) { renderer.dispose(); return; }
-      // libass divides videoWidth by videoHeight. On the LG hardware plane
-      // both can be zero even after decoding starts, leaving its canvas hidden.
-      if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
-        const nativePosition = renderer.getVideoPosition;
-        renderer.getVideoPosition = () => {
-          const video = this.video;
-          if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
-          const width = video.offsetWidth, height = video.offsetHeight;
-          const aspect = asset.aspectRatio;
-          if (!aspect) return {width, height, x:0, y:0};
-          const w = Math.min(width, Math.round(height * aspect));
-          const h = Math.min(height, Math.round(width / aspect));
-          return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
-        };
-        renderer.resize();
-      }
-      this.renderer = renderer;
-      this.kind = 'ass';
-      // A worker may neither become ready nor report an error on the LG
-      // browser. Treat that as a render failure instead of invisible captions.
-      if (ready) showReady();
-      else this.readyTimer = setTimeout(() => {
-        if (generation === this.generation && this.renderer === renderer && this.onError)
-          this.onError(new Error('ASS subtitle renderer did not become ready.'));
-      }, 20000);
     } else {
       throw new Error('Unsupported external subtitle format.');
     }
   }
 
+  async prepareDialogue(content, generation) {
+    try {
+      const track = await parseText(content + '\n', {type:'ssa'});
+      if (generation !== this.generation || this.assContent !== content || this.assPainted || !track.cues.length) return;
+      // The fallback shares the known-working SRT layout and clock. Leave
+      // typesetting to libass when its canvas actually has visible content.
+      for (const cue of track.cues) cue.style = undefined;
+      const renderer = this.dialogue || new CaptionsRenderer(this.element);
+      renderer.changeTrack(track);
+      this.dialogue = renderer;
+      this.update(this.offsetMs);
+      this.startClock();
+    } catch (error) {
+      console.info('ASS dialogue fallback unavailable:', error.message);
+    }
+  }
+
+  async assFailure(error, generation) {
+    if (generation !== this.generation || this.assUnavailable) return;
+    this.assUnavailable = true;
+    const wasPainted = this.assPainted;
+    this.assPainted = false;
+    clearTimeout(this.readyTimer);
+    if (wasPainted) await this.prepareDialogue(this.assContent, generation);
+    if (generation !== this.generation) return;
+    if (!this.dialogue) { this.onError?.(error); return; }
+    const renderer = this.renderer;
+    this.renderer = null;
+    this.kind = null;
+    if (renderer?.canvas) renderer.canvas.style.visibility = 'hidden';
+    try { renderer?.dispose(); }
+    catch (cleanupError) { console.warn('ASS renderer cleanup failed:', cleanupError); }
+    console.info('Using timed ASS dialogue:', error.message || error);
+  }
+
+  async renderStyledAss(asset, content, generation) {
+    if (this.kind === 'ass') {
+      this.renderer.setTrack(content);
+      this.renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+      return;
+    }
+    const resources = await ensureAssRenderer();
+    if (generation !== this.generation) return;
+    let renderer;
+    let ready = false;
+    const showReady = () => {
+      if (generation !== this.generation || this.renderer !== renderer) return;
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+      renderer.setCurrentTime(subtitleTime(this.video.currentTime, this.offsetMs));
+    };
+    renderer = new window.SubtitlesOctopus({
+      video: this.video, subContent: content, debug:true,
+      // Let the player recover from worker errors without a global throw.
+      workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
+      timeOffset: -this.offsetMs / 1000,
+      onReady: () => {
+        ready = true;
+        showReady();
+      },
+      onError: error => {
+        Promise.resolve().then(() => {
+          if (this.renderer === renderer) this.assFailure(error, generation);
+        });
+      }
+    });
+    if (generation !== this.generation) { renderer.dispose(); return; }
+    // libass divides videoWidth by videoHeight. On the LG hardware plane
+    // both can be zero even after decoding starts, leaving its canvas hidden.
+    if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
+      const nativePosition = renderer.getVideoPosition;
+      renderer.getVideoPosition = () => {
+        const video = this.video;
+        if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
+        const width = video.offsetWidth, height = video.offsetHeight;
+        const aspect = asset.aspectRatio;
+        if (!aspect) return {width, height, x:0, y:0};
+        const w = Math.min(width, Math.round(height * aspect));
+        const h = Math.min(height, Math.round(width / aspect));
+        return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
+      };
+      renderer.resize();
+    }
+    this.renderer = renderer;
+    this.kind = 'ass';
+    // Octopus calls onReady on its first worker message, including logs.
+    // Retire the dialogue only after the canvas contains painted pixels.
+    const onFrame = event => {
+      if (event.data.target !== 'canvas' || !event.data.canvases?.length) return;
+      requestAnimationFrame(() => {
+        if (generation !== this.generation || this.assPainted || this.assUnavailable || this.renderer !== renderer) return;
+        const probe = document.createElement('canvas');
+        probe.width = 160; probe.height = 90;
+        const ctx = probe.getContext('2d');
+        ctx.drawImage(renderer.canvas, 0, 0, probe.width, probe.height);
+        const pixels = ctx.getImageData(0, 0, probe.width, probe.height).data;
+        for (let i = 3; i < pixels.length; i += 4) {
+          if (!pixels[i]) continue;
+          this.assPainted = true;
+          renderer.worker.removeEventListener('message', onFrame);
+          this.dialogue?.destroy();
+          this.dialogue = null;
+          this.stopClock();
+          break;
+        }
+      });
+    };
+    renderer.worker?.addEventListener('message', onFrame);
+    // A worker may neither become ready nor report an error on the LG
+    // browser. Treat that as a render failure instead of invisible captions.
+    if (ready) showReady();
+    else this.readyTimer = setTimeout(() => {
+      if (generation === this.generation && this.renderer === renderer)
+        this.assFailure(new Error('ASS subtitle renderer did not become ready.'), generation);
+    }, 20000);
+  }
+
   update(offsetMs) {
     const changed = this.offsetMs !== offsetMs;
     this.offsetMs = offsetMs;
-    if (!this.renderer) return;
     const currentTime = subtitleTime(this.video.currentTime, offsetMs);
+    if (this.dialogue) this.dialogue.currentTime = currentTime;
+    if (!this.renderer) return;
     if (this.kind === 'srt') this.renderer.currentTime = currentTime;
     if (this.kind === 'ass' && changed) {
       this.renderer.timeOffset = -offsetMs / 1000;

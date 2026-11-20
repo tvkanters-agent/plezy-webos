@@ -26,6 +26,15 @@
       return value;
     };
   }
+  // Media Captions normalizes ASS centiseconds to milliseconds with padEnd.
+  if (!String.prototype.padEnd) {
+    String.prototype.padEnd = function (length, padding) {
+      var value = String(this), fill = padding === undefined ? ' ' : String(padding);
+      if (!fill) return value;
+      while (value.length < length) value += fill.slice(0, length - value.length);
+      return value;
+    };
+  }
   if (!Promise.prototype.finally) {
     Promise.prototype.finally = function (callback) {
       var C = this.constructor;
