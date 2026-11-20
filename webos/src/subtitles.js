@@ -484,7 +484,13 @@ export class SubtitleOverlay {
       renderer.onErrorEvent = onError;
       renderer.debug = this.preferences()?.diagnosticsEnabled === true;
       renderer.timeOffset = -this.offsetMs / 1000;
-      if (renderer.canvasParent) renderer.canvasParent.style.display = '';
+      // A warm libass worker retains the last painted canvas. It is NOT the
+      // new episode's first frame. Keep that canvas hidden until libass has
+      // rendered a nonempty cue for this session, otherwise a stale frame can
+      // masquerade as successful startup and remain visible after a paused seek.
+      if (renderer.canvasParent) renderer.canvasParent.style.display = 'none';
+      if (renderer.ctx && renderer.canvas)
+        renderer.ctx.clearRect(0,0,renderer.canvas.width,renderer.canvas.height);
       renderer.plezyResumeVideo();
       renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
       if (renderer._plezyTrackContent !== content) renderer.setTrack(content);
@@ -571,6 +577,7 @@ export class SubtitleOverlay {
         for (let i = 3; i < pixels.length; i += 4) {
           if (!pixels[i]) continue;
           this.assPainted = true;
+          if (renderer.canvasParent) renderer.canvasParent.style.display = '';
           clearTimeout(this.dialogueTimer);
           renderer.worker.removeEventListener('message', onFrame);
           if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
