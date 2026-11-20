@@ -36,3 +36,20 @@ test('a growing ASS stream appends only newly extracted events and does not repl
   append.remember(header + first + '\n' + second + '\n' + second + '\n' + first + '\n');
   assert.equal(sent.length,2,'released tracks cannot receive delayed events');
 });
+
+test('paused ASS event imports force a redraw after the worker installs the events',()=>{
+  const sent=[];
+  let stylesReply;
+  const renderer={video:{currentTime:6.5,paused:true,seeking:false},timeOffset:0,
+    worker:{postMessage:msg=>sent.push(msg)},
+    getStyles:fn=>{stylesReply=fn;},
+    setCurrentTime:time=>sent.push({target:'video',time})};
+  const appender=new AssEventAppender(renderer,header+first+'\n');
+  appender.remember(header+first+'\n'+second+'\n');
+  appender.ready();
+  stylesReply([{Name:'Default',_index:0},{Name:'Signs',_index:2}]);
+  assert.deepEqual(sent.map(msg=>msg.target),
+    ['create-events','plezy-force-frame','video'],
+    'paused redraw must occur after the worker processes the new events');
+  appender.dispose();
+});
