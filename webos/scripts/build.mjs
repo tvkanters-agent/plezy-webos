@@ -17,8 +17,40 @@ await cp(path.join(root, 'node_modules/pixi.js/LICENSE'),path.join(root,'dist/pi
 // can load sibling scripts but Chromium may refuse a sibling Worker URL.
 const vendor = path.join(root, 'node_modules/libass-wasm/dist/js');
 const libass = path.join(root, 'dist/libass');
-for (const name of ['subtitles-octopus.js', 'COPYRIGHT'])
-  await cp(path.join(vendor, name), path.join(libass, name));
+await cp(path.join(vendor, 'COPYRIGHT'),path.join(libass,'COPYRIGHT'));
+// Preserve the full libass runtime across playback without leaving an idle
+// worker subscribed to subsequent videos. The upstream wrapper's handlers
+// are closures, so expose narrowly scoped suspend/resume hooks at build time.
+let octopus = await readFile(path.join(vendor,'subtitles-octopus.js'),'utf8');
+const disposeAnchor = '    self.dispose = function () {';
+if (!octopus.includes(disposeAnchor)) throw new Error('SubtitlesOctopus video lifecycle changed');
+octopus = octopus.replace(disposeAnchor, `    self.plezySuspendVideo = function () {
+        if (self._plezySuspended || !self.video) return;
+        self._plezySuspended = true;
+        for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
+            ['seeking',onSeeking],['seeked',onSeeked],['ratechange',onRateChange],
+            ['waiting',onWaiting],['loadedmetadata',onLoadedMetadata]])
+            self.video.removeEventListener(pair[0],pair[1],false);
+        for (var event of ['fullscreenchange','mozfullscreenchange','webkitfullscreenchange','msfullscreenchange'])
+            document.removeEventListener(event,self.resizeWithTimeout,false);
+        window.removeEventListener('resize',self.resizeWithTimeout,false);
+        if (self.ro) self.ro.disconnect();
+    };
+    self.plezyResumeVideo = function () {
+        if (!self._plezySuspended || !self.video) return;
+        self._plezySuspended = false;
+        for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
+            ['seeking',onSeeking],['seeked',onSeeked],['ratechange',onRateChange],
+            ['waiting',onWaiting]])
+            self.video.addEventListener(pair[0],pair[1],false);
+        for (var event of ['fullscreenchange','mozfullscreenchange','webkitfullscreenchange','msfullscreenchange'])
+            document.addEventListener(event,self.resizeWithTimeout,false);
+        window.addEventListener('resize',self.resizeWithTimeout,false);
+        if (self.ro) self.ro.observe(self.video);
+        self.resize();
+    };
+` + disposeAnchor);
+await writeFile(path.join(libass,'subtitles-octopus.js'),octopus);
 const fallbackFont = await readFile(path.join(libass, 'default.woff2'));
 if (fallbackFont.toString('ascii', 0, 4) !== 'wOF2')
   throw new Error('The bundled libass fallback font is missing or invalid.');
@@ -54,6 +86,7 @@ for (const legacy of [false, true]) {
   // reparsing an ever-growing ASS script on every extracted MKV cluster.
   source += '\nvar originalAssWorkerMessage = self.onmessage;\n' +
     'self.onmessage = function(message) {\n' +
+    '  if (message.data.target === "plezy-force-frame") { self.getRenderMethod()(true); return; }\n' +
     '  if (message.data.target !== "create-events") return originalAssWorkerMessage(message);\n' +
     '  var events = message.data.events;\n' +
     '  for (var i = 0; i < events.length; i++) {\n' +

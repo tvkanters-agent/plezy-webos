@@ -2,6 +2,8 @@
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {attachAssColorComparison} from './ass-color-diagnostics.js';
 import {AssEventAppender} from './ass-events.js';
+import {assFontCache} from './ass-font-cache.js';
+import {assTrackCache} from './ass-track-cache.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
 import {PixiSrtRenderer} from './pixi-subtitles.js';
@@ -66,6 +68,12 @@ export function subtitleTime(videoTime, offsetMs) {
   return (Number(videoTime) || 0) - (Number(offsetMs) || 0) / 1000;
 }
 
+function sameFonts(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((font,i) => font.name === right[i].name &&
+    font.bytes === right[i].bytes);
+}
+
 // Plex Web's profile can deliver embedded text in an ASS wrapper even if
 // the source track is SRT. Choose the renderer from both source and payload.
 function embeddedSubtitleType(content) {
@@ -111,12 +119,30 @@ async function subtitleRequest(signal, run) {
 async function downloadSubtitle(asset, signal, position, preview, onTiming) {
   if (asset.partUrl) {
     try {
-      return await subtitleRequest(signal, (requestSignal, refresh) =>
+      if (asset.format === 'ass' && asset.partCacheKey) {
+        const saved = await assTrackCache.get(asset.partCacheKey);
+        if (signal.aborted) throw Object.assign(new Error('Aborted'), {name:'AbortError'});
+        if (saved) {
+          const fonts = await Promise.all(saved.fonts.map(async font => {
+            const bytes = await assFontCache.get(asset.fontScope,font.name,font.length,font.crc);
+            return bytes && {name:font.name,bytes};
+          }));
+          if (fonts.every(Boolean)) {
+            asset.fonts = fonts;
+            return saved.script;
+          }
+        }
+      }
+      const script = await subtitleRequest(signal, (requestSignal, refresh) =>
         extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming,
           onFonts:asset.format === 'ass' ? fonts => { asset.fonts = fonts; } : undefined,
           async preview(content) {
             if (!requestSignal.aborted) await preview(content);
           }}));
+      if (asset.format === 'ass' && asset.partCacheKey && asset.fonts)
+        assTrackCache.put(asset.partCacheKey,script,asset.fonts.map(font =>
+          ({name:font.name,length:font.bytes.byteLength,crc:font.crc})));
+      return script;
     } catch (error) {
       if (signal.aborted) throw error;
       if (onTiming) onTiming('fallback', error.message);
@@ -148,6 +174,7 @@ export class SubtitleOverlay {
     this.frame = null;
     this.readyTimer = null;
     this.assWaiting = false;
+    this.assClockTimer = null;
     // timeupdate may arrive only four times a second. Keep SRT cue boundaries
     // aligned to the visible playback clock, including short cues.
     this.listeners = [];
@@ -155,15 +182,28 @@ export class SubtitleOverlay {
       video.addEventListener?.(type, handler);
       this.listeners.push({type,handler});
     };
-    listen('playing', () => { this.assWaiting = false; this.syncAssClock(); this.startClock(); });
+    listen('playing', () => { this.assWaiting = false; this.syncAssClock(); this.startAssClock(); this.startClock(); });
     for (const event of ['pause', 'ended', 'seeking']) {
-      listen(event, () => { this.stopClock(); this.update(this.offsetMs); this.syncAssClock(); });
+      listen(event, () => {
+        this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
+        if (event === 'ended') this.stopAssClock();
+        else this.startAssClock();
+      });
     }
     listen('waiting', () => {
-      this.assWaiting = true; this.stopClock(); this.update(this.offsetMs); this.syncAssClock();
+      this.assWaiting = true; this.assWaitingPosition = this.video.currentTime;
+      this.stopClock(); this.update(this.offsetMs); this.syncAssClock(); this.startAssClock();
     });
     listen('seeked', () => {
-      this.update(this.offsetMs); this.syncAssClock(); this.startClock();
+      // Some LG decoders do not emit a second `playing` after a buffered seek.
+      // A prior waiting event must not freeze libass indefinitely.
+      this.assWaiting = false;
+      this.update(this.offsetMs); this.syncAssClock(true); this.startAssClock(); this.startClock();
+    });
+    listen('timeupdate', () => {
+      if (this.assWaiting && Math.abs(this.video.currentTime - this.assWaitingPosition) > 0.03)
+        this.assWaiting = false;
+      if (this.kind === 'ass') { this.syncAssClock(); this.startAssClock(); }
     });
     listen('ratechange', () => this.syncAssClock());
     listen('loadedmetadata', () => this.refreshStyle());
@@ -173,6 +213,8 @@ export class SubtitleOverlay {
 
   dispose() {
     this.clear();
+    this.parkedAssRenderer?.dispose?.();
+    this.parkedAssRenderer = null;
     for (const {type,handler} of this.listeners) this.video.removeEventListener?.(type, handler);
     this.listeners = [];
     if (typeof window !== 'undefined') window.removeEventListener?.('resize',this.resizeStyle);
@@ -187,6 +229,29 @@ export class SubtitleOverlay {
   stopClock() {
     if (this.frame != null) cancelAnimationFrame(this.frame);
     this.frame = null;
+  }
+
+  stopAssClock() {
+    clearInterval(this.assClockTimer);
+    this.assClockTimer = null;
+  }
+
+  startAssClock() {
+    if (this.assClockTimer || this.kind !== 'ass' || this.video.ended) return;
+    // Unlike requestAnimationFrame, this reads the actual decoded video clock.
+    // Native LG timeupdate/seeked events can be sparse or absent. Check paused
+    // seeks too: libass must repaint the new frame even without `playing`.
+    this.assClockLast = subtitleTime(this.video.currentTime,this.offsetMs);
+    this.assClockTimer = setInterval(() => {
+      if (this.kind !== 'ass') { this.stopAssClock(); return; }
+      const current = subtitleTime(this.video.currentTime,this.offsetMs);
+      const moved = Math.abs(current - this.assClockLast) > 0.03;
+      this.assClockLast = current;
+      if (this.assWaiting && Math.abs(this.video.currentTime - this.assWaitingPosition) > 0.03)
+        this.assWaiting = false;
+      if (!this.video.paused || moved || this.assWaiting)
+        this.syncAssClock(moved && (this.video.paused || this.video.seeking || this.assWaiting));
+    }, 250);
   }
 
   startClock() {
@@ -214,6 +279,12 @@ export class SubtitleOverlay {
   }
 
   releaseRenderer() {
+    this.stopAssClock();
+    const eventsInstalled = !this.assAppender ||
+      !!this.assAppender.styles && this.assAppender.pending.length === 0;
+    if (this.assFrameWorker && this.assFrameHandler)
+      this.assFrameWorker.removeEventListener('message',this.assFrameHandler);
+    this.assFrameWorker = this.assFrameHandler = null;
     this.assAppender?.dispose();
     this.assAppender = null;
     this.removeAssComparison?.();
@@ -223,10 +294,21 @@ export class SubtitleOverlay {
     this.dialogueTimer = this.readyTimer = null;
     this.stopClock();
     const renderer = this.renderer;
+    const parkAss = this.kind === 'ass' && renderer?.worker &&
+      eventsInstalled && renderer._plezyFullyReady &&
+      typeof renderer.plezySuspendVideo === 'function' && !this.assUnavailable;
     this.renderer = null;
     this.kind = null;
     this.aspectRatio = null;
-    if (renderer) {
+    if (renderer && parkAss) {
+      // Reserved for the next playback. No animation or font processing runs
+      // while parked, but the expensive 4.7 MB legacy libass worker survives.
+      this.parkedAssRenderer?.dispose();
+      renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
+      renderer.plezySuspendVideo();
+      if (renderer.canvasParent) renderer.canvasParent.style.display = 'none';
+      this.parkedAssRenderer = renderer;
+    } else if (renderer) {
       try {
         if (typeof renderer.destroy === 'function') renderer.destroy();
         else if (typeof renderer.dispose === 'function') renderer.dispose();
@@ -355,6 +437,7 @@ export class SubtitleOverlay {
     if (this.kind === 'ass') {
       if (this.assAppender) this.assAppender.remember(content);
       else this.renderer.setTrack(content);
+      this.renderer._plezyTrackContent = content;
       return;
     }
     const resources = await ensureAssRenderer();
@@ -369,25 +452,48 @@ export class SubtitleOverlay {
       renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting), time);
       renderer.setRate(this.video.playbackRate || 1);
     };
-    renderer = new window.SubtitlesOctopus({
-      video: this.video, subContent: content, fonts:asset.fonts || [],
-      debug:this.preferences()?.diagnosticsEnabled === true,
-      // Let the player recover from worker errors without a global throw.
-      workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
-      timeOffset: -this.offsetMs / 1000,
-      onReady: () => {
+    const onError = error => {
+      if (renderer) renderer.debug = true;
+      Promise.resolve().then(() => {
+        if (this.renderer === renderer) this.assFailure(error, generation);
+      });
+    };
+    const parked = this.parkedAssRenderer;
+    this.parkedAssRenderer = null;
+    if (parked && sameFonts(parked.fonts, asset.fonts || [])) {
+      // Retain compiled asm.js/WASM and registered glyphs for repeat plays
+      // and sibling episodes. Only parse changed dialogue on a new episode.
+      renderer = parked;
+      renderer.onErrorEvent = onError;
+      renderer.debug = this.preferences()?.diagnosticsEnabled === true;
+      renderer.timeOffset = -this.offsetMs / 1000;
+      if (renderer.canvasParent) renderer.canvasParent.style.display = '';
+      renderer.plezyResumeVideo();
+      renderer.setIsPaused(true,subtitleTime(this.video.currentTime,this.offsetMs));
+      if (renderer._plezyTrackContent !== content) renderer.setTrack(content);
+      ready = true;
+    } else {
+      parked?.dispose();
+      renderer = new window.SubtitlesOctopus({
+        video: this.video, subContent: content, fonts:asset.fonts || [],
+        debug:this.preferences()?.diagnosticsEnabled === true,
+        // Let the player recover from worker errors without a global throw.
+        workerUrl: resources?.workerUrl, legacyWorkerUrl: resources?.workerUrl,
+        timeOffset: -this.offsetMs / 1000,
+        onError
+      });
+      const onRuntimeReady = event => {
+        if (event.data.target !== 'ready') return;
+        renderer.worker?.removeEventListener('message',onRuntimeReady);
+        // SubtitlesOctopus fires its public onReady on the *first* worker
+        // message, sometimes just a log before libass has initialized.
+        // Wait for the explicit runtime-ready message before any forced draw.
+        renderer._plezyFullyReady = true;
         ready = true;
         showReady();
-      },
-      onError: error => {
-        // Octopus otherwise throws globally and disposes a second time after
-        // invoking our recovery callback. Only change this on a failed worker.
-        if (renderer) renderer.debug = true;
-        Promise.resolve().then(() => {
-          if (this.renderer === renderer) this.assFailure(error, generation);
-        });
-      }
-    });
+      };
+      renderer.worker?.addEventListener('message',onRuntimeReady);
+    }
     if (generation !== this.generation) { renderer.dispose(); return; }
     // The bundled libass worker normally timestamps video events only when
     // it receives them. Under load that means a stale seek clock can appear
@@ -403,22 +509,27 @@ export class SubtitleOverlay {
     }
     // libass divides videoWidth by videoHeight. On the LG hardware plane
     // both can be zero even after decoding starts, leaving its canvas hidden.
+    renderer._plezyAspectRatio = asset.aspectRatio;
     if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
-      const nativePosition = renderer.getVideoPosition;
-      renderer.getVideoPosition = () => {
-        const video = this.video;
-        if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
-        const width = video.offsetWidth, height = video.offsetHeight;
-        const aspect = asset.aspectRatio;
-        if (!aspect) return {width, height, x:0, y:0};
-        const w = Math.min(width, Math.round(height * aspect));
-        const h = Math.min(height, Math.round(width / aspect));
-        return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
-      };
+      if (!renderer._plezyNativePosition) {
+        const nativePosition = renderer._plezyNativePosition = renderer.getVideoPosition;
+        renderer.getVideoPosition = () => {
+          const video = this.video;
+          if (video.videoWidth > 0 && video.videoHeight > 0) return nativePosition();
+          const width = video.offsetWidth, height = video.offsetHeight;
+          const aspect = renderer._plezyAspectRatio;
+          if (!aspect) return {width, height, x:0, y:0};
+          const w = Math.min(width, Math.round(height * aspect));
+          const h = Math.min(height, Math.round(width / aspect));
+          return {width:w, height:h, x:(width - w) / 2, y:(height - h) / 2};
+        };
+      }
       renderer.resize();
     }
     this.renderer = renderer;
     this.kind = 'ass';
+    renderer._plezyTrackContent = content;
+    this.startAssClock();
     if (asset.partUrl && renderer.worker && renderer.getStyles)
       this.assAppender = new AssEventAppender(renderer, content);
     if (renderer.worker && this.preferences()?.diagnosticsEnabled === true)
@@ -429,6 +540,7 @@ export class SubtitleOverlay {
       if (event.data.target !== 'canvas' || !event.data.canvases?.length) return;
       requestAnimationFrame(() => {
         if (generation !== this.generation || this.assPainted || this.assUnavailable || this.renderer !== renderer) return;
+        if (renderer.canvas.style.visibility === 'hidden') renderer.canvas.style.visibility = 'visible';
         const probe = document.createElement('canvas');
         probe.width = 160; probe.height = 90;
         const ctx = probe.getContext('2d');
@@ -439,6 +551,7 @@ export class SubtitleOverlay {
           this.assPainted = true;
           clearTimeout(this.dialogueTimer);
           renderer.worker.removeEventListener('message', onFrame);
+          if (this.assFrameHandler === onFrame) this.assFrameWorker = this.assFrameHandler = null;
           this.dialogue?.destroy();
           this.dialogue = null;
           this.stopClock();
@@ -447,6 +560,8 @@ export class SubtitleOverlay {
       });
     };
     renderer.worker?.addEventListener('message', onFrame);
+    this.assFrameWorker = renderer.worker;
+    this.assFrameHandler = onFrame;
     // A worker may neither become ready nor report an error on the LG
     // browser. Treat that as a render failure instead of invisible captions.
     if (ready) showReady();
@@ -457,11 +572,13 @@ export class SubtitleOverlay {
     this.assAppender?.ready();
   }
 
-  syncAssClock() {
+  syncAssClock(force = false) {
     if (this.kind !== 'ass' || !this.renderer) return;
     const current = subtitleTime(this.video.currentTime, this.offsetMs);
     this.renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),current);
     this.renderer.setRate(this.video.playbackRate || 1);
+    if (force && this.renderer._plezyFullyReady)
+      this.renderer.worker?.postMessage({target:'plezy-force-frame'});
   }
 
   update(offsetMs) {
