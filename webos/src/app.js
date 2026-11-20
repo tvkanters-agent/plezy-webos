@@ -2024,8 +2024,17 @@ async function render(prepared = null) {
         const parentLink = button(parentShow.title, () => go({type:'detail',id:parentShow.id,kind:'show'}), 'detail-series-link');
         parentLink.dataset.focus = 'detail-series';
         info.append(parentLink);
-        if (isEpisode && raw.parentIndex != null && raw.index != null)
-          info.append(el('p', 'Season ' + raw.parentIndex + ' · Episode ' + raw.index, 'detail-context'));
+      }
+      if (isEpisode && raw.parentIndex != null && raw.index != null) {
+        const context = el('p', undefined, 'detail-context');
+        if (currentApi instanceof Plex && raw.parentRatingKey) {
+          const seasonLink = button('Season ' + raw.parentIndex,
+            () => go({type:'detail', id:raw.parentRatingKey, kind:'season'}), 'detail-season-link');
+          seasonLink.dataset.focus = 'detail-season';
+          context.append(seasonLink);
+        } else context.append(document.createTextNode('Season ' + raw.parentIndex));
+        context.append(document.createTextNode(' · Episode ' + raw.index));
+        info.append(context);
       }
       if (raw.tagline || showRaw.tagline)
         info.append(el('p', raw.tagline || showRaw.tagline, 'detail-tagline'));
