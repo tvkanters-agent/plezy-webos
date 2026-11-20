@@ -2028,6 +2028,10 @@ test('compressed MKV ASS draws before the final ranges arrive and keeps the appl
 });
 
 test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
+  const assRequests=[];
+  page.on('request',request=>{
+    if (request.url().includes('/libass/')) assRequests.push(request.url());
+  });
   const font=await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
   const fixture=assFixture(6000,'ass',font);
   const ranges=[];
@@ -2076,6 +2080,9 @@ test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
   await expect.poll(painted,{timeout:30000}).toBe(true);
   expect(ranges.filter(entry=>entry.length===font.length)).toHaveLength(1);
   expect(ranges.filter(entry=>entry.start===0&&entry.length===32768)).toHaveLength(indexedReads);
+  expect(assRequests.length).toBeGreaterThan(0);
+  expect(assRequests.every(url=>url.includes('/libass/v1.22.5/'))).toBe(true,
+    'an IPK update must never reuse an earlier version of a worker script');
 });
 
 test('reopening ASS and switching episodes reuses the compiled worker and same-series fonts',async({page})=>{

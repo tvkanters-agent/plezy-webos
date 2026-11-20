@@ -1,3 +1,12 @@
+## 1.22.5 — Fix broken ASS worker/font loading after IPK updates
+
+- Package the ASS worker, wrapper and all JavaScript chunks under a unique versioned asset directory. Previously 1.22.4 changed the worker chunk format while retaining the same URLs; stale scripts from previous installations could be mixed into an invalid worker on webOS, leaving custom ASS fonts unloaded.
+- Restore sequential chunk loading specifically for the large legacy worker on Chromium 53, and validate every indexed Blob rather than accepting sparse arrays. This keeps the other 1.22.4 performance and synchronization improvements.
+- Do not rename, invalidate or clear existing ASS font and subtitle-track IndexedDB stores. Cached fonts remain usable and missing fonts can still be read from the original MKV.
+- Verify versioned worker resources at build time and cover version-specific asset URLs in browser tests.
+
+TV-specific asset caching and font behavior still require verification on LG webOS 4.4.
+
 ## 1.22.4 — Improve ASS startup reliability and synchronize renderer timing
 
 - Use the player’s authoritative decoded-video clock exclusively while styled ASS is active. The bundled SubtitlesOctopus no longer sends a second set of conflicting timeupdate, pause, seek and buffering messages; its resize/metadata listeners remain attached.

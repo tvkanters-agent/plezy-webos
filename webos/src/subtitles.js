@@ -8,6 +8,7 @@ import {assTrackCache} from './ass-track-cache.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
 import {applySrtStyle, resetSrtStyle} from './subtitle-style.js';
 import {PixiSrtRenderer} from './pixi-subtitles.js';
+import {VERSION} from './core.js';
 
 let pixiScript;
 function ensurePixi() {
@@ -26,7 +27,9 @@ function ensurePixi() {
 function loadAssScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'libass/' + src;
+    // Names must change on update, not merely their contents: otherwise an LG
+    // installation can replay cached fragments from the previous IPK.
+    script.src = 'libass/v' + VERSION + '/' + src;
     script.onload = () => { script.remove(); resolve(); };
     script.onerror = () => { script.remove(); reject(new Error('Could not load ' + src)); };
     document.head.appendChild(script);
@@ -47,17 +50,17 @@ async function ensureAssRenderer() {
         await loadAssScript(prefix + '-assets.js');
         window.plezyAssParts = [];
         try {
-          // Independent local chunks can load concurrently. Each writes its
-          // fixed array index so out-of-order script completion is safe.
-          for (let i = 0; i < window.plezyAssPartCount; i += 3) {
-            const batch = [];
-            for (let j = i; j < Math.min(i + 3, window.plezyAssPartCount); j++)
-              batch.push(loadAssScript(prefix + '-' + j + '.js'));
-            await Promise.all(batch);
-          }
-          if (window.plezyAssParts.length !== window.plezyAssPartCount ||
-              window.plezyAssParts.some(part => !part))
+          // Chromium 53's file:// loader can reuse older cached scripts and
+          // handles concurrent large classic scripts unreliably on the C8.
+          // Keep the worker pieces ordered, and verify every part arrived.
+          for (let i = 0; i < window.plezyAssPartCount; i++)
+            await loadAssScript(prefix + '-' + i + '.js');
+          if (window.plezyAssParts.length !== window.plezyAssPartCount)
             throw new Error('Incomplete ASS worker asset bundle.');
+          for (let i = 0; i < window.plezyAssPartCount; i++) {
+            if (!(window.plezyAssParts[i] instanceof Blob))
+              throw new Error('Missing ASS worker asset ' + i);
+          }
           const blob = new Blob(window.plezyAssParts, {type:'text/javascript'});
           window.plezyAssAssets = {workerUrl:URL.createObjectURL(blob)};
         } finally {
