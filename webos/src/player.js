@@ -805,7 +805,7 @@ export class Player {
       this.session = session;
       this.trackCatalog = session;
       if (this.enhancedPlaybackActive && session.subtitleAsset && !this.subtitleOverlay)
-        this.subtitleOverlay = new SubtitleOverlay(this.video, this.root.querySelector('.player-captions'));
+        this.subtitleOverlay = new SubtitleOverlay(this.video, this.root.querySelector('.player-captions'),this.preferences);
       this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;

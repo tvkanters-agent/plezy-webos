@@ -541,7 +541,10 @@ export class Plex {
         subtitleAsset.streamIndex = selectedSubtitle.index;
       }
     }
-    if (subtitleAsset && subtitle.format === 'ass') {
+    if (subtitleAsset) {
+      // Chromium/webOS may keep decoded video dimensions at zero on the
+      // hardware plane. Pass the same metadata aspect ratio to SRT's
+      // use-margins layout as well as the existing libass canvas fallback.
       const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);
       if (Number.isFinite(aspect) && aspect > 0) subtitleAsset.aspectRatio = aspect;
     }

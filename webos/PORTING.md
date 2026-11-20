@@ -48,8 +48,8 @@ leading symbols, title/subtitle, and a trailing chevron or switch. The native
 subpages use a Back header, selection and text/numeric values are edited in
 focusable dialogs, and Back restores the originating row and scroll position.
 
-Only currently implemented webOS options appear: Video Playback (Player and
-Auto-play & Skip), Manage Libraries, Services (Simkl and MDBList), Connections,
+Only currently implemented webOS options appear: Video Playback (Player,
+Subtitles and Auto-play & Skip), Manage Libraries, Services (Simkl and MDBList), Connections,
 and About. The original General and Appearance pages, and native-only playback
 preferences, are omitted rather than populated with invented settings. Server
 connection details and the Enhanced playback switch are existing webOS-only
@@ -58,6 +58,29 @@ standalone Simkl linking remain available. Flutter's Material rows are rendered
 as grouped HTML/CSS and inline SVGs because webOS Chromium 53 cannot run Flutter
 widgets or load the Material Symbols font. TV remote, focus, Back, form error and
 persistence cases have browser tests; physical LG TV validation is outstanding.
+
+### SRT subtitle styling
+
+The `Subtitle Styling` subpage of Video Playback ports upstream
+`SubtitleStylingScreen`'s `Text` and `Border` settings, with identical defaults,
+input ranges and persisted meaning. `Font Size` (10–80, default 38), `Text
+Color`, `Position` (0–150, default 100), `Use margins`, `Bold`, `Italic`,
+`Border Size` (0–5, default 3), and `Border Color` work only with the existing
+enhanced-playback local SRT/VTT renderer. The original ASS Override and
+Background sections are intentionally absent per user request. Legacy Plex
+burn-in remains untouched, and ASS/SSA retains its authored formatting.
+
+MPV sizes subtitle font and border in units at 720p; webOS scales these with
+the display height and draws the text border with CSS shadows (Chromium 53 has
+no paint-order support for stroke-behind-fill). The local overlay uses the
+video rect when `Use margins` is off and the whole screen when enabled. For
+LG hardware planes where `videoWidth`/`videoHeight` report zero, Plex media
+metadata provides the fallback aspect ratio. Default-placement cues are
+repositioned like Plezy's text cues; authored cue placement is retained.
+Media Captions supplies the cue layout, while D-pad-compatible HSV/hex color
+and numeric editors replace native Flutter dialog widgets. Browser tests cover
+stored settings, keyboard focus, layout, and renderer style values. Pixel
+parity and physical LG caption placement have not yet been verified.
 
 These are pointers, not claims of completed porting. The current HTML frontend still has parity gaps and must not be described as faithful merely because a similarly named feature exists.
 

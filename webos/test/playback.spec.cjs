@@ -1641,6 +1641,52 @@ test('embedded SRT uses the selected track and changes visible cues while clean 
   expect(starts().every(url=>url.searchParams.get('subtitles')==='none')).toBe(true);
 });
 
+test('SRT playback applies saved Plezy text and border styling, including letterbox margin fallback',async({page})=>{
+  // LG's hardware decoder often reports zero dimensions despite presenting
+  // a wide video. Aspect ratio from Plex must still constrain the overlay.
+  await page.addInitScript(()=>{
+    for(const property of ['videoWidth','videoHeight'])
+      Object.defineProperty(HTMLVideoElement.prototype,property,{get:()=>0});
+  });
+  await setup(page,{Media:[{aspectRatio:2.4,container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',key:'/subtitles.srt',selected:1}
+    ]}]}]},undefined,[],{
+    subtitleFontSize:40,subtitleTextColor:'#AA3311',subtitleBorderSize:2,
+    subtitleBorderColor:'#00FF00',subtitlePosition:50,
+    subtitleUseMargins:false,subtitleBold:true,subtitleItalic:true
+  },null,null,async()=>'1\n00:00:10,000 --> 00:00:11,000\nSTYLE CUE\n');
+  await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
+  const captions=page.locator('.player-captions');
+  await expect(captions).toContainText('STYLE CUE');
+  await expect.poll(()=>captions.locator('[part="cue-display"]').evaluate(node=>
+    node.style.getPropertyValue('--cue-top'))).not.toBe('NaN%');
+  const style=await captions.evaluate(node=>{
+    const cue=node.querySelector('[part="cue"]');
+    const computed=getComputedStyle(cue);
+    const container=getComputedStyle(node);
+    return {fontSize:computed.fontSize,color:computed.color,weight:computed.fontWeight,
+      italic:computed.fontStyle,bg:computed.backgroundColor,
+      shadow:computed.textShadow,top:parseFloat(node.style.top),
+      cuePosition:node.querySelector('[part="cue-display"]').style.getPropertyValue('--cue-top'),
+      cueTopFraction:(node.querySelector('[part="cue-display"]').getBoundingClientRect().top-
+        node.getBoundingClientRect().top)/node.getBoundingClientRect().height};
+  });
+  assertStyle(style);
+  function assertStyle(actual){
+    expect(parseFloat(actual.fontSize)).toBeGreaterThan(40);
+    expect(actual.color).toBe('rgb(170, 51, 17)');
+    expect(actual.weight).toBe('700');
+    expect(actual.italic).toBe('italic');
+    expect(actual.bg).toBe('rgba(0, 0, 0, 0)');
+    expect(actual.shadow).toContain('rgb(0, 255, 0)');
+    expect(actual.top).toBeGreaterThan(12);
+    expect(actual.cuePosition).not.toBe('');
+    expect(actual.cueTopFraction).toBeGreaterThan(0.35);
+    expect(actual.cueTopFraction).toBeLessThan(0.65);
+  }
+});
+
 test('Plex extraction failure silently falls back once and disables burned-in subtitle sync',async({page})=>{
   const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
     Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:32,codec:'srt',selected:1}]}]}]},

@@ -823,6 +823,24 @@ main.settings-view { padding-top:38px; }
 .settings-dialog-form input { width:100%; margin-bottom:8px; }
 .settings-dialog-actions { display:flex; justify-content:flex-end; align-items:center; }
 .settings-dialog-actions button { margin:10px 0 0 10px; }
+.settings-color-swatch { display:block; width:28px; height:28px; margin-left:18px;
+  flex:0 0 28px; border-radius:6px; border:1px solid #696c75; }
+.settings-number-spinner { display:flex; align-items:center; justify-content:center;
+  border-radius:14px; background:#15171c; padding:10px; }
+.settings-number-step { flex:0 0 52px; text-align:center; font-size:32px;
+  color:#aeb1b9; cursor:pointer; }
+.settings-number-value { min-width:140px; min-height:62px; padding:8px 24px;
+  border:0; background:#30333a; border-radius:12px; font-size:28px; }
+.settings-number-value:focus { background:#ededed; color:#111318; border:0; box-shadow:none; }
+.settings-color-preview { height:64px; border-radius:8px; border:1px solid #696c75;
+  margin-bottom:16px; }
+.settings-color-channels { display:flex; flex-direction:column; margin-bottom:16px; }
+.settings-color-channel { display:block; text-align:left; border:0; border-radius:12px;
+  background:#30333a; padding:12px 16px; margin-bottom:8px; font-size:19px; }
+.settings-color-channel:focus { background:#ededed; color:#111318; border:0; box-shadow:none; }
+.settings-color-hex { display:block; font-size:17px; color:#a2a5ae; margin:0 0 12px; }
+.settings-dialog-form .settings-color-hex input { display:block; width:100%;
+  margin:6px 0 0; text-transform:uppercase; }
 .settings-connect-form { margin:0 16px; padding:20px; border-radius:20px; background:#15171c; }
 .settings-connect-form input { display:block; width:100%; margin-bottom:10px; }
 .settings-connect-form p { margin:14px 0 0; }

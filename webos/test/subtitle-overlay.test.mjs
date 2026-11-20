@@ -58,7 +58,7 @@ test('disabling enhanced playback disposes subtitle video listeners and renderin
   let destroyed=false;
   overlay.renderer={destroy(){destroyed=true;}};
   overlay.dispose();
-  assert.deepEqual(attached.map(entry=>entry.type),['playing','pause','ended','seeking','seeked']);
+  assert.deepEqual(attached.map(entry=>entry.type),['playing','pause','ended','seeking','seeked','loadedmetadata']);
   assert.deepEqual(detached,attached);
   assert.equal(overlay.listeners.length,0);
   assert.equal(destroyed,true);

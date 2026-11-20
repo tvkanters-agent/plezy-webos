@@ -18,6 +18,7 @@ import {showPlexAlphaBar} from './alpha-bar.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
+import {SUBTITLE_STYLE_BOUNDS} from './subtitle-style.js';
 import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
@@ -2585,6 +2586,14 @@ function settingsIcon(name) {
     timer:'M10 2h4v2h-4zm2 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm1 2v5l-4 3-1-1.5 3-2.5V8z',
     tune:'M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z',
     pattern:'M3 4h18v3H3zm0 6h10v3H3zm0 6h18v3H3z',
+    subtitles:'M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm1 6v2h6v-2zm8 0v2h6v-2zm-8 4v2h14v-2z',
+    size:'M3 4h18v3h-9v13H9V7H3z',
+    color:'M5 19h14v2H5zM12 2l7 15h-3l-1-3H9l-1 3H5zm0 5-2 5h4z',
+    position:'M3 18h18v3H3zM10 3h4v10h4l-6 5-6-5h4z',
+    margins:'M2 2h8v2H4v6H2zm12 0h8v8h-2V4h-6zM2 14h2v6h6v2H2zm18 0h2v8h-8v-2h6z',
+    bold:'M6 3h8a5 5 0 0 1 3 9 5 5 0 0 1-3 9H6zm4 4v4h4a2 2 0 0 0 0-4zm0 8v3h4a1.5 1.5 0 0 0 0-3z',
+    italic:'M9 3h10v3h-4l-4 12h4v3H5v-3h3l4-12H9z',
+    border:'M3 3h18v18H3zm3 3v12h12V6z',
     hidden:'M2 4l18 17 1.5-1.5-18-17z M12 7c5 0 9 5 10 5-.6 1.5-2 3.1-4 4.2l-2-2a5 5 0 0 0-6.2-6.2L8 6.7c1.3-.5 2.7-.7 4-.7z',
     plex:'M7 3h4l6 9-6 9H7l6-9z',
     service:'M4 4h16v16H4zm3 3v10h10V7z'
@@ -2613,6 +2622,7 @@ function settingsTile(label, description, icon, action, key, kind = 'chevron') {
   if (description) stack.append(summary);
   row.append(settingsIcon(icon),stack);
   if (kind==='switch') row.append(el('span',undefined,'settings-switch'));
+  else if (kind==='color') row.append(el('span',undefined,'settings-color-swatch'));
   else row.append(el('span','›','settings-chevron'));
   return row;
 }
@@ -2697,6 +2707,129 @@ function settingsTextInput(field,label,description,icon,{pattern=false}={}) {
   },field);
   return row;
 }
+// Upstream SettingNumberTile opens TvNumberSpinner on TV. Left/right adjust;
+// OK confirms, while Back cancels and restores the originating row.
+function settingsNumber(field,label,icon,format) {
+  const [min,max]=SUBTITLE_STYLE_BOUNDS[field];
+  const row=settingsTile(label,format(state[field]),icon,()=>{
+    openSettingsDialog(row,label);
+    let value=state[field];
+    const spinner=el('div',undefined,'settings-number-value');
+    spinner.setAttribute('role','button');spinner.tabIndex=0;
+    spinner.addEventListener('click',()=>focusWithoutJump(save,false));
+    spinner.setAttribute('aria-label',label);
+    const update=()=>{spinner.textContent=String(value);};
+    const adjust=step=>{value=Math.max(min,Math.min(max,value+step));update();};
+    const input=el('div',undefined,'settings-number-spinner');
+    const minus=el('span','−','settings-number-step');
+    const plus=el('span','+','settings-number-step');
+    minus.addEventListener('click',()=>adjust(-1));
+    plus.addEventListener('click',()=>adjust(1));
+    spinner.addEventListener('keydown',event=>{
+      if(event.keyCode===37 || event.keyCode===39){
+        event.preventDefault();event.stopPropagation();adjust(event.keyCode===37?-1:1);
+        // Chromium's TV spatial-navigation fallback may still move focus to
+        // a dialog action after changing a synthetic spinner value.
+        setTimeout(()=>{if(!dialog.hidden && spinner.isConnected)focusWithoutJump(spinner,false);},0);
+      } else if(event.keyCode===13){
+        event.preventDefault();event.stopPropagation();
+        save.click();
+      }
+    });
+    update();input.append(minus,spinner,plus);
+    const actions=el('div',undefined,'settings-dialog-actions');
+    const save=button('Save',()=>{
+      state[field]=value;persist();row.querySelector('.settings-tile-subtitle').textContent=format(value);
+      closeSettingsDialog();
+    },'primary');
+    actions.append(button('Cancel',closeSettingsDialog,'settings-cancel'),save);
+    dialog.append(input,el('p','Range: '+min+'–'+max,'settings-dialog-description'),actions);
+    focusWithoutJump(spinner,false);
+  },field);
+  return row;
+}
+
+function hexToHsv(hex) {
+  const channels=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255);
+  const [r,g,b]=channels,max=Math.max(r,g,b),min=Math.min(r,g,b),delta=max-min;
+  let h=0;
+  if(delta>0) {
+    if(max===r) h=((g-b)/delta)%6;
+    else if(max===g) h=(b-r)/delta+2;
+    else h=(r-g)/delta+4;
+  }
+  return [Math.round((h*60+360)%360),max===0?0:Math.round(delta/max*100),Math.round(max*100)];
+}
+function hsvToHex([h,s,v]) {
+  const c=v/100*s/100,x=c*(1-Math.abs((h/60)%2-1)),m=v/100-c;
+  const rgb=h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:
+    h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+  return '#'+rgb.map(n=>Math.round((n+m)*255).toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+// TV Color Picker: hue/saturation/value adjust horizontally, vertical keys
+// traverse rows; the six-digit hex field permits exact colors.
+function settingsColor(field,label,icon) {
+  const row=settingsTile(label,'',icon,()=>{
+    openSettingsDialog(row,label);
+    let channels=hexToHsv(state[field]),hex=state[field];
+    const preview=el('div',undefined,'settings-color-preview');
+    const channelRows=[];
+    const hexInput=el('input');hexInput.type='text';hexInput.maxLength=7;
+    hexInput.setAttribute('aria-label','Hex Color');hexInput.spellcheck=false;
+    const error=el('p','','error');error.setAttribute('role','status');
+    const sync=(fromHex=false)=>{
+      if(!fromHex){hex=hsvToHex(channels);hexInput.value=hex.substring(1);}
+      preview.style.backgroundColor=hex;
+      channelRows.forEach((entry,index)=>entry.textContent=
+        ['H','S','V'][index]+'   '+channels[index]+(index===0?'°':'%'));
+      error.textContent='';
+    };
+    const form=el('form',undefined,'settings-dialog-form');form.noValidate=true;
+    const controls=el('div',undefined,'settings-color-channels');
+    ['Hue','Saturation','Brightness'].forEach((name,index)=>{
+      const channel=el('div',undefined,'settings-color-channel');
+      channel.setAttribute('role','button');channel.tabIndex=0;
+      channel.addEventListener('click',()=>focusWithoutJump(save,false));
+      channel.setAttribute('aria-label',name);
+      channel.addEventListener('keydown',event=>{
+        if(event.keyCode===13){
+          event.preventDefault();event.stopPropagation();
+          save.click();return;
+        }
+        if(event.keyCode!==37 && event.keyCode!==39)return;
+        event.preventDefault();event.stopPropagation();
+        channels[index]=Math.max(0,Math.min(index===0?360:100,
+          channels[index]+(event.keyCode===37?-5:5)));
+        sync();
+        setTimeout(()=>{if(!dialog.hidden && channel.isConnected)focusWithoutJump(channel,false);},0);
+      });
+      channelRows.push(channel);controls.append(channel);
+    });
+    hexInput.addEventListener('input',()=>{
+      const entered='#'+hexInput.value.replace(/^#/,'').trim();
+      if(/^#[0-9a-fA-F]{6}$/.test(entered)){
+        hex=entered.toUpperCase();channels=hexToHsv(hex);sync(true);
+      }
+    });
+    const hexLabel=el('label','Hex Color','settings-color-hex');hexLabel.append(hexInput);
+    const actions=el('div',undefined,'settings-dialog-actions');
+    const save=el('button','Save','primary');save.type='submit';
+    actions.append(button('Cancel',closeSettingsDialog,'settings-cancel'),save);
+    form.addEventListener('submit',event=>{
+      event.preventDefault();
+      const entered='#'+hexInput.value.replace(/^#/,'').trim();
+      if(!/^#[0-9a-fA-F]{6}$/.test(entered)){
+        error.textContent='Enter a six-digit hexadecimal color.';focusWithoutJump(hexInput,false);return;
+      }
+      state[field]=entered.toUpperCase();persist();reflect();closeSettingsDialog();
+    });
+    form.append(preview,controls,hexLabel,error,actions);dialog.append(form);
+    hexInput.value=hex.substring(1);
+    sync(true);focusWithoutJump(channelRows[0],false);
+  },field,'color');
+  const reflect=()=>{row.querySelector('.settings-color-swatch').style.backgroundColor=state[field];};
+  reflect();return row;
+}
 function connectionChoices() {
   return [
     settingsTile('Sign in with Plex','Connect your Plex account.','plex',()=>go({type:'plex'}),'plex-sign-in'),
@@ -2714,6 +2847,10 @@ function settingsSubpage(page,serverId) {
       settingsSelection('quality','Quality','Compatible playback requires server transcoding permission.',
         'quality',[['auto','Automatic'],['transcode','Compatible H.264 / AAC']])
     ]);
+    settingsGroup('Subtitles',[
+      settingsTile('Subtitle Styling','Customize subtitle appearance','subtitles',
+        ()=>go({type:'settings-page',page:'subtitle-styling'}),'subtitle-styling')
+    ]);
     const skipModes=[['off','Off'],['button','Show skip button'],['auto','Automatic skip']];
     settingsGroup('Auto-play & Skip',[
       settingsSelection('skipIntroMode','Skip intro','', 'intro',skipModes),
@@ -2723,6 +2860,22 @@ function settingsSubpage(page,serverId) {
       settingsTextInput('autoSkipDelay','Automatic skip delay','Seconds before automatic skipping (1–30).','timer'),
       settingsTextInput('introPattern','Intro chapter pattern','Regular expression for matching intro chapters.','pattern',{pattern:true}),
       settingsTextInput('creditsPattern','Credits chapter pattern','Regular expression for matching credits chapters.','pattern',{pattern:true})
+    ]);
+  } else if(page==='subtitle-styling') {
+    settingsPage('Subtitle Styling');
+    settingsGroup('Text',[
+      settingsNumber('subtitleFontSize','Font Size','size',value=>String(value)),
+      settingsColor('subtitleTextColor','Text Color','color'),
+      settingsNumber('subtitlePosition','Position','position',value=>
+        value===0?'Top':value===100?'Bottom':value+'%'),
+      settingsToggle('subtitleUseMargins','Use margins',
+        'Allow text subtitles in the space outside the video. Styled subtitles may keep their original placement.','margins'),
+      settingsToggle('subtitleBold','Bold','','bold'),
+      settingsToggle('subtitleItalic','Italic','','italic')
+    ]);
+    settingsGroup('Border',[
+      settingsNumber('subtitleBorderSize','Border Size','border',value=>String(value)),
+      settingsColor('subtitleBorderColor','Border Color','color')
     ]);
   } else if(page==='libraries') {
     settingsPage('Manage Libraries','Choose which libraries appear in Plezy’s navigation rail.');
