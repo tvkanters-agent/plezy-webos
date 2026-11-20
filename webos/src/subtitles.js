@@ -219,6 +219,7 @@ export class SubtitleOverlay {
     this.frame = null;
     this.readyTimer = null;
     this.assWaiting = false;
+    this.assPendingSeek = null;
     this.assClockTimer = null;
     // timeupdate may arrive only four times a second. Keep SRT cue boundaries
     // aligned to the visible playback clock, including short cues.
@@ -237,7 +238,7 @@ export class SubtitleOverlay {
         if (event === 'seeking' && this.kind === 'ass' && this.renderer?.ctx && this.renderer.canvas)
           this.renderer.ctx.clearRect(0,0,this.renderer.canvas.width,this.renderer.canvas.height);
         if (event === 'seeking' && this.kind === 'ass')
-          this.assAppender?.prioritize(subtitleTime(this.video.currentTime,this.offsetMs));
+          this.assAppender?.prioritize(this.assClockSample().time);
         this.stopClock(); this.update(this.offsetMs); this.syncAssClock(event === 'seeking');
         if (event === 'ended') this.stopAssClock();
         else this.startAssClock();
@@ -255,7 +256,7 @@ export class SubtitleOverlay {
       this.assWaiting = !this.video.paused && Number.isFinite(this.video.readyState) &&
         this.video.readyState < 3;
       this.assWaitingPosition = this.video.currentTime;
-      this.assAppender?.prioritize(subtitleTime(this.video.currentTime,this.offsetMs));
+      this.assAppender?.prioritize(this.assClockSample().time);
       this.update(this.offsetMs); this.syncAssClock(true); this.startAssClock(); this.startClock();
     });
     listen('timeupdate', () => {
@@ -294,15 +295,42 @@ export class SubtitleOverlay {
     this.assClockTimer = null;
   }
 
+  // Native webOS may keep reporting the PRE-seek media clock while the
+  // hardware pipeline decodes the new frame. Render at the requested target
+  // instead of sending that obsolete clock back into libass.
+  assClockSample() {
+    let position = Number(this.video.currentTime) || 0;
+    let held = false;
+    const seek = this.assPendingSeek;
+    if (seek) {
+      if (Math.abs(position - seek.position) <= 3 ||
+          Date.now() - seek.at > 5000) {
+        this.assPendingSeek = null;
+      } else {
+        position = seek.position;
+        held = true;
+      }
+    }
+    return {time:subtitleTime(position,this.offsetMs),held};
+  }
+
+  requestAssSeek(position) {
+    if (!Number.isFinite(position)) return;
+    this.assPendingSeek = {position,at:Date.now()};
+    this.assPriorityPosition = subtitleTime(position,this.offsetMs);
+    this.assAppender?.prioritize(this.assPriorityPosition);
+    if (this.kind === 'ass') this.syncAssClock(true);
+  }
+
   startAssClock() {
     if (this.assClockTimer || this.kind !== 'ass' || this.video.ended) return;
     // Unlike requestAnimationFrame, this reads the actual decoded video clock.
     // Native LG timeupdate/seeked events can be sparse or absent. Check paused
     // seeks too: libass must repaint the new frame even without `playing`.
-    this.assClockLast = subtitleTime(this.video.currentTime,this.offsetMs);
+    this.assClockLast = this.assClockSample().time;
     this.assClockTimer = setInterval(() => {
       if (this.kind !== 'ass') { this.stopAssClock(); return; }
-      const current = subtitleTime(this.video.currentTime,this.offsetMs);
+      const current = this.assClockSample().time;
       const moved = Math.abs(current - this.assClockLast) > 0.03;
       this.assClockLast = current;
       if (this.assWaiting && Math.abs(this.video.currentTime - this.assWaitingPosition) > 0.03)
@@ -334,6 +362,7 @@ export class SubtitleOverlay {
     this.releaseRenderer();
     this.assWaiting = false;
     this.assPriorityPosition = null;
+    this.assPendingSeek = null;
     this.assContent = null;
     this.assUnavailable = this.assPainted = false;
   }
@@ -388,6 +417,9 @@ export class SubtitleOverlay {
     const generation = this.generation;
     this.offsetMs = offsetMs;
     this.assPriorityPosition = subtitleTime(position, offsetMs);
+    if (asset.format === 'ass' && Number.isFinite(position) &&
+        Math.abs((Number(this.video.currentTime) || 0) - position) > 3)
+      this.assPendingSeek = {position,at:Date.now()};
     const controller = this.abort = new AbortController();
     const startedAt = onTiming ? Date.now() : 0;
     let firstRendered = false;
@@ -514,8 +546,9 @@ export class SubtitleOverlay {
       if (generation !== this.generation || this.renderer !== renderer) return;
       clearTimeout(this.readyTimer);
       this.readyTimer = null;
-      const time = subtitleTime(this.video.currentTime, this.offsetMs);
-      renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting), time);
+      const clock = this.assClockSample();
+      renderer.setIsPaused(!!(this.video.paused || this.video.seeking ||
+        this.video.ended || this.assWaiting || clock.held), clock.time);
       renderer.setRate(this.video.playbackRate || 1);
       if (this.video.paused || this.video.seeking)
         renderer.worker?.postMessage({target:'plezy-force-frame'});
@@ -589,10 +622,14 @@ export class SubtitleOverlay {
     // current. Attach the source clock and playback state to every update.
     if (renderer.worker) {
       renderer._plezyClockHandlesRate = true;
-      renderer.setCurrentTime = time => renderer.worker.postMessage({target:'video',
-        currentTime:time, senderTime:Date.now(),
-        isPaused:!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),
-        rate:this.video.playbackRate || 1});
+      renderer.setCurrentTime = time => {
+        const clock = this.assClockSample();
+        renderer.worker.postMessage({target:'video',
+          currentTime:clock.held ? clock.time : time, senderTime:Date.now(),
+          isPaused:!!(this.video.paused || this.video.seeking || this.video.ended ||
+            this.assWaiting || clock.held),
+          rate:this.video.playbackRate || 1});
+      };
       renderer.setIsPaused = (paused,time) => renderer.worker.postMessage({target:'video',
         currentTime:time, senderTime:Date.now(), isPaused:paused,
         rate:this.video.playbackRate || 1});
@@ -662,9 +699,10 @@ export class SubtitleOverlay {
 
   syncAssClock(force = false) {
     if (this.kind !== 'ass' || !this.renderer) return;
-    const current = subtitleTime(this.video.currentTime, this.offsetMs);
+    const clock = this.assClockSample();
     if (this.renderer.worker && !this.renderer._plezyFullyReady) return;
-    this.renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),current);
+    this.renderer.setIsPaused(!!(this.video.paused || this.video.seeking ||
+      this.video.ended || this.assWaiting || clock.held),clock.time);
     // The webOS clock message already carries the playback rate; posting
     // another message every 100ms needlessly queues work on the LG worker.
     if (!this.renderer._plezyClockHandlesRate)
