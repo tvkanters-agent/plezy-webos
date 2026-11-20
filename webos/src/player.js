@@ -466,9 +466,10 @@ export class Player {
   updateSubtitleSyncControls() {
     const label = this.formatSubtitleSyncOffset();
     const settingsValue = this.sheet.querySelector('.player-settings-sync-value');
-    if (settingsValue) settingsValue.textContent = label;
+    const burnedIn = !!this.session?.subtitleBurnedIn;
+    if (settingsValue) settingsValue.textContent = burnedIn ? 'Burned in' : label;
     const settingsRow = this.sheet.querySelector('.player-settings-sync');
-    if (settingsRow) settingsRow.classList.toggle('is-active', this.subtitleSyncOffsetMs !== 0);
+    if (settingsRow) settingsRow.classList.toggle('is-active', !burnedIn && this.subtitleSyncOffsetMs !== 0);
     const value = this.sheet.querySelector('.sync-offset-value');
     if (value) value.textContent = label;
     const slider = this.sheet.querySelector('.sync-offset-slider');
@@ -500,6 +501,10 @@ export class Player {
     }, 400);
   }
   openSyncBar() {
+    if (this.session?.subtitleBurnedIn) {
+      this.notify('Plex burned this subtitle into the video. Its timing cannot be changed.');
+      return;
+    }
     this.stopSyncHold();
     this.openSheetAction = 'options';
     this.sheet.classList.remove('sheet-tracks');
@@ -576,7 +581,15 @@ export class Player {
     const offset = this.subtitleSyncOffsetMs / 1000;
     for (const track of Array.from(this.video.textTracks)) {
       let cues;
-      try { cues = track.cues; } catch (_) { continue; }
+      try {
+        // A decoder exposing an embedded track must not draw a duplicate
+        // beside the local overlay. Leave metadata/chapter tracks alone.
+        if (this.session?.subtitleAsset?.embedded && ['subtitles','captions'].includes(track.kind)) {
+          if (track.mode !== 'disabled') track.mode = 'disabled';
+          continue;
+        }
+        cues = track.cues;
+      } catch (_) { continue; }
       if (!cues) continue;
       for (const cue of Array.from(cues)) {
         let original = this.subtitleCueTimes.get(cue);
@@ -1022,8 +1035,9 @@ export class Player {
   async subtitleFailed(error, session) {
     if (!this.session || this.session !== session || this.recoveringSession === session) return;
     console.warn('Subtitle renderer failed; retrying with Plex burn-in:', error);
+    this.notify('Could not load the subtitle separately. Plex will burn it into the video.');
     this.recoveringSession = session;
-    try { await this.reopen({transcode:true, burnSubtitles:true}); }
+    try { await this.reopen({burnSubtitles:true}); }
     finally { if (this.recoveringSession === session) this.recoveringSession = null; }
   }
   async failed() {

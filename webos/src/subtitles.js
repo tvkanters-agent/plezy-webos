@@ -6,11 +6,15 @@ export function subtitleTime(videoTime, offsetMs) {
   return (Number(videoTime) || 0) - (Number(offsetMs) || 0) / 1000;
 }
 
-export function subtitleFormat(codec) {
-  const format = String(codec || '').toLowerCase();
-  if (format === 'srt' || format === 'subrip') return 'srt';
-  if (format === 'ass' || format === 'ssa') return 'ass';
-  return null;
+// Plex Web's profile can deliver embedded text in an ASS wrapper even if
+// the source track is SRT. Choose the renderer from both source and payload.
+function embeddedSubtitleType(content) {
+  const text = content.replace(/^\s+/, '');
+  if (/^WEBVTT(?:[ \t]|\r?\n)/.test(text)) return 'vtt';
+  if (/^\s*\[Events\]/mi.test(text) && /^Dialogue:/mi.test(text)) return 'ssa';
+  if (/^\s*\d+:\d{2}:\d{2}[,.]\d+\s+-->\s+\d+:\d{2}:\d{2}[,.]\d+/m.test(text))
+    return 'srt';
+  throw new Error('Plex did not return a text subtitle file.');
 }
 
 export class SubtitleOverlay {
@@ -76,12 +80,30 @@ export class SubtitleOverlay {
     const generation = this.generation;
     this.offsetMs = offsetMs;
     this.abort = new AbortController();
-    const response = await fetch(asset.url, {signal:this.abort.signal});
-    if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
-    const content = await response.text();
+    const controller = this.abort;
+    let timer;
+    let content;
+    try {
+      const download = fetch(asset.url, {signal:controller.signal}).then(response => {
+        if (!response.ok) throw new Error('Subtitle download returned HTTP ' + response.status);
+        return response.text();
+      });
+      const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Subtitle download timed out.'));
+          controller.abort();
+        }, 30000);
+      });
+      content = await Promise.race([download, deadline]);
+    } finally {
+      clearTimeout(timer);
+      if (this.abort === controller) this.abort = null;
+    }
     if (generation !== this.generation) return;
-    if (asset.format === 'srt') {
-      const track = await parseText(content, {type:'srt'});
+    const type = asset.embedded ? embeddedSubtitleType(content) : asset.format === 'ass' ? 'ssa' : 'srt';
+    if (asset.format === 'srt' || type === 'srt' || type === 'vtt') {
+      const track = await parseText(content, {type});
+      if (!track.cues.length && content.trim()) throw new Error('Subtitle file contains no readable cues.');
       if (generation !== this.generation) return;
       const renderer = new CaptionsRenderer(this.element);
       this.renderer = renderer;
@@ -114,7 +136,6 @@ export class SubtitleOverlay {
     } else {
       throw new Error('Unsupported external subtitle format.');
     }
-    this.abort = null;
   }
 
   update(offsetMs) {

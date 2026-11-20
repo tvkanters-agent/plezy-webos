@@ -11,7 +11,7 @@ const FORMATS = {mp4:'video/mp4', m4v:'video/mp4', mov:'video/mp4',
   mkv:'video/x-matroska', matroska:'video/x-matroska'};
 
 /** Return a MIME only when the file can preserve the requested tracks unchanged.
- * localSubtitle means the selected external SRT/ASS is rendered independently.
+ * localSubtitle means the selected text track is rendered independently.
  * Thin legacy MP4 metadata keeps the existing path; expanded formats require
  * stream detail and positive dimensions/bitrate. Unknown capabilities use HLS.
  */

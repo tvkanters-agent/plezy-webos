@@ -16,7 +16,8 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.route('http://plex.test/**',async route=>{
     const url = new URL(route.request().url()); calls.push(url);
-    if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/')))
+    if (subtitleResponse && (url.pathname === '/subtitles.srt' || url.pathname.startsWith('/library/streams/') ||
+        url.pathname === '/subtitles/:/transcode/universal/start' || url.pathname === '/video/:/transcode/universal/subtitles'))
       return route.fulfill({contentType:'text/plain',body:await subtitleResponse(url)});
     if (url.pathname.endsWith('/indexes/sd'))
       return bifBytes ? route.fulfill({contentType:'application/octet-stream',body:bifBytes})
@@ -1475,8 +1476,8 @@ test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn
   expect(errors).toEqual([]);
 });
 
-for (const legacy of [false,true]) {
-  test('sync slider retimes actual ASS canvas pixels using '+(legacy?'legacy':'WASM')+' libass',async({page})=>{
+for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
+  test('sync slider retimes '+(embedded?'embedded':'external')+' ASS canvas pixels using '+(legacy?'legacy':'WASM')+' libass',async({page})=>{
     test.setTimeout(90000);
     page.on('console',message=>console.log('ASS '+(legacy?'legacy':'WASM')+': '+message.text()));
     page.on('pageerror',error=>console.log('ASS error: '+error.message));
@@ -1492,9 +1493,10 @@ for (const legacy of [false,true]) {
     page.on('pageerror',error=>errors.push(error.message));
     const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
       Part:[{id:'part',key:'/video.webm',Stream:[
-        {streamType:3,id:31,codec:'ass',key:'/library/streams/31',selected:1}
+        {streamType:3,id:31,codec:'ass',selected:1,...(embedded?{}:{key:'/library/streams/31'})}
       ]}]}]},undefined,[],{},null,null,async url=>{
-        if(url.pathname!=='/library/streams/31.ass') return '<html>Not Found</html>';
+        const subtitlePath=embedded?'/subtitles/:/transcode/universal/start':'/library/streams/31.ass';
+        if(url.pathname!==subtitlePath) return '<html>Not Found</html>';
         return '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n'+
           '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'+
           'Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n'+
@@ -1526,9 +1528,62 @@ for (const legacy of [false,true]) {
     await expect.poll(hasPixels).toBe(false);
     await page.locator('video').evaluate(video=>{video.currentTime=8.5;});
     await expect.poll(hasPixels).toBe(true);
-    expect(calls.some(url=>url.pathname==='/library/streams/31.ass' &&
-      url.searchParams.get('encoding')==='utf-8')).toBe(true);
+    expect(calls.some(url=>embedded
+      ? url.pathname==='/subtitles/:/transcode/universal/start' && url.searchParams.get('subtitleStreamID')==='31'
+      : url.pathname==='/library/streams/31.ass' && url.searchParams.get('encoding')==='utf-8')).toBe(true);
     expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
     expect(errors).toEqual([]);
   });
 }
+
+
+test('embedded SRT uses the selected track and changes visible cues while clean HLS plays',async({page})=>{
+  let finishDownload;
+  const download=new Promise(resolve=>{finishDownload=resolve;});
+  const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'ass'},
+      {streamType:3,id:32,codec:'srt',selected:1}
+    ]}]}]},undefined,[],{},null,null,async url=>{
+      await download;
+      if(url.pathname!=='/video/:/transcode/universal/subtitles' ||
+          url.searchParams.get('subtitleStreamID')!=='32') return '<html>Not Found</html>';
+      // Plex's Web profile offers ASS as a transport even for a source SRT.
+      return '[Script Info]\nScriptType: v4.00+\n'+
+        '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
+        'Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,SELECTED SRT\n';
+    });
+  const starts=()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8'));
+  expect(starts()[0].searchParams.get('subtitles')).toBe('none');
+  await page.locator('[data-action="pause"]').click();
+  await page.locator('video').evaluate(video=>{
+    video.currentTime=10.5;
+    video.addTextTrack('subtitles','Decoder duplicate','en').mode='showing';
+  });
+  finishDownload();
+  const captions=page.locator('.player-captions');
+  await expect(captions).toContainText('SELECTED SRT');
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.textTracks[0].mode)).toBe('disabled');
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(input=>{
+    input.value='2000';input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await expect(captions).not.toContainText('SELECTED SRT');
+  await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+  await expect(captions).toContainText('SELECTED SRT');
+  expect(starts().every(url=>url.searchParams.get('subtitles')==='none')).toBe(true);
+});
+
+test('Plex extraction failure falls back once and explains why subtitle sync is unavailable',async({page})=>{
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:32,codec:'srt',selected:1}]}]}]},
+    undefined,[],{},null,null,async()=>'<html>Server cannot extract this track</html>');
+  const burned=()=>calls.filter(url=>url.pathname.endsWith('/start.m3u8') && url.searchParams.get('subtitles')==='burn');
+  await expect.poll(()=>burned().length).toBe(1);
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  await expect(page.locator('#toast')).toContainText('timing cannot be changed');
+  await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
+});
