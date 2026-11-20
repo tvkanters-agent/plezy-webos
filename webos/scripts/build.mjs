@@ -96,29 +96,9 @@ for (const legacy of [false, true]) {
     const wasm = await readFile(path.join(vendor, worker + '.wasm'));
     source = 'var Module = {wasmBinary:' + binaryExpression(wasm) + '};\n' + source;
   }
-  // A queued video timestamp must mean when the decoder reported it, not
-  // when the busy libass worker finally receives the message. Only the webOS
-  // overlay sends senderTime; upstream messages keep their existing behavior.
-  // Update the worker's playback rate and paused state before the timestamp.
-  // The original order renders one frame using the previous seek state/rate.
-  const originalClockOrder = /if\s*\(message\.data\.currentTime\s*!==\s*undefined\)\s*\{\s*self\.setCurrentTime\(message\.data\.currentTime\);\s*\}\s*if\s*\(message\.data\.isPaused\s*!==\s*undefined\)\s*\{\s*self\.setIsPaused\(message\.data\.isPaused\);\s*\}\s*if\s*\(message\.data\.rate\)\s*\{\s*self\.rate\s*=\s*message\.data\.rate;\s*\}/;
-  if (!originalClockOrder.test(source)) { const at=source.indexOf('self.setCurrentTime(message.data.currentTime)'); throw new Error('libass video update order context: '+JSON.stringify(source.slice(at-250,at+500))); }
-  source = source.replace(originalClockOrder, [
-    'if (message.data.rate) {',
-    '                self.rate = message.data.rate;',
-    '            }',
-    '            if (message.data.isPaused !== undefined) {',
-    '                self.setIsPaused(message.data.isPaused);',
-    '            }',
-    '            if (message.data.currentTime !== undefined) {',
-    '                self.setCurrentTime(message.data.currentTime);',
-    '            }'
-  ].join('\n'));
-  const clockCall = 'self.setCurrentTime(message.data.currentTime)';
-  if (!source.includes(clockCall)) throw new Error('libass worker clock integration changed');
-  source = source.replace(clockCall,
-    'self.setCurrentTime(message.data.currentTime+(message.data.senderTime&&message.data.isPaused===false' +
-    '?Math.max(0,Date.now()-message.data.senderTime)/1000*(message.data.rate||self.rate):0))');
+  // Handle Plezy's authoritative media clock in the narrow existing worker
+  // adapter below. Do not patch vendor source formatting: different compiled
+  // legacy/wasm worker variants may place these operations differently.
   // Workers launched by file-origin apps cannot reliably XHR even sibling
   // blob URLs. Install the bundled default font into libass's own filesystem.
   source += '\nvar loadExtraFont = self.loadFontFile;\n' +
@@ -132,6 +112,18 @@ for (const legacy of [false, true]) {
   // reparsing an ever-growing ASS script on every extracted MKV cluster.
   source += '\nvar originalAssWorkerMessage = self.onmessage;\n' +
     'self.onmessage = function(message) {\n' +
+    '  if (message.data.target === "video") {\n' +
+    '    // Apply state before the timestamp so seek frames never use an old rate/pause flag.\n' +
+    '    if (message.data.rate) self.rate = message.data.rate;\n' +
+    '    if (message.data.isPaused !== undefined) self.setIsPaused(message.data.isPaused);\n' +
+    '    if (message.data.currentTime !== undefined) {\n' +
+    '      var position = message.data.currentTime;\n' +
+    '      if (message.data.senderTime && message.data.isPaused === false)\n' +
+    '        position += Math.max(0, Date.now() - message.data.senderTime) / 1000 * (message.data.rate || self.rate);\n' +
+    '      self.setCurrentTime(position);\n' +
+    '    }\n' +
+    '    return;\n' +
+    '  }\n' +
     '  if (message.data.target === "plezy-force-frame") { self.getRenderMethod()(true); return; }\n' +
     '  if (message.data.target !== "create-events") return originalAssWorkerMessage(message);\n' +
     '  var events = message.data.events;\n' +
