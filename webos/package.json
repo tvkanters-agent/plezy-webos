@@ -1,6 +1,6 @@
 {
   "name": "plezy-webos",
-  "version": "1.18.1",
+  "version": "1.19.1",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
@@ -20,6 +20,7 @@
   "dependencies": {
     "fflate": "0.8.2",
     "libass-wasm": "4.1.0",
-    "media-captions": "0.0.18"
+    "media-captions": "0.0.18",
+    "pixi.js": "4.8.9"
   }
 }

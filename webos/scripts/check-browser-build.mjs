@@ -10,6 +10,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const script = await readFile(path.join(root, 'dist/app.js'), 'utf8');
 const html = await readFile(path.join(root, 'dist/index.html'), 'utf8');
 const appinfo = JSON.parse(await readFile(path.join(root, 'dist/appinfo.json'), 'utf8'));
+const pixi = await readFile(path.join(root,'dist/pixi.min.js'),'utf8');
+const pixiLicense = await readFile(path.join(root,'dist/pixi-LICENSE.txt'),'utf8');
+if (!pixi.includes('PIXI') || !pixiLicense.includes('MIT License'))
+  throw new Error('PixiJS 4 subtitle renderer or its license was not packaged.');
 
 if (!html.includes('<script src="app.js" defer')) {
   throw new Error('TV HTML does not load the bundled classic script.');
@@ -21,6 +25,7 @@ try {
   // Parse the packaged bundle and EVERY inline bootstrap script in the exact
   // HTML we ship; a malformed diagnostic script is still a boot failure.
   new Script(script, {filename: 'dist/app.js'});
+  new Script(pixi, {filename:'dist/pixi.min.js'});
   // The shipped boot diagnostics live in an untyped inline classic script.
   // Inspect the exact HTML bytes, too: a syntax failure there is fatal.
   var open = '<script>', close = '</script>', pos = 0, count = 0;

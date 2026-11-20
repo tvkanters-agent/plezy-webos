@@ -92,7 +92,7 @@ test('general Diagnostics lives under About, defaults off and persists only when
   await connected(page);
   await page.getByRole('button',{name:'About',exact:true}).click();
   await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
-  await expect(page.getByText('Version 1.18.1')).toBeVisible();
+  await expect(page.getByText('Version 1.19.1')).toBeVisible();
   const diagnostics=page.getByRole('button',{name:'Enable diagnostics',exact:true});
   await expect(diagnostics).toHaveAttribute('aria-pressed','false');
   await diagnostics.click();

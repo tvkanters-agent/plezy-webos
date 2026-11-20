@@ -973,8 +973,8 @@ main.settings-view { padding-top:38px; }
   .player-sheet.sheet-sync .sync-offset-icon { display:none; }
 }
 
-/* Media Captions uses part attributes and CSS variables; avoid modern :where()
-   and numeric calc() multiplication unsupported by the C8's Chromium 53. */
+/* Local SRT/VTT uses a transparent PixiJS canvas; ASS dialogue fallback uses
+   Media Captions parts. Keep the LG Chromium 53 compatible CSS. */
 #player .player-captions {
   --overlay-padding: 1%;
   --cue-color: #fff;
@@ -1005,8 +1005,7 @@ main.settings-view { padding-top:38px; }
   text-shadow: var(--cue-text-shadow); box-sizing: border-box;
   position: relative;
 }
-#player .player-captions .plezy-srt-foreground { position: relative; z-index: 1; }
-#player .player-captions .plezy-srt-vector-outline { z-index: 0; }
+#player .player-captions canvas.plezy-pixi-subtitles { display: block; }
 /* SubtitlesOctopus positions signs in native ASS coordinates. Keep its canvas
    over the video, but below Plezy's controls, without moving signs on reveal. */
 #player .libassjs-canvas-parent { position: absolute !important; top: 0; right: 0; bottom: 0; left: 0; z-index: 2 !important; pointer-events: none; }
