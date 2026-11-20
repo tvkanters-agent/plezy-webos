@@ -1,3 +1,9 @@
+## 1.19.4 — Start nearby MKV SRT cues after decoder Play
+
+- Start the first embedded MKV subtitle read shortly after the hardware decoder's `playing` event instead of waiting for video dimensions and 0.1-second clock progress. Preserve the existing full startup gate and decoder-failure recovery.
+- Guard each read by playback generation and selected session, so late timers cannot trigger duplicate reads or resume-position mistakes.
+- Add an opt-in diagnostic measurement for the actual decoder playing event, to distinguish first-frame gating from network/renderer latency.
+
 ## 1.19.3 — Validate Plex byte ranges by actual payload size
 
 - Trust a verified Content-Range over an inflated Content-Length on Plex partial responses. Native webOS still aborts transfers whose actual payload exceeds the requested range.

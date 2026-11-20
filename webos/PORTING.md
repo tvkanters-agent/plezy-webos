@@ -810,6 +810,14 @@ checks the returned byte count exactly, and never buffers a whole-file `200`.
 The optional failure readout distinguishes bad header length from actual
 oversized body transfer so TV-only reports can identify the remaining issue.
 
+In v1.19.4, the playing event starts a short (200 ms) decoder-settle timer
+before the first MKV subtitle read. LG's hardware plane can be visibly playing
+while its HTML video dimensions remain zero or its media clock still lags;
+the old reader was waiting for both to confirm startup. Subsequent startup
+recovery and the resume-seek gate remain unchanged. Playback generation and
+session checks avoid duplicate or stale subtitle downloads, and diagnostics
+optionally separate `playing` from `video ready` timing.
+
 The webOS range reader now waits for playback to advance or for a requested
 paused frame, including when resuming. It sends one abortable XHR at a time
 and cancels a full-file response at the header boundary. If the decoder

@@ -22,6 +22,7 @@ export class SubtitleDiagnostics {
       // Repainting for every range request would skew the timings being measured.
       if (this.requests % 5 !== 0) return;
     } else if (event === 'video') this.videoMs = milliseconds;
+    else if (event === 'playing' && this.playingMs === undefined) this.playingMs = milliseconds;
     else if (event === 'source') this.source = milliseconds;
     else if (event === 'fallback') {
       this.source = 'Plex sidecar (MKV failed)';
@@ -41,6 +42,7 @@ export class SubtitleDiagnostics {
       'Embedded SRT diagnostics',
       'Source: ' + (this.source || 'waiting'),
       ...(this.fallbackReason ? ['MKV failed: ' + this.fallbackReason] : []),
+      'Decoder playing: ' + ms(this.playingMs) + ' from Play',
       'Video ready: ' + ms(this.videoMs) + ' from Play',
       'MKV index: ' + ms(this.indexMs) + ' from subtitle request',
       'First render: ' + ms(this.firstMs) + ' from subtitle request',
