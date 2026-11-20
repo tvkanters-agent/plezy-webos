@@ -44,7 +44,18 @@ const canvasFrameAnchor = "case 'renderCanvas': {\\n                        if (
 if (!octopus.includes(canvasFrameAnchor)) throw new Error('SubtitlesOctopus frame dispatch changed');
 octopus = octopus.replace(canvasFrameAnchor,
   canvasFrameAnchor.replace('self.lastRenderTime < data.time','self.lastRenderTime <= data.time'));
-octopus = octopus.replace(disposeAnchor, `    self.plezySuspendVideo = function () {
+octopus = octopus.replace(disposeAnchor, `    // Plezy supplies its own authoritative timestamp, buffering and seek
+    // state. The vendor's video listeners send *additional*, uncorrected
+    // timestamps that can rewind libass and flash subtitle frames.
+    // Keep resize/metadata handlers active; only remove clock listeners.
+    self.plezyUseExternalClock = function () {
+        if (self._plezySuspended || !self.video) return;
+        for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
+            ['seeking',onSeeking],['seeked',onSeeked],['ratechange',onRateChange],
+            ['waiting',onWaiting]])
+            self.video.removeEventListener(pair[0],pair[1],false);
+    };
+    self.plezySuspendVideo = function () {
         if (self._plezySuspended || !self.video) return;
         self._plezySuspended = true;
         for (var pair of [['timeupdate',onTimeUpdate],['playing',onPlaying],['pause',onPause],
