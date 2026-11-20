@@ -79,16 +79,15 @@ async function subtitleRequest(signal, run) {
   }
 }
 
-async function downloadSubtitle(asset, signal, position, preview, onTiming) {
+async function downloadSubtitle(asset, signal, position, preview) {
   if (asset.partUrl) {
     try {
       return await subtitleRequest(signal, (requestSignal, refresh) =>
-        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, onTiming, async preview(content) {
+        extractMatroskaSubtitle(asset, requestSignal, {position, onRead:refresh, async preview(content) {
           if (!requestSignal.aborted) await preview(content);
         }}));
     } catch (error) {
       if (signal.aborted) throw error;
-      onTiming?.({phase:'fallback'});
       console.info('Could not read embedded subtitle from MKV:', error.message);
     }
   }
@@ -197,40 +196,16 @@ export class SubtitleOverlay {
     this.element.textContent = '';
   }
 
-  async load(asset, offsetMs, position = this.video.currentTime, diagnostics = {}) {
+  async load(asset, offsetMs, position = this.video.currentTime) {
     this.clear();
     if (!asset) return;
     const generation = this.generation;
     this.offsetMs = offsetMs;
     const controller = this.abort = new AbortController();
     const render = content => this.render(asset, content, generation);
-    const started = Date.now();
-    const stages = {};
-    let reported = false;
-    const onTiming = timing => { stages[timing.phase] = timing; };
-    const report = () => {
-      if (reported || asset.format !== 'srt' || !asset.partUrl ||
-          generation !== this.generation || controller.signal.aborted) return;
-      const first = stages.firstCues || stages.complete;
-      if (!first && !stages.fallback) return;
-      reported = true;
-      // One measurement per selected MKV SRT track. No Plex URLs or tokens.
-      console.info('Plezy embedded SRT timing:', JSON.stringify({
-        source:stages.fallback ? 'plex-fallback' : 'mkv',
-        videoGateMs:diagnostics.videoGateMs ?? null,
-        indexMs:stages.index?.elapsedMs ?? null,
-        firstCueMs:first?.elapsedMs ?? null,
-        firstRenderMs:Date.now() - started,
-        rangeRequests:first?.requests ?? 0,
-        rangeBytes:first?.bytes ?? 0,
-        rangeRequestMs:first?.requestMs ?? 0
-      }));
-    };
-    const preview = async content => { await render(content); report(); };
     try {
-      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), preview, onTiming);
+      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render);
       await render(content);
-      report();
     } finally {
       if (this.abort === controller) this.abort = null;
     }

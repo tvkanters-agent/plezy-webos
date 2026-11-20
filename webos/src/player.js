@@ -847,7 +847,6 @@ export class Player {
       // Arm before load/play: synchronous errors and never-settling Play
       // promises must not leave startup without a recovery deadline.
       this.armStartupTimeout(session, generation);
-      this.mediaLoadStartedAt = Date.now();
       this.loadSource(session);
       if (generation !== this.generation || this.session !== session) return;
       // Embedded MKV is loaded from the same Plex part as the video. Let the
@@ -873,9 +872,7 @@ export class Player {
     };
     if (asset.partUrl) this.matroskaSubtitleSession = session;
     try {
-      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position(), {
-        videoGateMs:this.mediaLoadStartedAt == null ? null : Date.now() - this.mediaLoadStartedAt
-      });
+      await this.subtitleOverlay.load(asset, this.subtitleSyncOffsetMs, this.position());
     } catch (error) {
       if (alive() && error.name !== 'AbortError') this.subtitleFailed(error, session);
     } finally {
@@ -1035,7 +1032,6 @@ export class Player {
     clearTimeout(this.startTimeout); clearTimeout(this.hideTimer); clearInterval(this.interval);
     this.subtitleOverlay?.clear();
     this.matroskaSubtitleSession = null;
-    this.mediaLoadStartedAt = null;
     this.root?.classList?.remove('subtitle-lift');
     if (this.previewAbort) this.previewAbort.abort();
     this.previewAbort = null;
