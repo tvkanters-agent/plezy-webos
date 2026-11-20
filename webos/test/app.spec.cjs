@@ -1286,7 +1286,7 @@ test('connected Simkl movie and series rating rows read existing user score and 
  expect(writes[0]).toEqual({shows:[{ids:{tvdb:321},rating:9}]});
 });
 
-test('series Play uses the full on-deck episode resume offset before HLS buffering',async({page})=>{
+test('series Play resumes classic Plex HLS after initial video data, without native mediaOption',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
    deviceId:'dev',active:'plex',servers:[{id:'plex',kind:'plex',url:'http://plex.test',name:'Plex',token:'token'}]})));
  const show={ratingKey:'series',type:'show',title:'Partially Viewed Series'};
@@ -1298,8 +1298,8 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
      const source=this.querySelector('source');
      if(source) window.nativeOpens.push({url:source.src,type:source.type});
    };
-   // Desktop Chromium cannot decode native LG mediaOption. Inspect the exact
-   // source at load time; this fixture does not validate TV buffering.
+   // Desktop Chromium cannot decode LG HLS. Inspect the exact source and
+   // synthesize video readiness; this fixture does not validate TV decoding.
    HTMLMediaElement.prototype.play=function(){return Promise.resolve();};
  });
  const episode={ratingKey:'episode2',type:'episode',title:'Episode In Progress',
@@ -1334,9 +1334,18 @@ test('series Play uses the full on-deck episode resume offset before HLS bufferi
  expect(url.pathname).toBe('/video/:/transcode/universal/start.m3u8');
  expect(url.searchParams.has('offset')).toBe(false);
  expect(url.searchParams.get('path')).toBe('/library/metadata/episode2');
- const [mime,encoded]=opens[0].type.split(';mediaOption=');
- expect(mime).toBe('application/vnd.apple.mpegurl');
- expect(JSON.parse(decodeURIComponent(encoded)).option.transmission.playTime.start).toBe(125000);
+ expect(opens[0].type).toBe('application/vnd.apple.mpegurl');
+ await expect(page.locator('video')).toHaveCSS('visibility','hidden');
+ // A real LG video decoder performs this transition after fetching segment
+ // zero; do not jump at loadedmetadata, and show the picture only on landing.
+ await page.locator('video').evaluate(video=>{
+   Object.defineProperty(video,'readyState',{configurable:true,value:2});
+   Object.defineProperty(video,'currentTime',{configurable:true,
+     get(){return window.soughtAt||0;},set(value){window.soughtAt=value;}});
+   video.dispatchEvent(new Event('loadeddata'));
+ });
+ expect(await page.evaluate(()=>window.soughtAt)).toBe(125);
+ await expect(page.locator('video')).toHaveCSS('visibility','visible');
  // Preserve the target in progress reports while the decoder is opening.
  await expect.poll(()=>times.includes('125000')).toBe(true);
 });

@@ -30,6 +30,7 @@ test('compatibility mode restores pre-change Plex HLS and burn-in for MKV SRT an
     assert.equal(session.transcode,true);
     assert.equal(session.start,45);
     assert.equal(session.subtitleAsset,null);
+    assert.equal(session.legacyPlexPlayback,true);
     assert.equal(session.subtitleBurnedIn,true);
     assert.equal(url.pathname,'/video/:/transcode/universal/start.m3u8');
     assert.equal(url.searchParams.get('X-Plex-Platform'),'Chrome');

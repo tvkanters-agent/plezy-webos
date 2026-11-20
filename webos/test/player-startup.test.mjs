@@ -99,6 +99,71 @@ test('Matroska source passes MIME and native resume; obsolete source errors are 
   } finally {globalThis.window=oldWindow;globalThis.document=oldDocument;}
 });
 
+test('classic Plex HLS resumes after loadeddata rather than black-screening on native mediaOption',()=>{
+  const oldWindow=globalThis.window,oldDocument=globalThis.document;
+  const sources=[];globalThis.window={PalmSystem:{}};
+  globalThis.document={createElement:()=>({attributes:{},
+    setAttribute(k,v){this.attributes[k]=v;},addEventListener(){}})};
+  try {
+    const session={url:'http://plex.test/start.m3u8',transcode:true,legacyPlexPlayback:true};
+    const video={readyState:1,currentTime:0,style:{visibility:'hidden'},seeking:false,
+      appendChild(source){sources.push(source);},load(){}};
+    const player=Object.assign(Object.create(Player.prototype),{
+      session,item:{duration:1200},generation:1,initialSeekTarget:125.25,
+      initialSeekPending:true,pendingStart:125.25,
+      video,showBuffering(){},update(){},checkStartupProgress(){},
+      skipButton:null
+    });
+    player.loadSource(session);
+    assert.equal(sources[0].attributes.type,'application/vnd.apple.mpegurl');
+    assert.equal(player.pendingStart,125.25);
+    player.resume();
+    assert.equal(video.currentTime,0,'metadata must not seek before a decoder frame is available');
+    video.readyState=2;
+    player.resume();
+    assert.equal(video.currentTime,125.25);
+    assert.equal(player.pendingStart,0);
+    player.startAfterInitialSeek();
+    assert.equal(player.initialSeekPending,false);
+    assert.equal(video.style.visibility,'visible');
+  } finally {globalThis.window=oldWindow;globalThis.document=oldDocument;}
+});
+
+test('resume preserves its target when Plex and the HLS decoder omit duration',()=>{
+  const player=Object.assign(Object.create(Player.prototype),{
+    session:{},item:{duration:0},pendingStart:125.25,initialSeekPending:true,
+    initialSeekTarget:125.25,video:{readyState:2,currentTime:0,duration:NaN}
+  });
+  player.resume();
+  assert.equal(player.video.currentTime,125.25);
+  assert.equal(player.pendingStart,0);
+});
+
+test('native fast resume remains enabled for enhanced HLS, direct files and starts at zero',()=>{
+  const oldWindow=globalThis.window,oldDocument=globalThis.document;
+  const sources=[];globalThis.window={PalmSystem:{}};
+  globalThis.document={createElement:()=>({attributes:{},
+    setAttribute(k,v){this.attributes[k]=v;},addEventListener(){}})};
+  try {
+    for (const [session,target] of [
+      [{transcode:true},125],
+      [{transcode:false,legacyPlexPlayback:true},125],
+      [{transcode:true,legacyPlexPlayback:true},0]
+    ]) {
+      const video={appendChild(source){sources.push(source);},load(){}};
+      const player=Object.assign(Object.create(Player.prototype),{
+        session,generation:1,initialSeekTarget:target,pendingStart:target,video
+      });
+      player.loadSource({...session,url:'http://plex.test/file'});
+      const type=sources.at(-1).attributes.type;
+      assert.match(type,/;mediaOption=/);
+      assert.equal(JSON.parse(decodeURIComponent(type.split(';mediaOption=')[1])).option.transmission.playTime.start,
+        target*1000);
+      assert.equal(player.pendingStart,0);
+    }
+  } finally {globalThis.window=oldWindow;globalThis.document=oldDocument;}
+});
+
 test('an audio-only clock does not establish a video frame; old startup deadlines cannot fail new sessions',t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   let failures=0;

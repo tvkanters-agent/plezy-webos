@@ -585,6 +585,17 @@ user-requested reversible webOS compatibility gate, not a native Plezy
 setting. Browser tests cover mode separation and requests; actual subtitle
 pixels and video decoding still require LG hardware verification.
 
+On the user's MKV+ASS case, Play from beginning succeeds while Resume plays
+audio over black video in compatibility mode. The original API request alone
+does not restore the player's start behavior: webOS also receives a nonzero
+`mediaOption` playback start which the LG HLS decoder may not handle. For
+legacy Plex HLS *resumes only*, start the same source without that mediaOption,
+then perform LG's documented `loadeddata` → `currentTime` seek after video
+data is available. The initial frame stays gated until the seek lands; this
+may preload/buffer twice, but avoids the problematic native-start variant.
+MP4 and enhanced-mode native resume remain unchanged. Hardware verification
+is still needed to confirm whether the affected LG reproduces this inference.
+
 The reviewed native expansion is documented in [DIRECT_PLAY_REVIEW.md](DIRECT_PLAY_REVIEW.md). Unlike desktop mpv, LG HTML5 cannot select arbitrary embedded tracks; multi-audio files stay on HLS. Native-only AVC/HEVC formats require stream evidence within the C8/webOS 4.0 limits and correct source MIME. Independent SRT/ASS does not force a video transcode. Startup recovery is scoped to the session and remains armed past metadata until video clock progress, so native failures cannot hide indefinitely or suppress replacement HLS errors. Browser event tests are not hardware decode validation.
 
 ### Subtitle sync on Chromium 53 and real Plex sidecar keys
