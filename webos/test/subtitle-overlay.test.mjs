@@ -235,7 +235,10 @@ test('an ASS worker signals runtime ready before the startup timeout',async t=>{
   globalThis.window={SubtitlesOctopus:function(options){
     this.dispose=()=>{};
     this.worker={addEventListener(type,handler){
-      queueMicrotask(()=>handler({data:{target:'ready'}}));
+      queueMicrotask(()=>{
+        handler({data:{target:'ready'}});
+        handler({data:{target:'get-styles',styles:[]}});
+      });
     },removeEventListener(){},postMessage(value){messages.push(value);}};
     this.setIsPaused=()=>{};
     this.setRate=()=>{};

@@ -2,6 +2,7 @@
 import {CaptionsRenderer, parseText} from 'media-captions';
 import {attachAssColorComparison} from './ass-color-diagnostics.js';
 import {AssEventAppender} from './ass-events.js';
+import {assStartupPreview} from './ass-startup.js';
 import {assFontCache} from './ass-font-cache.js';
 import {assTrackCache} from './ass-track-cache.js';
 import {extractMatroskaSubtitle} from './matroska-subtitles.js';
@@ -116,7 +117,7 @@ async function subtitleRequest(signal, run) {
   }
 }
 
-async function downloadSubtitle(asset, signal, position, preview, onTiming) {
+async function downloadSubtitle(asset, signal, position, preview, onTiming, parked) {
   if (asset.partUrl) {
     try {
       if (asset.format === 'ass' && asset.partCacheKey) {
@@ -129,6 +130,15 @@ async function downloadSubtitle(asset, signal, position, preview, onTiming) {
           }));
           if (fonts.every(Boolean)) {
             asset.fonts = fonts;
+            // The full cached script may contain megabytes of vector signs.
+            // Render the currently relevant events first instead of making
+            // libass parse every sign before the first visible subtitle.
+            // A warm worker already holding this complete track can display
+            // it immediately. Never replace its track with a partial preview.
+            const alreadyLoaded = parked?._plezyTrackContent === saved.script &&
+              sameFonts(parked.fonts, fonts);
+            const opening = alreadyLoaded ? null : assStartupPreview(saved.script, position);
+            if (opening && !signal.aborted) await preview(opening);
             return saved.script;
           }
         }
@@ -249,9 +259,10 @@ export class SubtitleOverlay {
       this.assClockLast = current;
       if (this.assWaiting && Math.abs(this.video.currentTime - this.assWaitingPosition) > 0.03)
         this.assWaiting = false;
-      if (!this.video.paused || moved || this.assWaiting)
+      if (this.renderer?.worker && !this.renderer._plezyFullyReady) return;
+      if (!this.video.paused || moved)
         this.syncAssClock(moved && (this.video.paused || this.video.seeking || this.assWaiting));
-    }, 250);
+    }, 100);
   }
 
   startClock() {
@@ -342,7 +353,7 @@ export class SubtitleOverlay {
     if (asset.format === 'srt' || asset.format === 'vtt') ensurePixi().catch(()=>{});
     if (asset.format === 'ass') ensureAssRenderer().catch(()=>{});
     try {
-      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming);
+      const content = await downloadSubtitle(asset, controller.signal, subtitleTime(position, offsetMs), render, onTiming, this.parkedAssRenderer);
       await render(content);
     } finally {
       if (this.abort === controller) this.abort = null;
@@ -483,11 +494,15 @@ export class SubtitleOverlay {
         onError
       });
       const onRuntimeReady = event => {
-        if (event.data.target !== 'ready') return;
+        // Upstream emits 'ready' immediately after releasing the worker-init
+        // dependency, *before* libass has finished initializing. Requesting
+        // its styles guarantees that the track and font registration exist.
+        if (event.data.target === 'ready') {
+          renderer.worker?.postMessage({target:'get-styles'});
+          return;
+        }
+        if (event.data.target !== 'get-styles') return;
         renderer.worker?.removeEventListener('message',onRuntimeReady);
-        // SubtitlesOctopus fires its public onReady on the *first* worker
-        // message, sometimes just a log before libass has initialized.
-        // Wait for the explicit runtime-ready message before any forced draw.
         renderer._plezyFullyReady = true;
         ready = true;
         showReady();
@@ -499,6 +514,7 @@ export class SubtitleOverlay {
     // it receives them. Under load that means a stale seek clock can appear
     // current. Attach the source clock and playback state to every update.
     if (renderer.worker) {
+      renderer._plezyClockHandlesRate = true;
       renderer.setCurrentTime = time => renderer.worker.postMessage({target:'video',
         currentTime:time, senderTime:Date.now(),
         isPaused:!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),
@@ -575,8 +591,12 @@ export class SubtitleOverlay {
   syncAssClock(force = false) {
     if (this.kind !== 'ass' || !this.renderer) return;
     const current = subtitleTime(this.video.currentTime, this.offsetMs);
+    if (this.renderer.worker && !this.renderer._plezyFullyReady) return;
     this.renderer.setIsPaused(!!(this.video.paused || this.video.seeking || this.video.ended || this.assWaiting),current);
-    this.renderer.setRate(this.video.playbackRate || 1);
+    // The webOS clock message already carries the playback rate; posting
+    // another message every 100ms needlessly queues work on the LG worker.
+    if (!this.renderer._plezyClockHandlesRate)
+      this.renderer.setRate(this.video.playbackRate || 1);
     if (force && this.renderer._plezyFullyReady)
       this.renderer.worker?.postMessage({target:'plezy-force-frame'});
   }

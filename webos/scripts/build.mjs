@@ -24,6 +24,18 @@ await cp(path.join(vendor, 'COPYRIGHT'),path.join(libass,'COPYRIGHT'));
 let octopus = await readFile(path.join(vendor,'subtitles-octopus.js'),'utf8');
 const disposeAnchor = '    self.dispose = function () {';
 if (!octopus.includes(disposeAnchor)) throw new Error('SubtitlesOctopus video lifecycle changed');
+// Upstream compares CSS lengths ('0px') to numbers (0), causing needless
+// canvas.width assignments on every resize. Assigning width clears the
+// rendered ASS frame even when geometry is unchanged (visible flicker).
+const geometryAnchor = 'self.canvas.style.top != top ||\n          self.canvas.style.left != left';
+if (!octopus.includes(geometryAnchor)) throw new Error('SubtitlesOctopus resize API changed');
+octopus = octopus.replace(geometryAnchor,
+  'parseFloat(self.canvas.style.top) != top ||\\n          parseFloat(self.canvas.style.left) != left'.replace('\\n','\n'));
+const canvasSizeAnchor = 'self.canvas.width = width;\n            self.canvas.height = height;';
+if (!octopus.includes(canvasSizeAnchor)) throw new Error('SubtitlesOctopus canvas sizing changed');
+octopus = octopus.replace(canvasSizeAnchor,
+  'if (self.canvas.width !== width) self.canvas.width = width;\n' +
+  '            if (self.canvas.height !== height) self.canvas.height = height;');
 octopus = octopus.replace(disposeAnchor, `    self.plezySuspendVideo = function () {
         if (self._plezySuspended || !self.video) return;
         self._plezySuspended = true;

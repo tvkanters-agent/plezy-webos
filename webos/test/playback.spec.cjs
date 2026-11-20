@@ -1949,6 +1949,20 @@ test('animated ASS sign layers paint together between video time updates', async
   await expect.poll(position).toBeGreaterThan(0);
   const start = await position();
   await expect.poll(position).toBeGreaterThan(start + 3);
+  await page.locator('[data-action="pause"]').click();
+  // A no-op resize must never reset the visible canvas. Upstream compares
+  // style.top ('0px') to top (0), then unnecessarily reassigns canvas.width.
+  const resizePixels=await canvas.evaluate(element=>{
+    const visible=()=>{
+      const pixels=element.getContext('2d').getImageData(0,0,element.width,element.height).data;
+      for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
+      return false;
+    };
+    const before=visible();
+    window.dispatchEvent(new Event('resize'));
+    return {before,after:visible()};
+  });
+  expect(resizePixels).toEqual({before:true,after:true});
 });
 
 test('compressed MKV ASS draws before the final ranges arrive and keeps the applied sync', async ({page}) => {
