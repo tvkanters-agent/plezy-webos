@@ -71,9 +71,12 @@ Background sections are intentionally absent per user request. Legacy Plex
 burn-in remains untouched, and ASS/SSA retains its authored formatting.
 
 MPV sizes subtitle font and border in units at 720p; webOS scales these with
-the display height and draws a uniform outline with the Chromium 53-compatible
-`-webkit-text-stroke` property. Unlike the former text shadows, the width
-directly changes the visible glyph contour in every direction. The local overlay uses the
+the display height. Native MPV paints a rounded border *behind* the glyphs.
+Chromium 53's `-webkit-text-stroke` paints over the letter fill, with sharp
+mitres/spikes on W/V. The webOS adaptation instead layers zero-blur shadows
+at evenly sampled angles around a circular contour, behind the fill. This
+preserves the letter shape and has an even border in every direction; the
+sample count scales with the border size. The local overlay uses the
 video rect when `Use margins` is off and the whole screen when enabled. For
 LG hardware planes where `videoWidth`/`videoHeight` report zero, Plex media
 metadata provides the fallback aspect ratio. Default-placement cues are
