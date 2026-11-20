@@ -909,3 +909,22 @@ Timed dialogue recovery starts on worker failure or after eight seconds without
 a painted frame. The styled canvas
 is anchored to the player viewport. If the worker fails, dialogue continues
 locally with the selected track and offset. The HTML fallback omits typesetting.
+
+### ASS video clock ownership and startup (1.22.4)
+
+Native Plezy delegates subtitle track clocks and seek state to MPV. On webOS
+the independently rendered libass canvas must follow the hardware HTML
+decoder. The vendor SubtitlesOctopus wrapper attached its own timeupdate,
+playing, pause, seek and waiting callbacks in addition to the webOS overlay.
+Those competing callbacks did not transmit the corrected sender timestamp,
+stalled-state guard or playback rate. The bundled wrapper now disables only
+its clock callbacks when Plezy's local ASS overlay owns the clock; viewport
+resize and metadata observation continue. When resuming a parked worker, the
+callback detachment is re-applied. The worker processes rate and pause before
+video time to avoid rendering a transient frame from the previous seek state.
+A new worker only installs incremental dialogue events after its initial
+style/track ready response, rather than sending a premature second style
+query. The native first-frame and resume seek gates remain authoritative;
+once either loaded video or first-frame playback is confirmed, embedded ASS
+extraction does not wait another 200ms, and paused title opens may read the
+subtitle track. Physical C8 tests are needed to verify these changes.
