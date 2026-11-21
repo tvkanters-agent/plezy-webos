@@ -2326,18 +2326,22 @@ async function render(prepared = null) {
       const markDetailWatched = async watched => {
         if (watchMutationPending) return;
         watchMutationPending = true;
+        const trackerEpochAtMutation = simklTracker.epoch;
         // Retire a background detail revalidation that may have started before
         // the user's watch action, so it cannot remount stale metadata.
         ++detailWatchEpoch;
         try {
           await currentApi.watched(item, watched);
-          if (currentApi !== api || detailDisposed) return;
+          // WatchActions finishes acknowledged writes even if the initiating
+          // detail is unmounted. A different server/account must not inherit it.
+          if (currentApi !== api) return;
           updateLocalWatchState(item, watched);
           catalogCache.clear();
-          if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           persistDetailWatchState(item, detailRoute, detailServerScope);
-          // Update this page's controls even if its snapshot is still covered.
-          refreshDetailWatchActions(actions, item);
+          if (currentApi instanceof Plex && simklTracker.epoch === trackerEpochAtMutation)
+            simklTracker.markWatched(currentApi, item, watched);
+          // UI changes belong only to the originating live/covered snapshot.
+          if (!detailDisposed) refreshDetailWatchActions(actions, item);
           if (!detailActive()) return;
           if (item.folder) {
             main.querySelectorAll('.episode-list,.grid').forEach(grid => grid._markWatched?.(watched));
