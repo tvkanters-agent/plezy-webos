@@ -1,3 +1,10 @@
+## 1.22.16 — Fix Plex series Shuffle
+
+- Shuffle now traverses seasons and paginated episodes in Plex series rather than treating season rows as unplayable.
+- Sample episodes uniformly without building a full in-memory queue; keep season Shuffle within the chosen season.
+- Cancel pending Shuffle on navigation or another playback launch; handle empty shows without opening the player.
+- Add browser/unit regressions covering multi-season shows, pagination, empty seasons and cancellation.
+
 ## 1.22.14 — Remove credentials from persisted artwork cache
 
 - Persist account-scoped artwork fingerprints instead of storing authenticated Plex/Jellyfin/Emby image URLs in IndexedDB keys.
