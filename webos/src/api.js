@@ -187,10 +187,6 @@ export async function plexServers(deviceId, token, signal) {
   }));
   return results.filter(Boolean);
 }
-export class PlexLibraryBoundaryChanged extends Error {
-  constructor() { super('The library changed while loading. Try again.'); }
-}
-
 export class Plex {
   constructor(server, deviceId) { this.server = server; this.deviceId = deviceId; }
   url(path, params = {}) { return endpoint(this.server.url, path, {...plexIdentity(this.deviceId), 'X-Plex-Token': this.server.token, ...params}); }
@@ -272,21 +268,35 @@ export class Plex {
       size: Number(entry.size) || 0
     }));
   }
-  async list(library, start = 0, sort = 'title', filter = 'all', limit = PAGE) {
-    const order = {title: 'titleSort', recent: 'addedAt:desc', release: 'originallyAvailableAt:desc'}[sort] || 'titleSort';
+  async libraryContainer(library, sort, filter, params) {
+    const order = {title:'titleSort', recent:'addedAt:desc', release:'originallyAvailableAt:desc'}[sort] || 'titleSort';
     const section = filter === 'unwatched' ? 'unwatched' : 'all';
-    const data = (await this.get('/library/sections/' + enc(library) + '/' + section, {
-      'X-Plex-Container-Start': start, 'X-Plex-Container-Size': limit, sort: order})).MediaContainer;
-    return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
+    return (await this.get('/library/sections/' + enc(library) + '/' + section, {...params, sort:order})).MediaContainer;
   }
-  async listAfter(library, sort, filter, predecessor) {
-    const previous = predecessor.page.items;
-    // Verify both halves of the boundary from one Plex response. A local
-    // cache signature alone cannot prove which ordering Plex used.
-    const range = await this.list(library, predecessor.offset, sort, filter, previous.length + PAGE);
-    if (previous.some((item, index) => range.items[index]?.id !== item.id))
-      throw new PlexLibraryBoundaryChanged();
-    return {items:range.items.slice(previous.length), total:range.total};
+  async list(library, start = 0, sort = 'title', filter = 'all', limit = PAGE) {
+    const data = await this.libraryContainer(library, sort, filter, {
+      'X-Plex-Container-Start':start, 'X-Plex-Container-Size':limit});
+    return {items:(data.Metadata || []).map(plexItem), total:data.totalSize || data.size || 0};
+  }
+  async dateLibrary(library, sort, filter) {
+    const data = await this.libraryContainer(library, sort, filter, {excludeElements:'Media'});
+    const rows = data.Metadata || [];
+    const total = Number(data.totalSize ?? data.size ?? rows.length);
+    if (Number(data.offset || 0) !== 0 || rows.length !== total ||
+        rows.some(row => row.ratingKey == null) ||
+        new Set(rows.map(row => String(row.ratingKey))).size !== rows.length) {
+      const error = new Error('Plex returned an incomplete date order.');
+      error.code = 'INCOMPLETE_LIBRARY';
+      throw error;
+    }
+    // Store only the fields used by cards. Details load their own metadata.
+    const items = rows.map(row => {
+      const {id,title,subtitle,type,poster,watched,unwatchedCount,resume,duration} = plexItem(row);
+      const {thumb,updatedAt,grandparentTitle,parentIndex,index} = row;
+      return {id,title,subtitle,type,poster,watched,unwatchedCount,resume,duration,
+        raw:{thumb,updatedAt,grandparentTitle,parentIndex,index}};
+    });
+    return {items, total};
   }
   async search(query) {
     const data = await this.get('/hubs/search', {query, limit: 60});
