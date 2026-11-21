@@ -58,7 +58,7 @@ const player = new Player(document.querySelector('#player'), notify, playbackClo
   (item, mediaIndex, kind, track) => episodeTrackChoices.record(item, mediaIndex, kind, track));
 // Plezy keeps the detail route beneath playback. Never clear/refetch that
 // page after hiding the player: it flashes blank and discards remote focus.
-function playbackClosed() {
+function playbackClosed(reportDone) {
   // Playback may have changed continue-watching, progress and watched state.
   catalogCache.clear();
   const previous = playbackReturn;
@@ -68,17 +68,25 @@ function playbackClosed() {
     focusWithoutJump(previous.focus, false);
   else focusFirst();
   if (route.type !== 'detail' || route.id !== previous.item.id) return;
-  const expectedRevision = revision;
-  previous.api.detail(route.id, route.kind).then(updated => {
-    if (revision !== expectedRevision || route !== previous.route ||
-        api !== previous.api || player.active) return;
+  const expectedRevision = revision, expectedPlayback = playbackLaunch;
+  const stillCurrent = () => revision === expectedRevision &&
+    playbackLaunch === expectedPlayback && route === previous.route &&
+    api === previous.api && !player.active;
+  // The final Plex timeline is asynchronous. Reading detail before it saves
+  // would persist the old viewOffset and leave the mounted Play action stale.
+  // Never hold the player open while waiting for the report to settle.
+  Promise.resolve(reportDone).then(() => {
+    if (!stillCurrent()) return null;
+    return previous.api.detail(previous.route.id, previous.route.kind);
+  }).then(updated => {
+    if (!updated || !stillCurrent()) return;
     // Detail actions close over this item. Refresh it and the affected
     // controls in place rather than replacing the mounted screen.
     Object.assign(previous.item, updated);
     const cacheId = savedCatalog.id(catalogScope(activeServer()),
       'detail:' + JSON.stringify([route.id,route.kind]));
     savedCatalog.read(cacheId).then(bundle => {
-      if (!bundle || previous.api !== api) return;
+      if (!bundle || !stillCurrent()) return;
       // Persist the playback result even when the in-memory item was mutated
       // in place, so equality checks on the next visit cannot skip the write.
       bundle.item = updated;

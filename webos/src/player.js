@@ -1077,7 +1077,7 @@ export class Player {
     }
     const position = this.position();
     const duration = this.timelineDuration();
-    if (state === 'stopped') this.reporter.stop(position, duration);
+    if (state === 'stopped') return this.reporter.stop(position, duration);
     else this.reporter.report(state, position, duration);
   }
   track(action, ended = false) {
@@ -1105,7 +1105,7 @@ export class Player {
     this.hideSeekPreview();
     const session = this.session, api = this.api;
     this.lastPosition = this.position() || this.lastPosition || 0;
-    if (session) this.report('stopped');
+    const reportDone = session ? this.report('stopped') : null;
     // Tracking belongs to the viewing, not a particular decoder session. A
     // failed/replaced decoder must still finish the started Simkl viewing.
     if (!preserveTracking) {
@@ -1136,6 +1136,8 @@ export class Player {
     this.reporter = null;
     if (session) void api.stop(session).catch(() => {});
     this.reportWarning = false;
+    // Return the promise as a property: release must not await reporting.
+    return {reportDone};
   }
   async close(ended = false) {
     if (this.closing) return;
@@ -1143,10 +1145,10 @@ export class Player {
     this.root.hidden = true;
     const cleanup = this.release(ended);
     const generation = this.generation;
-    await cleanup;
+    const {reportDone} = await cleanup;
     if (generation !== this.generation) return;
     this.closing = false;
-    this.onClose();
+    this.onClose(reportDone);
   }
   // An enhanced SRT stream has no subtitle pixels: SRT-to-SRT and SRT-to-Off
   // replace only the overlay. ASS/SSA must reopen for Plex to burn its pixels.
