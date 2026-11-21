@@ -1,3 +1,9 @@
+## 1.22.29 — Restrict release publication to the version-bump commit
+
+- Validate every master commit, but only publish its IPK when that commit increased the app version compared with its first parent.
+- Keep same-version follow-up runs from racing the intended version-bump publisher for a tag.
+- Preserve release retries, fail if parent history is missing, and test bump/follow-up/retry scenarios.
+
 ## 1.22.27 — Fix Back navigation during pending playback and detail updates
 
 - Cancel queued native HLS replay when Back or another navigation leaves its originating detail view, without reordering Plex Stop/teardown or breaking immediate replay.
