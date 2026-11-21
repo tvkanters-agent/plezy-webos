@@ -837,6 +837,7 @@ function revalidateRestoredLibrary(expectedRoute, mountedRevision) {
   const currentApi = api;
   let key, loader;
   if (view === 'browse') {
+    if (main.querySelector('.paged-window-grid')) return; // Revalidated on grid resume.
     key = 'browse:' + JSON.stringify([libraryId,selected,filter,expectedRoute.alpha || '',0,null]);
     loader = () => currentApi.list(libraryId,0,selected,filter,undefined,
       currentApi instanceof Jellyfin ? expectedRoute.alpha : undefined);
@@ -1445,7 +1446,7 @@ async function paginated(loader, currentRevision, options = {}) {
   // The first page may be a persisted snapshot. Refresh callbacks replace
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
-  let pageGeneration = 0, forceShiftedPages = false;
+  let pageGeneration = 0, forceShiftedPages = false, firstPageRefresh = null;
   const loadedPages = new Map();
   let watchedOverride;
   const watchExceptions = new Map();
@@ -1637,6 +1638,8 @@ async function paginated(loader, currentRevision, options = {}) {
       forceShiftedPages = true;
       loading = false;
       pendingFocus = null;
+      errorMessage.textContent = '';
+      retry.hidden = true;
     }
     let next = 0;
     for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
@@ -1650,11 +1653,34 @@ async function paginated(loader, currentRevision, options = {}) {
   function watchFresh(offset, initialPage, pending) {
     const watchEpoch = detailWatchEpoch;
     const requestRevision = mountedRevision;
-    if (pending) pending.then(update => {
+    if (pending) return pending.then(update => {
       if (watchEpoch === detailWatchEpoch && (!windowed || mountedRevision === requestRevision))
         return applyFresh(offset, initialPage, update);
     })
       .catch(() => { /* Offline updates keep the saved view usable. */ });
+  }
+  function trackFirstPageRefresh(pending) {
+    firstPageRefresh = pending;
+    pending.catch(() => { /* Keep the consistent cached grid offline. */ }).finally(() => {
+      if (firstPageRefresh !== pending) return;
+      firstPageRefresh = null;
+      requestAnimationFrame(check);
+    });
+  }
+  async function revalidateFirstPage(requestRevision) {
+    const reconcile = page => {
+      if (requestRevision !== mountedRevision || mountedRevision !== revision || !grid.isConnected)
+        return;
+      const original = loadedPages.get(0);
+      if (original && JSON.stringify(original) !== JSON.stringify(page))
+        return applyFresh(0, original, {value:page, changed:true});
+    };
+    const result = await options.reloadFirstPage();
+    // A refresh may have updated the cache while this grid was detached.
+    // Compare the cached page with the mounted one before extending it.
+    await reconcile(result.value);
+    const update = await result.fresh;
+    if (update?.changed) await reconcile(update.value);
   }
   grid._markWatched = watched => {
     watchedOverride = watched;
@@ -1680,10 +1706,12 @@ async function paginated(loader, currentRevision, options = {}) {
   grid._resumeCatalog = restoredRevision => {
     mountedRevision = restoredRevision;
     windowed?.resume();
+    if (options.reloadFirstPage && loadedPages.has(0))
+      trackFirstPageRefresh(revalidateFirstPage(restoredRevision));
     if (!completed) { listen(); requestAnimationFrame(check); }
   };
   async function load() {
-    if (loading || completed || mountedRevision !== revision || !grid.isConnected) return;
+    if (loading || firstPageRefresh || completed || mountedRevision !== revision || !grid.isConnected) return;
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
@@ -1694,7 +1722,9 @@ async function paginated(loader, currentRevision, options = {}) {
       requestGeneration === pageGeneration &&
       (!windowed || (requestRevision === mountedRevision && offset === start));
     try {
-      const predecessor = Array.from(loadedPages.keys()).filter(key => key < offset).pop();
+      const previousOffset = Array.from(loadedPages.keys()).filter(key => key < offset).pop();
+      const predecessor = windowed && previousOffset !== undefined
+        ? {offset:previousOffset, page:loadedPages.get(previousOffset)} : null;
       const response = options.initialPage && start === 0
         ? options.initialPage : await loader(start, forceShiftedPages, predecessor);
       options.initialPage = null;
@@ -1730,7 +1760,8 @@ async function paginated(loader, currentRevision, options = {}) {
       if (completed) { pendingFocus = null; cleanup(); }
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
       schedulePosters();
-      watchFresh(offset, page, fresh);
+      const update = watchFresh(offset, page, fresh);
+      if (windowed && offset === 0 && update) trackFirstPageRefresh(update);
     } catch (error) {
       if (canApply()) {
         pendingFocus = null;
@@ -1747,7 +1778,7 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   function check() {
     if (mountedRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
-    if (loading || (windowed && errorMessage.textContent)) return;
+    if (loading || firstPageRefresh || (windowed && errorMessage.textContent)) return;
     const rect = sentinel.getBoundingClientRect();
     const pane = main.getBoundingClientRect();
     if (rect.top <= pane.bottom + pane.height * 0.8) load();
@@ -1956,13 +1987,12 @@ async function render(prepared = null) {
         offset, count || null]);
       const isPlexDateSort = currentApi instanceof Plex &&
         (selected === 'recent' || selected === 'release');
-      const libraryLoader = (start, count, shifted = false, predecessor) => savedPage(
-        browseKey(start, count),
-        () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
-          currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
-        {force:forceRefresh || shifted, priority:start === 0 && !libraryRoute.alpha,
-          predecessorKey:isPlexDateSort && predecessor !== undefined
-            ? browseKey(predecessor) : null});
+      const libraryLoader = (start, count, shifted = false, predecessor, force = forceRefresh) =>
+        savedPage(browseKey(start, count),
+          () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
+            currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
+          {force:force || shifted, priority:start === 0 && !libraryRoute.alpha,
+            predecessor:predecessor ? {key:browseKey(predecessor.offset), page:predecessor.page} : null});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -2046,7 +2076,8 @@ async function render(prepared = null) {
       } else {
         await paginated((start, shifted, predecessor) =>
           libraryLoader(start, undefined, shifted, predecessor), currentRevision, {startedAt:contentStartedAt,
-          windowed:isPlexDateSort});
+          windowed:isPlexDateSort, reloadFirstPage:isPlexDateSort
+            ? () => libraryLoader(0, undefined, false, null, false) : null});
       }
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {

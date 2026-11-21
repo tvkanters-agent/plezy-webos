@@ -1,3 +1,9 @@
+## 1.22.32 — Fix Plex date-sort page ordering after refresh
+
+- Keep pending page requests separate when Plex shifts the order twice during browsing.
+- Reconcile first-page updates completed while the library tab was detached.
+- Discard successor cache entries from older builds that could have saved the wrong ordering.
+
 ## 1.22.31 — Fix watched action on reopened Plex details
 
 - Reconcile delayed Plex watched/unwatched acknowledgments with the reopened detail of the same title, including its accessible button label.

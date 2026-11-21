@@ -18,10 +18,10 @@ async function mockLibrary(page, total, beforePage = () => {}) {
       const size = Number(url.searchParams.get('X-Plex-Container-Size'));
       const sort = url.searchParams.get('sort');
       requests.push({start, size, sort});
-      const response = await beforePage({start, sort, titles});
+      const response = await beforePage({start, size, sort, titles});
       if (response?.status)
         return route.fulfill({status:response.status, json:{error:'Simulated Plex outage'}});
-      data = {totalSize:titles.length, Metadata:titles.slice(start, start + size)};
+      data = response?.snapshot || {totalSize:titles.length, Metadata:titles.slice(start, start + size)};
     } else if (url.pathname.startsWith('/library/metadata/')) {
       data.Metadata = titles.filter(item => item.ratingKey === url.pathname.split('/').pop());
     }
@@ -39,6 +39,25 @@ async function openDateSort(page, label = 'Recently added') {
 
 const card = (page, id) => page.locator(`.paged-window-grid .card[data-focus="${id}"]`);
 const pane = page => page.locator('main');
+const cachedPage = (page, plexSort, offset) => page.evaluate(async ({plexSort,offset}) => {
+  const key = ':browse:' + JSON.stringify(['movies',
+    plexSort === 'addedAt:desc' ? 'recent' : 'release','all','',offset,null]);
+  return new Promise(resolve => {
+    const request = indexedDB.open('plezy-catalog-v1',1);
+    request.onerror = () => resolve(null);
+    request.onsuccess = () => {
+      const tx = request.result.transaction('pages','readonly');
+      const cursor = tx.objectStore('pages').openCursor();
+      cursor.onsuccess = () => {
+        const row = cursor.result;
+        if (!row) { resolve(null); return; }
+        if (String(row.key).endsWith(key)) resolve(row.value);
+        else row.continue();
+      };
+      cursor.onerror = () => resolve(null);
+    };
+  });
+}, {plexSort,offset});
 const waitForLayout = page => page.evaluate(() => new Promise(resolve =>
   requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
@@ -269,31 +288,12 @@ for (const [sortLabel, plexSort] of [
           await new Promise(resolve => { releaseSecond = resolve; });
         }
       });
-      const cachedPage = async offset => page.evaluate(async ({plexSort,offset}) => {
-        const key = ':browse:' + JSON.stringify(['movies',
-          plexSort === 'addedAt:desc' ? 'recent' : 'release','all','',offset,null]);
-        return new Promise(resolve => {
-          const request = indexedDB.open('plezy-catalog-v1',1);
-          request.onerror = () => resolve(null);
-          request.onsuccess = () => {
-            const tx = request.result.transaction('pages','readonly');
-            const cursor = tx.objectStore('pages').openCursor();
-            cursor.onsuccess = () => {
-              const row = cursor.result;
-              if (!row) { resolve(null); return; }
-              if (String(row.key).endsWith(key)) resolve(row.value);
-              else row.continue();
-            };
-            cursor.onerror = () => resolve(null);
-          };
-        });
-      }, {plexSort,offset});
       await page.goto('/');
       await openDateSort(page, sortLabel);
       const grid = page.locator('.paged-window-grid');
       await pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
       await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
-      await expect.poll(async () => (await cachedPage(60))?.data?.items?.[0]?.id).toBe('60');
+      await expect.poll(async () => (await cachedPage(page, plexSort, 60))?.data?.items?.[0]?.id).toBe('60');
       await pane(page).evaluate(main => { main.scrollTop = 0; });
       await page.getByRole('button',{name:'Settings',exact:true}).click();
       changeFirstPage = true;
@@ -301,9 +301,9 @@ for (const [sortLabel, plexSort] of [
       await expect.poll(() => grid.evaluate((node, id) =>
         node._libraryWindow.focusById(id)?._libraryWindowIndex,
         mutation === 'insert' ? 'new' : '1')).toBe(0);
-      await expect.poll(async () => (await cachedPage(0))?.data?.items?.[0]?.id)
+      await expect.poll(async () => (await cachedPage(page, plexSort, 0))?.data?.items?.[0]?.id)
         .toBe(mutation === 'insert' ? 'new' : '1');
-      expect((await cachedPage(60)).data.items[0].id).toBe('60');
+      expect((await cachedPage(page, plexSort, 60)).data.items[0].id).toBe('60');
       const oldRequests = requests.filter(r => r.sort === plexSort && r.start === 60).length;
       afterRestart = true;
       await page.reload();
@@ -324,4 +324,100 @@ for (const [sortLabel, plexSort] of [
       }
     });
   }
+}
+
+for (const [sortLabel, plexSort] of [
+  ['Recently added', 'addedAt:desc'], ['Release date', 'originallyAvailableAt:desc']
+]) {
+  test(`${sortLabel} keeps pending successors tied to their ordering across restart`, async ({page}) => {
+    let arrival, offline = false;
+    const successors = [];
+    await mockLibrary(page, 180, async ({start, size, sort, titles}) => {
+      if (sort !== plexSort) return;
+      if (start === 0 && arrival) {
+        titles.unshift({ratingKey:arrival, type:'movie', title:'Arrival ' + arrival});
+        arrival = null;
+      }
+      if (start === 60) {
+        if (offline) return {status:503};
+        const snapshot = {totalSize:titles.length, Metadata:titles.slice(start,start + size)};
+        await new Promise(resolve => successors.push(resolve));
+        return {snapshot};
+      }
+    });
+    const movies = page.locator('.rail-library-items').getByRole('button',{name:'Movies'});
+    const settings = page.getByRole('button',{name:'Settings',exact:true});
+    const grid = page.locator('.paged-window-grid');
+    const scrollToBoundary = () => pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+    const hasSuccessor = () => grid.evaluate(node => node._libraryWindow.has(60));
+    const boundary = () => grid.evaluate(node => ['57','58','59'].map(id =>
+      node._libraryWindow.focusById(id)?._libraryWindowIndex));
+    await page.goto('/');
+    await openDateSort(page, sortLabel);
+    for (const id of ['A','B']) {
+      await pane(page).evaluate(main => { main.scrollTop = 0; });
+      await settings.click();
+      arrival = id;
+      await movies.click();
+      await expect(card(page,id)).toBeVisible();
+      await scrollToBoundary();
+      await expect.poll(() => successors.length).toBe(id === 'A' ? 1 : 2);
+    }
+    // Let the current ordering finish first, then deliver the older response.
+    expect(await hasSuccessor()).toBe(false);
+    successors[1]();
+    await expect.poll(boundary).toEqual([59,60,61]);
+    const oldResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.hostname === 'plex.test' && url.searchParams.get('sort') === plexSort &&
+        url.searchParams.get('X-Plex-Container-Start') === '60';
+    });
+    successors[0]();
+    await oldResponse;
+    await expect.poll(async () => (await cachedPage(page,plexSort,60))?.data.items[0].id)
+      .toBe('58');
+    offline = true;
+    await page.reload();
+    await openDateSort(page, sortLabel);
+    const failedResponse = page.waitForResponse(response =>
+      response.status() === 503 && new URL(response.url()).hostname === 'plex.test');
+    await scrollToBoundary();
+    await failedResponse;
+    await expect.poll(boundary).toEqual([59,60,61]);
+  });
+
+  test(`${sortLabel} reconciles a first-page refresh completed while detached`, async ({page}) => {
+    let holdFirst = false, arrival = true;
+    const refreshes = [];
+    await mockLibrary(page, 180, async ({start, sort, titles}) => {
+      if (sort !== plexSort || start !== 0 || !holdFirst) return;
+      if (arrival) {
+        titles.unshift({ratingKey:'new', type:'movie', title:'Arrival'});
+        arrival = false;
+      }
+      await new Promise(resolve => refreshes.push(resolve));
+    });
+    const movies = page.locator('.rail-library-items').getByRole('button',{name:'Movies'});
+    const settings = page.getByRole('button',{name:'Settings',exact:true});
+    const grid = page.locator('.paged-window-grid');
+    await page.goto('/');
+    await openDateSort(page, sortLabel);
+    await settings.click();
+    holdFirst = true;
+    await movies.click();
+    await expect.poll(() => refreshes.length).toBe(1);
+    await settings.click();
+    refreshes[0]();
+    await expect.poll(async () => (await cachedPage(page,plexSort,0))?.data.items[0].id)
+      .toBe('new');
+    await movies.click();
+    await expect.poll(() => refreshes.length).toBe(2);
+    // The new first page is already on disk. Apply it while the next refresh
+    // is still held, then check the complete boundary once paging resumes.
+    await expect(card(page,'new')).toBeVisible();
+    refreshes[1]();
+    await pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+    await expect.poll(() => grid.evaluate(node => ['58','59','60'].map(id =>
+      node._libraryWindow.focusById(id)?._libraryWindowIndex))).toEqual([59,60,61]);
+  });
 }
