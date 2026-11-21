@@ -1,7 +1,7 @@
 const {test,expect}=require('@playwright/test');
 
 // A show detail is preserved as a detached DOM snapshot while its season is open.
-async function mockPlexShow(page) {
+async function mockPlexShow(page, ratingResult = {ratings:[{source:'imdb',value:8.7,votes:250}]}) {
   await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
     deviceId:'test', active:'plex', mdblistApiKey:'test-key',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}]
@@ -13,7 +13,7 @@ async function mockPlexShow(page) {
   await page.route('https://api.mdblist.com/**', async route=>{
     ratingRequests++;
     await ratingGate;
-    await route.fulfill({json:{ratings:[{source:'imdb',value:8.7,votes:250}]}});
+    await route.fulfill({status:ratingResult ? 200 : 404,json:ratingResult || {error:'not found'}});
   });
   let watched=false;
   const show=()=>({ratingKey:'show',type:'show',title:'Example Series',
@@ -103,5 +103,33 @@ for(const timing of ['before','during','after']) {
     await expect(page.locator('#main .ratings-chip .rating-badge')).toContainText(['8.7']);
     expect(await page.evaluate(()=>
       document.querySelector('#main .ratings-chip')===window.originalRatingChip)).toBe(true);
+  });
+}
+
+for(const timing of ['before','during','after']) {
+  test('empty ratings lookup '+timing+' Back removes the detached chip',async({page})=>{
+    const server=await mockPlexShow(page,null);
+    await openShow(page);
+    const rating=page.locator('#main .ratings-chip');
+    await expect(rating).toHaveAttribute('aria-busy','true');
+    await expect.poll(server.ratingRequests).toBe(1);
+    await page.evaluate(()=>{window.emptyRatingChip=document.querySelector('#main .ratings-chip');});
+    if(timing==='before') {
+      server.releaseRating();
+      await expect(rating).toHaveCount(0);
+    }
+    await page.getByRole('button',{name:/Season 1/}).click();
+    await expect(page.getByRole('heading',{name:'Season 1'})).toBeVisible();
+    if(timing==='during'){
+      server.releaseRating();
+      await expect.poll(()=>page.evaluate(()=>
+        window.emptyRatingChip.parentNode===null)).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading',{name:'Example Series'})).toBeVisible();
+    if(timing==='after')server.releaseRating();
+    await expect(page.locator('#main .ratings-chip')).toHaveCount(0);
+    expect(await page.evaluate(()=>
+      window.emptyRatingChip.parentNode===null)).toBe(true);
   });
 }
