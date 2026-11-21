@@ -202,6 +202,12 @@ test('Stop during native HLS resume retires the old decoder and replay displays 
   await page.addInitScript(()=>{
     window.PalmSystem = {};
     window.hlsOpens = [];
+    // Chromium may inspect an appended source even though load and play are
+    // mocked. Its rejection of LG's mediaOption MIME is outside this fixture.
+    document.addEventListener('error', event=>{
+      if (event.isTrusted && (event.target instanceof HTMLSourceElement ||
+          event.target instanceof HTMLVideoElement)) event.stopImmediatePropagation();
+    }, true);
     const load = HTMLMediaElement.prototype.load;
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.load = function() {
@@ -264,6 +270,7 @@ test('Stop during native HLS resume retires the old decoder and replay displays 
       current.dispatchEvent(new Event('playing'));
     });
     await expect(player).toBeVisible();
+    await expect(player.locator('.player-status')).toBeEmpty();
     await expect(video).toHaveCSS('visibility','hidden');
     await expect(player.locator('.player-buffering')).toBeVisible();
     await video.evaluate(current=>{
