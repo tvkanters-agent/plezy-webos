@@ -1,4 +1,4 @@
-## 1.22.17 — Parallel, scoped webOS CI
+## 1.22.18 — Parallel, scoped webOS CI
 
 - Parallelize unit, bundle/IPK and two browser E2E shards while preserving the final QA gate.
 - Avoid duplicate PR/push runs and cancel superseded PR revisions, but never cancel master releases.
