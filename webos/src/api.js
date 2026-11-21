@@ -644,7 +644,7 @@ export class Plex {
     for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.byteLength;}
     return bytes;
   }
-  async report(session, state, position, duration) {
+  async report(session, state, position, duration, signal) {
     // Plex's timeline API is POST. It often returns XML or an empty 200,
     // neither of which is a request failure. Do not feed it to request()
     // (which parses JSON and would falsely show "progress not synced").
@@ -656,10 +656,10 @@ export class Plex {
       duration: Math.round(Math.max(0, duration || session.item.duration || 0) * 1000),
       'X-Plex-Session-Identifier': session.sessionId};
     const url = this.url('/:/timeline', params);
-    // release() serializes the final report before opening a fallback decoder.
-    // Bound this transport too: a hung timeline POST must not block recovery.
+    // The per-session reporter coalesces heartbeats and can cancel an obsolete
+    // request during teardown without delaying the next decoder.
     try {
-      await request(url, {method:'POST', headers:{Accept:'*/*'}, responseType:'none'});
+      await request(url, {method:'POST', headers:{Accept:'*/*'}, responseType:'none', signal});
     } catch (error) {
       if (error.status) error.message = 'Plex playback timeline returned HTTP ' + error.status + '.';
       throw error;
@@ -782,12 +782,12 @@ export class Jellyfin {
       ...navigation, markerPromise,
       ...mediaSourceTracks({raw:{MediaSources:[source]}})};
   }
-  async report(session, state, position) {
+  async report(session, state, position, duration, signal) {
     const path = state === 'start' ? '/Sessions/Playing' : state === 'stopped' ? '/Sessions/Playing/Stopped' : '/Sessions/Playing/Progress';
     await this.call(path, {}, {method: 'POST', body: {ItemId: session.item.id, MediaSourceId: session.sourceId,
       PlaySessionId: session.sessionId, PositionTicks: Math.round(position * 10000000), IsPaused: state === 'paused',
       CanSeek: true, PlayMethod: session.transcode ? 'Transcode' : 'DirectPlay',
-      AudioStreamIndex: session.options.audio, SubtitleStreamIndex: session.options.subtitle}});
+      AudioStreamIndex: session.options.audio, SubtitleStreamIndex: session.options.subtitle}, signal});
   }
   async stop(session) {
     if (session.transcode) await this.call('/Videos/ActiveEncodings', {DeviceId: this.deviceId, PlaySessionId: session.sessionId}, {method: 'DELETE'});

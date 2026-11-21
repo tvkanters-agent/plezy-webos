@@ -1,3 +1,9 @@
+## 1.22.13 — Prevent slow playback reporting from blocking Stop and restart
+
+- Coalesce unsent progress heartbeats; send final stopped position without waiting behind a growing queue.
+- Release decoders and begin server-side transcode teardown without waiting for a slow server.
+- Cancel obsolete Plex/Jellyfin requests, preserve Simkl tracking and add regression tests.
+
 ## 1.22.12 — Cache personal Simkl ratings
 
 - Reuse five-minute, account-scoped Simkl personal-rating snapshots for movies, shows and anime instead of downloading full lists for each detail page.

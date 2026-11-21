@@ -5,6 +5,7 @@ import {parseBif, bifFrameAt} from './scrub-preview.js';
 import {SubtitleOverlay} from './subtitles.js';
 import {SubtitleDiagnostics} from './subtitle-diagnostics.js';
 import {catalogScope} from './persistent-catalog.js';
+import {ProgressReporter} from './progress-reporter.js';
 export class Player {
   constructor(root, notify, onClose, tracker = null, preferences = () => ({}), onTrackChoice = null) {
     this.root = root; this.notify = notify; this.onClose = onClose; this.tracker = tracker;
@@ -46,7 +47,7 @@ export class Player {
     this.lastPointerPosition = null;
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
-    this.generation = 0; this.session = null; this.reporting = Promise.resolve();
+    this.generation = 0; this.session = null; this.reporter = null; this.reportWarning = false;
     this.video.addEventListener('loadedmetadata', () => {
       this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
     });
@@ -1064,14 +1065,20 @@ export class Player {
     pause.classList.toggle('is-paused', this.video.paused);
   }
   report(state) {
-    if (!this.session) return;
-    const api = this.api, session = this.session;
+    const session = this.session;
+    if (!session) return;
+    if (!this.reporter || this.reporter.session !== session) {
+      this.reporter = new ProgressReporter(this.api, session, () => {
+        if (this.session === session && !this.reportWarning) {
+          this.reportWarning = true;
+          this.notify('Progress could not be synced to the server.');
+        }
+      });
+    }
     const position = this.position();
     const duration = this.timelineDuration();
-    // Serialize start/progress/stop so a delayed heartbeat cannot overwrite stop.
-    this.reporting = this.reporting.then(() => api.report(session, state, position, duration)).catch(() => {
-      if (!this.reportWarning) { this.reportWarning = true; this.notify('Progress could not be synced to the server.'); }
-    });
+    if (state === 'stopped') this.reporter.stop(position, duration);
+    else this.reporter.report(state, position, duration);
   }
   track(action, ended = false) {
     if (!this.playbackTracking || !this.item) return;
@@ -1123,8 +1130,11 @@ export class Player {
     this.video.pause(); this.video.removeAttribute('src');
     Array.from(this.video.querySelectorAll('source')).forEach(source => source.remove());
     this.video.load();
-    await this.reporting;
-    if (session) await api.stop(session).catch(() => {});
+    // Never await playback reporting (or server-side transcode teardown) when
+    // stopping/reopening the hardware decoder. The per-session reporter owns
+    // its final stopped report and cannot feed stale heartbeats into a new one.
+    this.reporter = null;
+    if (session) void api.stop(session).catch(() => {});
     this.reportWarning = false;
   }
   async close(ended = false) {

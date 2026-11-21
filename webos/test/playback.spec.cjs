@@ -197,20 +197,31 @@ test('closing playback preserves the detail screen and focused action without a 
   }))).toEqual({sameNode:true,detached:false});
 });
 test('Back during delayed stream cleanup cannot resurrect playback',async({page})=>{
-  const {calls,events}=await setup(page);let release;
+  const {calls,events}=await setup(page), releaseStops=[];
   await page.route('http://plex.test/**/timeline**',async route=>{
-    if(new URL(route.request().url()).searchParams.get('state')==='stopped')await new Promise(resolve=>{release=resolve;});
+    if(new URL(route.request().url()).searchParams.get('state')==='stopped')
+      await new Promise(resolve=>{releaseStops.push(resolve);});
     await route.fulfill({json:{}});
   });
   await page.getByRole('button',{name:'Playback settings'}).click();
   await page.locator('.player-sheet').getByRole('button',{name:'Compatible playback',exact:true}).click();
-  await expect.poll(()=>!!release).toBe(true);
+  await expect.poll(()=>releaseStops.length).toBeGreaterThan(0);
+  // Unlike the old serialized cleanup, a delayed timeline Stop must NOT
+  // block the replacement decoder from opening.
+  const started=()=>calls.filter(u=>u.pathname.endsWith('/start.m3u8')).length;
+  await expect.poll(started).toBeGreaterThan(0);
+  const startsBeforeBack=started();
   await page.keyboard.press('Escape');
   await expect(page.locator('.controls')).toBeHidden();
-  await page.keyboard.press('Escape'); release();
+  await page.keyboard.press('Escape');
   await expect(page.locator('#player')).toBeHidden();
   await expect.poll(()=>events.some(e=>e.path==='/scrobble/stop')).toBe(true);
-  expect(calls.filter(u=>u.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
+  releaseStops.forEach(resolve=>resolve());
+  // Neither a released network report nor an old Play promise may re-open
+  // playback after the user's explicit Back.
+  await page.waitForTimeout(300);
+  releaseStops.forEach(resolve=>resolve());
+  expect(started()).toBe(startsBeforeBack);
   await expect(page.getByRole('heading',{name:'Test Movie'})).toBeVisible();
 });
 test('failed audio restart still stops the existing Simkl viewing',async({page})=>{
