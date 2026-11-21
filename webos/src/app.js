@@ -155,6 +155,7 @@ function persist() {
 function activeServer() { return state.servers.find(s => s.id === state.active) || state.servers[0]; }
 let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
 function setClient() {
+  if (player.pendingOpen) { ++playbackLaunch; player.close(); }
   // Never reuse catalog metadata across accounts or server connections.
   catalogCache.clear();
   episodeTrackChoices.clear();
@@ -954,6 +955,8 @@ async function prepareNavigation(next, sourceApi) {
   }
 }
 async function go(next, remember = true) {
+  // A hidden replay must not open after a different destination is chosen.
+  if (player.pendingOpen) { ++playbackLaunch; player.close(); }
   const intent = ++navigationIntent, sourceApi = api;
   const destinationKey = rootKey(next);
   // A detached view already has its decoded images and metadata. Prewarming
@@ -1037,6 +1040,8 @@ function back() {
     dialog.hidden = true; focusFirst(); return;
   }
   if (player.active) { player.close(); return; }
+  // Back still navigates the detail stack, but retires a hidden queued replay.
+  if (player.pendingOpen) { ++playbackLaunch; player.close(); }
   if (history.length) {
     const previous = history.pop();
     route = previous.route || previous;
