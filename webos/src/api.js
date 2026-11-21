@@ -187,6 +187,10 @@ export async function plexServers(deviceId, token, signal) {
   }));
   return results.filter(Boolean);
 }
+export class PlexLibraryBoundaryChanged extends Error {
+  constructor() { super('The library changed while loading. Try again.'); }
+}
+
 export class Plex {
   constructor(server, deviceId) { this.server = server; this.deviceId = deviceId; }
   url(path, params = {}) { return endpoint(this.server.url, path, {...plexIdentity(this.deviceId), 'X-Plex-Token': this.server.token, ...params}); }
@@ -274,6 +278,15 @@ export class Plex {
     const data = (await this.get('/library/sections/' + enc(library) + '/' + section, {
       'X-Plex-Container-Start': start, 'X-Plex-Container-Size': limit, sort: order})).MediaContainer;
     return {items: (data.Metadata || []).map(plexItem), total: data.totalSize || data.size || 0};
+  }
+  async listAfter(library, sort, filter, predecessor) {
+    const previous = predecessor.page.items;
+    // Verify both halves of the boundary from one Plex response. A local
+    // cache signature alone cannot prove which ordering Plex used.
+    const range = await this.list(library, predecessor.offset, sort, filter, previous.length + PAGE);
+    if (previous.some((item, index) => range.items[index]?.id !== item.id))
+      throw new PlexLibraryBoundaryChanged();
+    return {items:range.items.slice(previous.length), total:range.total};
   }
   async search(query) {
     const data = await this.get('/hubs/search', {query, limit: 60});

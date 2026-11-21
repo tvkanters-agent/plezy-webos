@@ -199,7 +199,7 @@ test('a successor stamped by an older app version is reloaded', async () => {
   const cache = new PersistentCatalogCache({indexedDB:null});
   const first = {items:[{id:'a'}],total:3};
   await cache.page('s','first',()=>first);
-  cache.remember(cache.id('s','second'),{items:[{id:'stale'}],total:3},undefined,false,null,'["a"]');
+  cache.remember(cache.id('s','second'),{items:[{id:'stale'}],total:3},undefined,false,null,'[2,["a"]]');
   const result = await cache.page('s','second',()=>({items:[{id:'b'}],total:3}),
     {predecessor:{key:'first',page:first}});
   assert.equal(result.cached,false);

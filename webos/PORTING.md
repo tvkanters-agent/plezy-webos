@@ -627,10 +627,15 @@ Plex's ordinary date sorts keep the same cached offset pages and render the
 viewport plus two nearby rows on either side with spacers. The flex fallback
 reserves a caption line on these cards to match Flutter's uniform sliver
 geometry even when a year is missing. A D-pad move into an unloaded row waits
-for that page while retaining the originating card's focus. Restored grids
-reconcile the first page before loading more offsets. Successor requests and
-snapshots are scoped to the mounted predecessor's ordered IDs, so a request
-from an older ordering cannot populate a new one.
+for that page while retaining the originating card's focus. Coherent cached
+pages remain browsable while Plex refreshes them. Each live successor request
+uses one contiguous Plex range covering the preceding page and the next
+page. The next page can be rendered and saved only if the overlapping IDs
+match the mounted predecessor in order. When Plex moves the boundary, the
+grid walks back to the first verifiable update and discards its shifted
+successors. The request is bounded to two pages during normal scrolling.
+Older successor entries lack this verification and are fetched again as
+needed.
 
 ### Seek play intent on the HTML decoder
 
