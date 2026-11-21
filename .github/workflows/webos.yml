@@ -131,7 +131,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Compare the fixed commit parent rather than mutable master.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/download-artifact@v4
         with:
           name: plezy-webos-ipk
@@ -141,6 +144,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          # Stop same-version follow-up runs racing the actual version bump.
+          # Missing parent history is an error, never permission to publish.
+          decision=$(node webos/scripts/ci-release-eligible.mjs)
+          if [ "$decision" != "publish" ]; then
+            echo "Version was not increased by this commit; skipping release."
+            exit 0
+          fi
           version=$(node -p "require('./webos/package.json').version")
           notes="webos/releases/v${version}.md"
           if [ ! -f "$notes" ]; then exit 0; fi

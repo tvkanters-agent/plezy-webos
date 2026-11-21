@@ -18,3 +18,11 @@ test('master release publication still waits for the complete validation gate', 
   assert.match(workflow, /release:\n    needs: test-and-package\n    if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'/);
   assert.match(workflow, /--prerelease --target "\$GITHUB_SHA"/);
 });
+
+test('release job compares the version against its immutable first parent', () => {
+  const release = workflow.split(/^  release:\n/m)[1];
+  assert.ok(release, 'release job must exist');
+  assert.match(release, /- uses: actions\/checkout@v4\n        with:\n          fetch-depth: 2/);
+  assert.match(release, /decision=\$\(node webos\/scripts\/ci-release-eligible\.mjs\)/);
+  assert.match(release, /if \[ "\$decision" != "publish" \]; then\n[\s\S]*?exit 0/);
+});
