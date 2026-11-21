@@ -721,7 +721,10 @@ function forEachPagedGrid(container, callback) {
 function releaseSnapshot(entry) {
   if (!entry) return;
   if (entry.alphabet) entry.alphabet.destroy();
-  if (entry.snapshot) forEachPagedGrid(entry.snapshot, node => node._destroyCatalog());
+  if (entry.snapshot) {
+    entry.snapshot.querySelectorAll('.detail').forEach(node => node._disposeDetail?.());
+    forEachPagedGrid(entry.snapshot, node => node._destroyCatalog());
+  }
 }
 function clearDrilldownHistory() {
   history.forEach(releaseSnapshot);
@@ -853,6 +856,7 @@ function restoreRootPage(entry) {
   pendingRailEntryRevision = null;
   lastRailRightRevision = null;
   cancelAuth(); detailMenu = null;
+  main.querySelector('.detail')?._disposeDetail?.();
   main.textContent = '';
   main.appendChild(entry.snapshot);
   updateDetailTrackStatus = null;
@@ -998,8 +1002,10 @@ function back() {
         (route.type !== 'home' || previous.catalogGeneration === catalogCache.generation)) {
       ++revision;
       cancelAuth();
+      main.querySelector('.detail')?._disposeDetail?.();
       main.textContent = '';
       main.appendChild(previous.snapshot);
+      main.querySelector('.detail')?._resumeDetail?.(revision);
       const restoredTracks = main.querySelector('.detail-playback-tracks');
       updateDetailTrackStatus = restoredTracks?._updateTracks || null;
       if (restoredTracks?.hidden) restoredTracks._probeTracks?.();
@@ -1630,6 +1636,7 @@ async function render(prepared = null) {
   cancelAuth(); detailMenu = null;
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
+  main.querySelector('.detail')?._disposeDetail?.();
   main.textContent = ''; main.scrollTop = 0; navigation();
   main.classList.toggle('settings-view', route.type === 'settings' || route.type === 'settings-page');
   const valid = () => currentRevision === revision;
@@ -2020,6 +2027,15 @@ async function render(prepared = null) {
       };
       const showRaw = parentShow?.raw || {};
       const content = el('div', undefined, 'detail'), info = el('div', undefined, 'detail-info');
+      // Back reattaches this DOM with its original handlers. Keep an active
+      // revision separate from render()'s stale async guard.
+      let mountedDetailRevision = currentRevision, detailDisposed = false;
+      const detailActive = () => !detailDisposed && currentApi === api &&
+        mountedDetailRevision === revision && content.isConnected &&
+        route.type === 'detail' && String(route.id) === String(detailRoute.id) &&
+        route.kind === detailRoute.kind;
+      content._resumeDetail = restoredRevision => { mountedDetailRevision = restoredRevision; };
+      content._disposeDetail = () => { detailDisposed = true; };
       if (isSeason) content.classList.add('detail-season');
       content.classList.add(item.type === 'episode' || item.type === 'Episode' ? 'detail-episode' : 'detail-media');
       const heroMedia = item.background ? item : (parentShow?.background ? parentShow : null);
@@ -2117,12 +2133,13 @@ async function render(prepared = null) {
       }
       showRatings();
       if(ratingsLoading) {
-        const expected=currentRevision;
-        const stillCurrent=()=>revision===expected&&info.isConnected;
+        // Results belong to this DOM snapshot, even while it is detached.
+        // Only update its own chip; never update another route or account.
+        const ratingsAlive=()=>!detailDisposed&&currentApi===api;
         // All active sources start independently. Keep the loader inside
         // the pill, then publish their combined result in a single render.
         const personalTask=simklReady?simklTracker.getTitleRating(api,ratingItem)
-          .then(score=>{if(stillCurrent()&&!ownRatingChanged)ownRating=score;})
+          .then(score=>{if(ratingsAlive()&&!ownRatingChanged)ownRating=score;})
           .catch(error=>console.warn('Personal Simkl rating unavailable',error)):Promise.resolve();
         const communityTask=(async()=>{
           const resolved=Object.assign({},ratingItem.raw||{});
@@ -2136,7 +2153,7 @@ async function render(prepared = null) {
                 resolved.Guid.push({id:key+'://'+value});
             }
           }catch(error){console.warn('Could not enrich Plex rating IDs',error);}
-          if(!stillCurrent())return;
+          if(!ratingsAlive())return;
           const requests=[];
           if(simklReady)requests.push({origin:'simkl',
             promise:simklTracker.getCommunityRatings(resolved,ratingItem.type)});
@@ -2151,15 +2168,15 @@ async function render(prepared = null) {
               return {origin:request.origin,ratings:[]};
             }
           }));
-          if(stillCurrent())community=mergeProviderRatings(answers);
+          if(ratingsAlive())community=mergeProviderRatings(answers);
         })();
         Promise.all([communityTask,personalTask]).then(()=>{
-          if(!stillCurrent())return;
+          if(!ratingsAlive())return;
           ratingsLoading=false;
           showRatings();
         }).catch(error=>{
           console.warn('Rating loading failed',error);
-          if(!stillCurrent())return;
+          if(!ratingsAlive())return;
           ratingsLoading=false;
           showRatings();
         });
@@ -2201,12 +2218,14 @@ async function render(prepared = null) {
         ++detailWatchEpoch;
         try {
           await currentApi.watched(item, watched);
+          if (currentApi !== api || detailDisposed) return;
           updateLocalWatchState(item, watched);
           catalogCache.clear();
           if (currentApi instanceof Plex) simklTracker.markWatched(currentApi, item, watched);
           persistDetailWatchState(item, detailRoute, detailServerScope);
-          if (!valid() || currentApi !== api) return;
+          // Update this page's controls even if its snapshot is still covered.
           refreshDetailWatchActions(actions, item);
+          if (!detailActive()) return;
           if (item.folder) {
             main.querySelectorAll('.episode-list,.grid').forEach(grid => grid._markWatched?.(watched));
           }
@@ -2216,23 +2235,23 @@ async function render(prepared = null) {
       const chooseEpisode = async () => {
         if (item.type === 'show' || item.type === 'Series') {
           try {
-            const next = await api.onDeck(item.id);
+            const next = await currentApi.onDeck(item.id);
             if (next) {
-              try { return await api.detail(next.id,'episode'); }
+              try { return await currentApi.detail(next.id,'episode'); }
               catch (_) { return next; }
             }
           } catch (_) { /* On Deck is optional */ }
         }
-        const first = await api.children(item.id);
+        const first = await currentApi.children(item.id);
         if (item.type === 'season' || item.type === 'Season')
           return first.items.find(e => e.type === 'episode' || e.type === 'Episode') || null;
         let firstEpisode=null;
         for (const season of first.items) {
-          const episodes = await api.children(season.id);
+          const episodes = await currentApi.children(season.id);
           const candidates=episodes.items.filter(e => e.type === 'episode' || e.type === 'Episode');
           const resumed=candidates.find(e=>e.resume>0);
           if(resumed) {
-            try { return await api.detail(resumed.id,'episode'); }
+            try { return await currentApi.detail(resumed.id,'episode'); }
             catch (_) { return resumed; }
           }
           if(!firstEpisode)firstEpisode=candidates.find(e=>!e.watched)||candidates[0];
@@ -2313,10 +2332,10 @@ async function render(prepared = null) {
       trackStatus._updateTracks = paintTrackStatus;
       trackStatus._probeTracks = probeTrackStatus;
       if (item.folder && (isPlexShow || isSeason)) {
-        const expectedRevision = revision, currentApi = api;
         actions.append(detailButton('Play', async () => {
+          const expectedRevision = revision;
           const episode = await chooseEpisode();
-          if (revision !== expectedRevision || api !== currentApi) return;
+          if (!detailActive() || revision !== expectedRevision) return;
           if (episode) play(episode, episode.resume || 0);
           else notify('No playable episodes were found.');
         }, 'play', 'detail-play'));
@@ -2330,7 +2349,7 @@ async function render(prepared = null) {
             start += page.items.length;
             if (!page.items.length || start >= page.total) break;
           }
-          if (expected !== revision || currentApi !== api) return;
+          if (!detailActive() || expected !== revision || currentApi !== api) return;
           if (all.length) {
             const random = all[Math.floor(Math.random() * all.length)];
             play(random, 0);
