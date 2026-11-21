@@ -196,6 +196,56 @@ test('closing playback preserves the detail screen and focused action without a 
     detached:window.detailDetachedOnClose
   }))).toEqual({sameNode:true,detached:false});
 });
+
+test('Stop during an unfinished HLS startup retires Plex session before immediate replay',async({page})=>{
+  await page.addInitScript(()=>{
+    window.interruptedHlsLoads=[];
+    const load=HTMLMediaElement.prototype.load,play=HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.load=function(){
+      // Model LG's incomplete native HLS open without depending on desktop HLS.
+      if(this.src.includes('/start.m3u8')) {
+        window.interruptedHlsLoads.push(this.src);
+        return;
+      }
+      return load.call(this);
+    };
+    HTMLMediaElement.prototype.play=function(){
+      if(this.src.includes('/start.m3u8')) return new Promise(()=>{});
+      return play.call(this);
+    };
+  });
+  await setup(page,{Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'dts',
+    Part:[{id:'part',key:'/video.webm',Stream:[]}]}]},undefined,[],{},null,null,null,false);
+  await expect.poll(()=>page.evaluate(()=>window.interruptedHlsLoads.length)).toBe(1);
+  let stopRequests=0,releaseStop;
+  const stopGate=new Promise(resolve=>{releaseStop=resolve;});
+  await page.route('http://plex.test/video/:/transcode/universal/stop**',async route=>{
+    stopRequests++;
+    await stopGate;
+    return route.fulfill({json:{}});
+  });
+  try {
+    await page.getByRole('button',{name:'Stop',exact:true}).click();
+    await expect(page.locator('#player')).toBeHidden();
+    await expect.poll(()=>stopRequests).toBe(1);
+    await page.locator('#main .detail-play').click();
+    await page.waitForTimeout(100);
+    const startedSessions=()=>page.evaluate(()=>
+      new Set(window.interruptedHlsLoads.map(url=>new URL(url).searchParams.get('session'))).size);
+    // Wait before checking visibility: the new player deliberately remains
+    // hidden until Plex retires the old HLS session. Waiting for it to show
+    // first would cross the three-second fallback deadline.
+    // LG's video.load() during Stop may still reference the old HLS URL,
+    // so count distinct Plex sessions rather than native load() calls.
+    expect(await startedSessions()).toBe(1,
+      'the new Plex session must not start while the prior transcode stop is pending');
+    await expect(page.locator('#player')).toBeHidden();
+    releaseStop();
+    await expect(page.locator('#player')).toBeVisible();
+    await expect.poll(startedSessions).toBe(2);
+  } finally { releaseStop(); }
+});
+
 test('Back during delayed stream cleanup cannot resurrect playback',async({page})=>{
   const {calls,events}=await setup(page), releaseStops=[];
   await page.route('http://plex.test/**/timeline**',async route=>{

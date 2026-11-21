@@ -48,6 +48,7 @@ export class Player {
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporter = null; this.reportWarning = false;
+    this.pendingPlayback = null; this.pendingStartupTeardown = null;
     this.video.addEventListener('loadedmetadata', () => {
       this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
     });
@@ -774,6 +775,11 @@ export class Player {
     const generation = this.generation;
     await cleanup;
     if (generation !== this.generation) return;
+    // A cancelled HLS startup may still be stopping on Plex or finishing
+    // playback negotiation. Let that session retire before requesting another.
+    // The wait is bounded, and ordinary decoder replacements never use it.
+    await this.waitForStartupTeardown();
+    if (generation !== this.generation) return;
     // A background event during cleanup can precede the player's visibility.
     if (document.hidden) this.openIntentPlaying = false;
     this.api = api; this.item = item; this.options = options;
@@ -811,10 +817,23 @@ export class Player {
     if (!trackSheetFocus) this.root.querySelector('[data-action="pause"]').focus();
     let session;
     try {
-      session = await api.playback(item, {...options,
-        srtPlayback: playbackPreferences?.srtPlayback === true,
-        skipSettings: playbackPreferences});
-      if (generation !== this.generation) { await api.stop(session).catch(() => {}); return; }
+      // Include stale-session teardown in the pending promise. Stop can run
+      // before the server has returned a session, and its next Play must not
+      // overtake that session's eventual stop request.
+      const pending = (async () => {
+        const opened = await api.playback(item, {...options,
+          srtPlayback: playbackPreferences?.srtPlayback === true,
+          skipSettings: playbackPreferences});
+        if (generation !== this.generation) {
+          await api.stop(opened).catch(() => {});
+          return null;
+        }
+        return opened;
+      })();
+      this.pendingPlayback = pending;
+      try { session = await pending; }
+      finally { if (this.pendingPlayback === pending) this.pendingPlayback = null; }
+      if (!session) return;
       this.enhancedPlaybackActive = session.enhancedPlayback === true;
       if (!this.enhancedPlaybackActive && this.subtitleOverlay) {
         this.subtitleOverlay.dispose();
@@ -1092,6 +1111,26 @@ export class Player {
     const duration = this.timelineDuration();
     this.playbackTracking.event(action, position, duration, ended);
   }
+  queueStartupTeardown(work) {
+    const previous = this.pendingStartupTeardown;
+    const pending = Promise.all([previous, work].filter(Boolean).map(task =>
+      Promise.resolve(task).catch(() => {})));
+    this.pendingStartupTeardown = pending;
+    void pending.then(() => {
+      if (this.pendingStartupTeardown === pending) this.pendingStartupTeardown = null;
+    });
+  }
+  async waitForStartupTeardown() {
+    const pending = this.pendingStartupTeardown;
+    if (!pending) return;
+    let timeout;
+    try {
+      await Promise.race([pending, new Promise(resolve => {
+        // Network timeouts must not make Stop/replay hang indefinitely.
+        timeout = setTimeout(resolve, 3000);
+      })]);
+    } finally { clearTimeout(timeout); }
+  }
   async release(ended = false, preserveTracking = false) {
     this.stopSyncHold();
     this.syncHoldFired = false;
@@ -1110,6 +1149,11 @@ export class Player {
     this.previewFrames = null;
     this.hideSeekPreview();
     const session = this.session, api = this.api;
+    // An explicit Stop may race Plex's transcode teardown even if LG has
+    // already reported startup complete. Track changes remain non-blocking
+    // once their old decoder has reached a confirmed first frame.
+    const interruptedHls = !!(session?.transcode && (!preserveTracking || !this.startupComplete));
+    if (!session && this.pendingPlayback) this.queueStartupTeardown(this.pendingPlayback);
     this.lastPosition = this.position() || this.lastPosition || 0;
     const reportDone = session ? this.report('stopped') : null;
     // Tracking belongs to the viewing, not a particular decoder session. A
@@ -1140,7 +1184,10 @@ export class Player {
     // stopping/reopening the hardware decoder. The per-session reporter owns
     // its final stopped report and cannot feed stale heartbeats into a new one.
     this.reporter = null;
-    if (session) void api.stop(session).catch(() => {});
+    if (session) {
+      const stopping = Promise.resolve().then(() => api.stop(session)).catch(() => {});
+      if (interruptedHls) this.queueStartupTeardown(stopping);
+    }
     this.reportWarning = false;
     // Return the promise as a property: release must not await reporting.
     return {reportDone};
