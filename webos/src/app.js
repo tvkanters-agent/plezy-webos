@@ -344,6 +344,14 @@ function updateLocalWatchState(item, watched) {
     item.raw.viewOffset = 0;
   }
 }
+// A cached detail item can be updated by another instance while its old DOM
+// still shows the previous label. Always execute the action the button names.
+function detailWatchButton(item, markWatched) {
+  const control = detailButton(item.watched ? 'Mark unwatched' : 'Mark watched',
+    () => markWatched(control.getAttribute('aria-label') === 'Mark watched'),
+    item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched');
+  return control;
+}
 function refreshDetailWatchActions(actions, item) {
   refreshDetailAction(actions.querySelector('.detail-watched'),
     item.watched ? 'Mark unwatched' : 'Mark watched', item.watched ? 'unwatched' : 'watched');
@@ -2350,6 +2358,17 @@ async function render(prepared = null) {
         });
       }
       const actions = el('div', undefined, 'detail-actions');
+      // The original watch request may finish while this detail is reopened
+      // from a cached item. Refresh this instance only when identity and
+      // account scope match; do not remount the DOM or steal focus.
+      content._syncWatchState = (sourceApi, sourceScope, sourceRoute, watched) => {
+        if (!detailActive() || currentApi !== sourceApi ||
+            detailServerScope !== sourceScope ||
+            String(detailRoute.id) !== String(sourceRoute.id) ||
+            detailRoute.kind !== sourceRoute.kind) return;
+        updateLocalWatchState(item, watched);
+        refreshDetailWatchActions(actions, item);
+      };
       let watchMutationPending = false;
       const markDetailWatched = async watched => {
         if (watchMutationPending) return;
@@ -2362,14 +2381,20 @@ async function render(prepared = null) {
           await currentApi.watched(item, watched);
           // WatchActions finishes acknowledged writes even if the initiating
           // detail is unmounted. A different server/account must not inherit it.
-          if (currentApi !== api) return;
+          if (currentApi !== api || catalogScope(activeServer()) !== detailServerScope) return;
           updateLocalWatchState(item, watched);
+          // Invalidate any detail revalidation started before the acknowledgment.
+          ++detailWatchEpoch;
           catalogCache.clear();
           persistDetailWatchState(item, detailRoute, detailServerScope);
           if (currentApi instanceof Plex && simklTracker.epoch === trackerEpochAtMutation)
             simklTracker.markWatched(currentApi, item, watched);
-          // UI changes belong only to the originating live/covered snapshot.
+          // Keep the original detached snapshot coherent, but also reconcile a
+          // newly mounted detail for this same title after Back/reopening.
           if (!detailDisposed) refreshDetailWatchActions(actions, item);
+          const visibleDetail = main.querySelector('.detail');
+          if (visibleDetail && visibleDetail !== content)
+            visibleDetail._syncWatchState?.(currentApi, detailServerScope, detailRoute, watched);
           if (!detailActive()) return;
           if (item.folder) {
             main.querySelectorAll('.episode-list,.grid').forEach(grid => grid._markWatched?.(watched));
@@ -2502,9 +2527,7 @@ async function render(prepared = null) {
           if (random) return play(random, 0);
           notify('No playable episodes were found.');
         }, 'shuffle', 'detail-icon'));
-        actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
-          await markDetailWatched(!item.watched);
-        }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
+        actions.append(detailWatchButton(item, markDetailWatched));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
             if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
@@ -2541,9 +2564,7 @@ async function render(prepared = null) {
           () => play(item, 0), 'restart', 'detail-icon detail-restart');
         restart.hidden = !(item.resume > 0);
         actions.append(restart);
-        actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
-          await markDetailWatched(!item.watched);
-        }, item.watched ? 'unwatched' : 'watched', 'detail-icon detail-watched'));
+        actions.append(detailWatchButton(item, markDetailWatched));
         if (api instanceof Plex) actions.append(detailButton('Rate',()=>showRatingSheet(item,api,
           ({tracker,value})=>{
             if(tracker && ratingItem?.id===item.id){ownRatingChanged=true;ownRating=value;showRatings();}
