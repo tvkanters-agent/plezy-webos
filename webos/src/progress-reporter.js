@@ -9,6 +9,8 @@ export class ProgressReporter {
     this.active = null;
     this.pending = null;
     this.closed = false;
+    this.stopCompletion = null;
+    this.finishStop = null;
   }
   report(state, position, duration) {
     if (this.closed) return;
@@ -23,8 +25,11 @@ export class ProgressReporter {
     this.active = active;
     Promise.resolve()
       .then(() => this.api.report(this.session, state, position, duration, active.controller.signal))
-      .catch(error => {
+      .then(() => {
+        if (state === 'stopped') this.finishStop?.(true);
+      }, error => {
         if (!active.controller.signal.aborted) this.onError(error);
+        if (state === 'stopped') this.finishStop?.(false);
       })
       .finally(() => {
         clearTimeout(active.stopTimer);
@@ -35,13 +40,15 @@ export class ProgressReporter {
       });
   }
   stop(position, duration) {
-    if (this.closed) return;
+    if (this.closed) return this.stopCompletion;
     this.closed = true;
+    // Let detail metadata wait for the final server write without blocking Stop.
+    this.stopCompletion = new Promise(resolve => { this.finishStop = resolve; });
     // Retire every unsent heartbeat; keep the final playback position.
     this.pending = {state: 'stopped', position, duration};
     if (!this.active) {
       this.flush();
-      return;
+      return this.stopCompletion;
     }
     const active = this.active;
     // Fast servers retain strict start/progress -> stopped ordering. A slow or
@@ -53,5 +60,6 @@ export class ProgressReporter {
       this.active = null;
       this.flush();
     }, 250);
+    return this.stopCompletion;
   }
 }
