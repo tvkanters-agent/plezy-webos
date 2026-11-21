@@ -20,7 +20,7 @@ import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 import {SUBTITLE_STYLE_BOUNDS} from './subtitle-style.js';
-import {plexRatings, fetchMdblistRatings, mergeProviderRatings,
+import {plexRatings, fetchMdblistRatings, verifyMdblistKey, mergeProviderRatings,
   mergeRatings, ratingBadgeInfo} from './ratings.js';
 const main = document.querySelector('#main'), nav = document.querySelector('#nav'), dialog = document.querySelector('#dialog');
 const artworkCache = new ArtworkCache();
@@ -3032,9 +3032,7 @@ function settingsSubpage(page,serverId) {
         if(!key)return;
         submit.disabled=true;message.textContent='Checking MDBList key…';
         try{
-          const url=new URL('https://api.mdblist.com/user');url.searchParams.set('apikey',key);
-          const response=await fetch(url.href,{headers:{Accept:'application/json'}});
-          if(!response.ok)throw new Error('MDBList verification failed (HTTP '+response.status+').');
+          await verifyMdblistKey(key);
           if(expected!==revision)return;
           state.mdblistApiKey=key;persist();keyInput.value='';render();
         }catch(error){if(expected===revision)message.textContent=error.message;}

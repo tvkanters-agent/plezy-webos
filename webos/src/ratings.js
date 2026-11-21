@@ -4,7 +4,7 @@
 // The original source logos are installed under public/assets/.
 import {SIMKL_CLIENT_ID} from './simkl.js';
 import {simklCatalogRequest} from './simkl-transport.js';
-import {VERSION} from './core.js';
+import {VERSION, request as networkRequest} from './core.js';
 import {plexExternalIds} from './external-ids.js';
 const cache=new Map(),TTL=12*60*60*1000;
 export const displayOrder=['rottenTomatoesCritic','rottenTomatoesAudience','imdb','tmdb',
@@ -146,7 +146,20 @@ export function parseMdblistRatings(data) {
  }
  return result;
 }
-export async function fetchMdblistRatings(raw,kind,apiKey,fetchImpl=fetch) {
+// The app's bounded transport also handles cancellation during response bodies.
+// 404 means a valid no-match; other errors must remain retryable.
+const MDBLIST_TIMEOUT=10000;
+export async function verifyMdblistKey(apiKey,performRequest=networkRequest) {
+ const url=new URL('https://api.mdblist.com/user');
+ url.searchParams.set('apikey',apiKey);
+ try {
+   await performRequest(url.href,{timeout:MDBLIST_TIMEOUT,responseType:'none'});
+ }catch(error){
+   if(error.status)throw new Error('MDBList verification failed (HTTP '+error.status+').');
+   throw error;
+ }
+}
+export async function fetchMdblistRatings(raw,kind,apiKey,fetchImpl=fetch,timeout=MDBLIST_TIMEOUT) {
  if(!apiKey||!['movie','show'].includes(kind))return [];
  const ids=plexExternalIds(raw||{});
  // Upstream prefers IMDb, then TMDB, TVDB for series, then MAL.
@@ -161,16 +174,14 @@ export async function fetchMdblistRatings(raw,kind,apiKey,fetchImpl=fetch) {
  const url=new URL('https://api.mdblist.com/'+chosen.map(encodeURIComponent).join('/'));
  url.searchParams.set('apikey',apiKey);
  try {
-   const response=await fetchImpl(url.href,{headers:{Accept:'application/json'}});
-   if(response.status===404){
-     mdblistCache.set(key,{ratings:[],at:Date.now()});return [];
-   }
-   if(!response.ok)return []; // Error, not an empty answer: retry on next visit.
-   const data=await response.json();
+   const data=await networkRequest(url.href,{timeout,fetchImpl});
    const ratings=parseMdblistRatings(data?.ratings);
    mdblistCache.set(key,{ratings,at:Date.now()});
    return ratings;
- }catch(_){return [];}
+ }catch(error){
+   if(error.status===404)mdblistCache.set(key,{ratings:[],at:Date.now()});
+   return []; // HTTP, transport and body errors aren't cached.
+ }
 }
 export function mergeProviderRatings(answers) {
  const best=new Map();

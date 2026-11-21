@@ -129,3 +129,77 @@ test('Simkl authentication and provider failures are not cached',async()=>{
 test('Simkl validates native 0-10 scores and excludes nonpositive votes',()=>{
  assert.deepEqual(simklRatings({simkl:{rating:80,votes:1},imdb:{rating:8,votes:-1},mal:{rating:7,votes:0}}),[]);
 });
+
+test('MDBList verification times out and can be retried successfully',async()=>{
+ const {verifyMdblistKey}=await import('../src/ratings.js');
+ const {request}=await import('../src/core.js');
+ let attempts=0;
+ const transport=(url,options)=>{
+   attempts++;
+   assert.equal(new URL(url).pathname,'/user');
+   assert.equal(new URL(url).searchParams.get('apikey'),'test-key');
+   assert.equal(options.responseType,'none');
+   assert.equal(options.timeout,10000);
+   return request(url,{...options,timeout:10,
+     fetchImpl:attempts===1?()=>new Promise(()=>{}):async()=>new Response('',{status:200})});
+ };
+ await assert.rejects(verifyMdblistKey('test-key',transport),/timed out/);
+ await verifyMdblistKey('test-key',transport);
+ assert.equal(attempts,2);
+});
+test('MDBList header stall does not cache failures or hide other provider scores',async()=>{
+ const {fetchMdblistRatings,mergeProviderRatings}=await import('../src/ratings.js');
+ const raw={Guid:[{id:'imdb://tt7123456'}]};
+ let calls=0,aborted=false;
+ const fetchImpl=(url,{signal})=>{
+   calls++;
+   if(calls===1){
+     signal.addEventListener('abort',()=>{aborted=true;});
+     return new Promise(()=>{});
+   }
+   return Promise.resolve(new Response(JSON.stringify({ratings:[{source:'imdb',value:8.6,votes:100}]})));
+ };
+ const stalled=await fetchMdblistRatings(raw,'movie','stall-header-key',fetchImpl,10);
+ assert.deepEqual(stalled,[]);
+ assert.equal(aborted,true);
+ assert.deepEqual(mergeProviderRatings([
+   {origin:'simkl',ratings:[{source:'simkl',value:8.1}]},
+   {origin:'mdblist',ratings:stalled}
+ ]),[{source:'simkl',value:8.1}]);
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','stall-header-key',fetchImpl,10),
+   [{source:'imdb',value:8.6}]);
+ assert.equal(calls,2);
+});
+test('MDBList response body stall does not poison subsequent title results',async()=>{
+ const {fetchMdblistRatings}=await import('../src/ratings.js');
+ const raw={Guid:[{id:'imdb://tt7123457'}]};
+ let calls=0;
+ const fetchImpl=async()=>{
+   calls++;
+   if(calls===1)return {ok:true,status:200,text:()=>new Promise(()=>{})};
+   return new Response(JSON.stringify({ratings:[{source:'tmdb',value:73,votes:10}]}));
+ };
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','stall-body-key',fetchImpl,10),[]);
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','stall-body-key',fetchImpl,10),
+   [{source:'tmdb',value:7.3}]);
+ assert.equal(calls,2);
+});
+
+test('MDBList valid 404 misses remain cached while HTTP 500 failures retry',async()=>{
+ const {fetchMdblistRatings}=await import('../src/ratings.js');
+ const raw={Guid:[{id:'imdb://tt7123458'}]};
+ let misses=0,failures=0;
+ const missing=async()=>{misses++;return new Response('',{status:404});};
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','missing-key',missing,10),[]);
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','missing-key',missing,10),[]);
+ assert.equal(misses,1);
+ const retry=async()=>{
+   failures++;
+   return failures===1?new Response('',{status:500}):
+     new Response(JSON.stringify({ratings:[{source:'imdb',value:7.7,votes:20}]}));
+ };
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','http-retry-key',retry,10),[]);
+ assert.deepEqual(await fetchMdblistRatings(raw,'movie','http-retry-key',retry,10),
+   [{source:'imdb',value:7.7}]);
+ assert.equal(failures,2);
+});

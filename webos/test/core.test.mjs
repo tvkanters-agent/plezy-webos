@@ -540,3 +540,29 @@ test('Plex tracker ID fetch matches upstream modern, legacy, empty and HTTP erro
     response=new Response('',{status:500});await assert.rejects(api.fetchExternalIds('show-1'),/HTTP 500/);
   } finally {restore();}
 });
+
+test('request deadline settles even when fetch ignores AbortController',async()=>{
+ let aborted=false;
+ await assert.rejects(request('https://media.test',{timeout:10,
+   fetchImpl:(_url,{signal})=>{
+     signal.addEventListener('abort',()=>{aborted=true;});
+     return new Promise(()=>{});
+   }}),/timed out/);
+ assert.equal(aborted,true);
+});
+test('request deadline includes the response body',async()=>{
+ let aborted=false;
+ await assert.rejects(request('https://media.test',{timeout:10,
+   fetchImpl:async(_url,{signal})=>{
+     signal.addEventListener('abort',()=>{aborted=true;});
+     return {ok:true,text:()=>new Promise(()=>{})};
+   }}),/timed out/);
+ assert.equal(aborted,true);
+});
+test('request cancellation settles even when fetch does not reject',async()=>{
+ const controller=new AbortController();
+ const task=request('https://media.test',{timeout:5000,signal:controller.signal,
+   fetchImpl:()=>new Promise(()=>{})});
+ controller.abort();
+ await assert.rejects(task,/timed out/);
+});
