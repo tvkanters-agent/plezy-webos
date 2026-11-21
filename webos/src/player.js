@@ -825,7 +825,7 @@ export class Player {
         this.subtitleDiagnostics = new SubtitleDiagnostics(this.root, diagnosticOpenedAt);
       if (this.enhancedPlaybackActive && session.subtitleAsset && !this.subtitleOverlay)
         this.subtitleOverlay = new SubtitleOverlay(this.video, this.root.querySelector('.player-captions'),this.preferences);
-      this.loadSeekFrames(session, generation);
+      if (!session.subtitleBurnedIn) this.loadSeekFrames(session, generation);
       if (session.extrasPromise) session.extrasPromise.then(extras => {
         if (generation !== this.generation || this.session !== session || !extras) return;
         session.markers = extras.markers;
@@ -1042,6 +1042,8 @@ export class Player {
       if (this.hasFirstFrame || this.video.readyState >= 2) {
         this.startupComplete = true;
         clearTimeout(this.startTimeout);
+        // Keep the full BIF download off the burn-in startup/resume path.
+        if (this.session.subtitleBurnedIn) this.loadSeekFrames(this.session, this.generation);
       }
       return;
     }
@@ -1296,7 +1298,7 @@ export class Player {
     this.buffering.style.display = show ? 'flex' : 'none';
   }
   async loadSeekFrames(session, generation) {
-    if (typeof this.api?.scrubPreview !== 'function') return;
+    if (this.previewAbort || typeof this.api?.scrubPreview !== 'function') return;
     const controller = new AbortController();
     this.previewAbort = controller;
     try {
@@ -1309,6 +1311,9 @@ export class Player {
   renderSeekPreview(seconds) {
     const duration = this.timelineDuration();
     if (!this.session || duration <= 0 || !this.active) return;
+    // A user scrub takes priority over waiting for the burn-in startup frame.
+    if (this.seeking && this.session.subtitleBurnedIn && !this.previewAbort)
+      this.loadSeekFrames(this.session, this.generation);
     const frame = bifFrameAt(this.previewFrames, seconds);
     const hasImage = !!frame;
     this.seekTooltip.classList.toggle('no-image', !hasImage);

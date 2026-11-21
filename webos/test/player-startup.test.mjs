@@ -381,3 +381,45 @@ test('a dimensionless LG video with a known first frame can finish subtitle star
   t.mock.timers.tick(0);
   assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
 });
+
+test('burn-in resume waits for a frame at the target before loading seek thumbnails once',()=>{
+  const session={legacyPlexPlayback:true,subtitleBurnedIn:true};
+  const requests=[];
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,generation:7,initialSeekPending:true,video:{readyState:2},
+    loadSeekFrames(...args){requests.push(args);}
+  });
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[]);
+  player.initialSeekPending=false;
+  player.video.readyState=1;
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[]);
+  player.hasFirstFrame=true;
+  player.checkStartupProgress();
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[[session,7]]);
+});
+
+test('scrubbing during burn-in startup requests previews immediately and follows the latest position',async()=>{
+  let finish, requests=0;
+  const session={legacyPlexPlayback:true,subtitleBurnedIn:true};
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,generation:1,seeking:true,initialSeekPending:true,root:{hidden:false},
+    timelineDuration:()=>100,seekBar:{parentElement:{clientWidth:800}},
+    seekTooltip:{classList:{toggle(){}},style:{},querySelector:()=>({})},seekImage:{},
+    api:{scrubPreview(){requests++;return new Promise(resolve=>{finish=resolve;});}}
+  });
+  player.renderSeekPreview(20);
+  player.renderSeekPreview(60);
+  assert.equal(requests,1);
+  player.initialSeekPending=false;
+  player.hasFirstFrame=true;
+  player.checkStartupProgress();
+  const repaints=[];
+  player.renderSeekPreview=seconds=>repaints.push(seconds);
+  finish(null);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requests,1);
+  assert.deepEqual(repaints,[60]);
+});

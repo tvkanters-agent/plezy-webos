@@ -474,6 +474,9 @@ export class Plex {
       protocol: 'hls', directPlay: 0, directStream: 0, videoCodec: 'h264', audioCodec: 'aac',
       maxVideoBitrate: 12000, videoResolution: '1920x1080', videoQuality: 100,
       session: sessionId, subtitleSize: 100, subtitles: 'burn',
+      // Match native Plezy's HLS burn request. The TV seeks on the full
+      // timeline while PMS can serve a segment as it encodes it.
+      ...(selectedSubtitle ? {fastSeek: 1, 'X-Plex-Incomplete-Segments': '1'} : {}),
       // The Plex HLS endpoint needs the selected source audio ID as well as
       // the part-level PUT; otherwise it can play the default audio instead.
       ...(options.audio !== undefined ? {audioStreamID:options.audio} : {}),
