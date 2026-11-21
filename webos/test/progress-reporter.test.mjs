@@ -102,3 +102,34 @@ test('release never awaits reporting or transcode stop and keeps Simkl stop sema
   assert.ok(calls.includes('load'), 'hardware decoder teardown is not delayed');
   pending.resolve();
 });
+
+test('stop completion waits for the final Plex report, not an earlier heartbeat', async () => {
+  const first = deferred(), final = deferred(), calls = [];
+  const reporter = new ProgressReporter({report(session, state, position) {
+    calls.push([state, position]);
+    return state === 'start' ? first.promise : final.promise;
+  }}, {});
+  reporter.report('start', 0, 100);
+  await tick();
+  const completion = reporter.stop(1.151, 100);
+  assert.equal(reporter.stop(99, 100), completion, 'repeated Stop must not replace the final snapshot');
+  let settled = false;
+  completion.then(() => { settled = true; });
+  first.resolve();
+  await tick();
+  assert.deepEqual(calls, [['start', 0], ['stopped', 1.151]]);
+  assert.equal(settled, false, 'detail refresh must wait until Plex saves Stop');
+  final.resolve();
+  assert.equal(await completion, true);
+  assert.equal(settled, true);
+});
+
+test('failed stopped report releases the detail refresh instead of hanging it', async () => {
+  const errors = [];
+  const reporter = new ProgressReporter({report(session, state) {
+    assert.equal(state, 'stopped');
+    return Promise.reject(new Error('offline'));
+  }}, {}, error => errors.push(error.message));
+  assert.equal(await reporter.stop(4, 100), false);
+  assert.deepEqual(errors, ['offline']);
+});
