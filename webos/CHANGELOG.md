@@ -1,3 +1,9 @@
+## 1.22.20 — Bound MDBList requests
+
+- Time out stalled MDBList key verification and title-rating requests, including response-body stalls, and restore retryability.
+- Keep available Plex and Simkl scores visible after provider failure, without caching temporary MDBList failures.
+- Add regression coverage for cancellation-resistant requests and provider recovery.
+
 ## 1.22.19 — Reconcile Resume after asynchronous Stop
 
 - Keep Stop and decoder cleanup immediate while waiting separately for the final playback report to settle before refreshing the mounted detail metadata.

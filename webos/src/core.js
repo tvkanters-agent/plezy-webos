@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {subtitleStyle} from './subtitle-style.js';
-export const VERSION = '1.22.19';
+export const VERSION = '1.22.20';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -36,28 +36,39 @@ export function endpoint(base, path, params = {}) {
   });
   return url.href;
 }
-export async function request(url, {method = 'GET', headers = {}, body, timeout = 15000, signal, responseType = 'json'} = {}) {
+export async function request(url, {method = 'GET', headers = {}, body, timeout = 15000, signal,
+  responseType = 'json', fetchImpl = fetch} = {}) {
   const controller = new AbortController();
-  const abort = () => controller.abort();
+  // Some fetch implementations and response streams never settle on abort.
+  // Race the entire request, including the response body, with its deadline.
+  let rejectCancelled;
+  const cancelled = new Promise((_, reject) => { rejectCancelled = reject; });
+  const abort = () => {
+    controller.abort();
+    rejectCancelled(new Error('Request cancelled or timed out. Check that the TV can reach the server.'));
+  };
   if (signal) {
-    if (signal.aborted) controller.abort();
+    if (signal.aborted) abort();
     else signal.addEventListener('abort', abort);
   }
   const timer = setTimeout(abort, timeout);
   try {
-    const response = await fetch(url, {method, headers: {Accept: 'application/json', ...headers},
-      body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal});
-    if (!response.ok) {
-      const error = new Error(response.status === 401 || response.status === 403
-        ? 'Sign-in was rejected. Check your account credentials and server access.'
-        : 'The server returned HTTP ' + response.status + '.');
-      error.status = response.status;
-      throw error;
-    }
-    if (responseType === 'none') return {};
-    const text = await response.text();
-    if (!text) return {};
-    try { return JSON.parse(text); } catch (_) { throw new Error('The server did not return JSON. Check the server URL.'); }
+    const operation = (async () => {
+      const response = await fetchImpl(url, {method, headers: {Accept: 'application/json', ...headers},
+        body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal});
+      if (!response.ok) {
+        const error = new Error(response.status === 401 || response.status === 403
+          ? 'Sign-in was rejected. Check your account credentials and server access.'
+          : 'The server returned HTTP ' + response.status + '.');
+        error.status = response.status;
+        throw error;
+      }
+      if (responseType === 'none') return {};
+      const text = await response.text();
+      if (!text) return {};
+      try { return JSON.parse(text); } catch (_) { throw new Error('The server did not return JSON. Check the server URL.'); }
+    })();
+    return await Promise.race([operation, cancelled]);
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('Request cancelled or timed out. Check that the TV can reach the server.');
     if (error instanceof TypeError) throw new Error('Cannot reach the server. Check its URL, network, certificate and CORS configuration.');
