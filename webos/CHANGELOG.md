@@ -1,3 +1,8 @@
+## 1.22.36 — Synchronize covered season details after a watch change
+
+- Apply Plex watch and unwatch acknowledgements to matching season pages on the Back stack.
+- Keep restored episode badges, progress, More options and later pages consistent with the season action.
+
 ## 1.22.35 — Verify Plex date-sort page boundaries
 
 - Verify the preceding page against the same Plex response as each live successor, then repair moved boundaries in place.

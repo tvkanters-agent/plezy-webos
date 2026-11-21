@@ -138,6 +138,7 @@ async function seasonWatchServer(page, initialWatched) {
       case '/:/scrobble':
       case '/:/unscrobble':
         expect(searchParams.get('key')).toBe(first.ratingKey);
+        expect(pathname).toBe(initialWatched?'/:/unscrobble':'/:/scrobble');
         writeRequests++;
         await writeGate;
         return route.fulfill({status:200,body:''});
@@ -160,6 +161,22 @@ async function seasonWatchServer(page, initialWatched) {
   await page.goto('/');
   await page.getByRole('button',{name:show.title,exact:true}).click();
   return {releaseWrite,releasePage,writeRequests:()=>writeRequests,laterPageRequests:()=>laterPageRequests};
+}
+
+function savedCatalogRows(page, keyPart) {
+  return page.evaluate(keyPart=>new Promise((resolve,reject)=>{
+    const open = indexedDB.open('plezy-catalog-v1',1);
+    open.onerror = ()=>reject(open.error);
+    open.onsuccess = ()=>{
+      const db = open.result;
+      const request = db.transaction('pages').objectStore('pages').getAll();
+      request.onerror = ()=>reject(request.error);
+      request.onsuccess = ()=>{
+        db.close();
+        resolve(request.result.filter(row=>row.key.includes(keyPart)).map(row=>row.data));
+      };
+    };
+  }),keyPart);
 }
 
 for (const watched of [true,false]) {
@@ -196,20 +213,79 @@ for (const watched of [true,false]) {
       const later = page.locator('.episode-entry[data-catalog-id="first-2"]');
       await expect(later).toBeVisible();
       await expect(later.locator('.badge')).toHaveCount(watched?1:0);
-      await expect.poll(()=>page.evaluate(()=>new Promise((resolve,reject)=>{
-        const open = indexedDB.open('plezy-catalog-v1',1);
-        open.onerror = ()=>reject(open.error);
-        open.onsuccess = ()=>{
-          const db = open.result;
-          const request = db.transaction('pages').objectStore('pages').getAll();
-          request.onerror = ()=>reject(request.error);
-          request.onsuccess = ()=>{
-            db.close();
-            const pages = request.result.filter(row=>row.key.includes(':children:["first","season",false,'));
-            resolve(pages.flatMap(row=>row.data.items.map(item=>[item.id,item.watched,item.resume])));
-          };
-        };
-      }))).toEqual([['first-1',watched,0],['first-2',watched,0]]);
+      await expect.poll(async()=>{
+        const pages = await savedCatalogRows(page,':children:["first","season",false,');
+        return pages.flatMap(page=>page.items.map(item=>[item.id,item.watched,item.resume]));
+      }).toEqual([['first-1',watched,0],['first-2',watched,0]]);
+    } finally {
+      server.releaseWrite();
+      server.releasePage();
+    }
+  });
+}
+
+for (const watched of [true,false]) for (const reopened of [false,true]) {
+  test('covered '+(reopened?'reopened ':'')+'season restores episode state after '+(watched?'watch':'unwatch'),async({page})=>{
+    const server = await seasonWatchServer(page,!watched);
+    const season = page.getByRole('button',{name:/^Season 1/});
+    const mark = watched?'Mark watched':'Mark unwatched';
+    const reverse = watched?'Mark unwatched':'Mark watched';
+    const first = page.locator('.episode-entry[data-catalog-id="first-1"]');
+    const later = page.locator('.episode-entry[data-catalog-id="first-2"]');
+    try {
+      await season.click();
+      await expect(first).toBeVisible();
+      await page.getByRole('button',{name:mark,exact:true}).click();
+      await expect.poll(server.writeRequests).toBe(1);
+      if (reopened) {
+        await page.keyboard.press('Escape');
+        await season.click();
+        await expect(first).toBeVisible();
+      }
+      await expect(first.locator('.badge')).toHaveCount(watched?0:1);
+      await expect(first.locator('.episode-progress')).toHaveCount(watched?1:0);
+      await expect.poll(server.laterPageRequests).toBeGreaterThan(0);
+      await first.evaluate(row=>{window.retainedSeasonRow=row;});
+
+      await page.getByRole('button',{name:'More options',exact:true}).click();
+      await page.getByRole('button',{name:'View series',exact:true}).click();
+      await expect(page.getByRole('heading',{name:'Watch State Series',exact:true})).toBeVisible();
+      await season.focus();
+      server.releaseWrite();
+      await expect.poll(async()=>{
+        const [detail] = await savedCatalogRows(page,':detail:["first","season"]');
+        return detail?.item.watched;
+      }).toBe(watched);
+      await expect(season).toBeFocused();
+      await expect(page.getByRole('button',{name:'Mark watched',exact:true})).toBeVisible();
+      if (reopened) {
+        const pendingPage = page.waitForResponse(response=>{
+          const url = new URL(response.url());
+          return url.pathname === '/library/metadata/first/children' &&
+            url.searchParams.get('X-Plex-Container-Start') === '1';
+        });
+        server.releasePage();
+        await (await pendingPage).finished();
+      }
+
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('button',{name:reverse,exact:true})).toBeVisible();
+      await expect(first.locator('.badge')).toHaveCount(watched?1:0);
+      await expect(first.locator('.episode-progress')).toHaveCount(0);
+      expect(await first.evaluate(row=>row===window.retainedSeasonRow)).toBe(true);
+      await first.getByRole('button',{name:/More options/}).click();
+      await expect(page.getByRole('button',{name:watched?'Mark as Unwatched':'Mark as Watched',exact:true})).toBeVisible();
+      await expect(page.getByRole('button',{name:watched?'Mark as Watched':'Mark as Unwatched',exact:true})).toHaveCount(0);
+      await page.keyboard.press('Escape');
+
+      server.releasePage();
+      await expect(later).toBeVisible();
+      await expect(later.locator('.badge')).toHaveCount(watched?1:0);
+      await expect.poll(async()=>{
+        const pages = await savedCatalogRows(page,':children:["first","season",false,');
+        return pages.flatMap(page=>page.items.map(item=>[item.id,item.watched,item.resume]));
+      }).toEqual([['first-1',watched,0],['first-2',watched,0]]);
+      expect(server.writeRequests()).toBe(1);
     } finally {
       server.releaseWrite();
       server.releasePage();
