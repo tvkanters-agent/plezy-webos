@@ -208,7 +208,8 @@ export class Plex {
   }
   async recommended(library) {
     const data = (await this.get('/library/sections/' + enc(library) + '/hubs', {count: 20})).MediaContainer;
-    return (data.Hub || []).map(h => ({title: h.title || 'Recommended',
+    return (data.Hub || []).map(h => ({id: h.hubIdentifier || h.key || null,
+      title: h.title || 'Recommended',
       items: (h.Metadata || []).filter(item => ['movie', 'show', 'episode', 'season'].includes(item.type)).map(plexItem)}))
       .filter(h => h.items.length);
   }
