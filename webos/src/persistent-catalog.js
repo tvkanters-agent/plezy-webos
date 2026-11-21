@@ -12,8 +12,8 @@ const TOUCH_INTERVAL_MS = 60000;
 // A successor cache is valid only for the precise ordered IDs of its predecessor.
 // Metadata-only changes do not invalidate it. Exact IDs avoid hash collisions.
 function pageLineage(page) {
-  // Version the signature to reject successors saved by older, unscoped flights.
-  return Array.isArray(page?.items) ? JSON.stringify([2, page.items.map(item => item.id)]) : null;
+  // Reject successors from versions that did not verify the live boundary.
+  return Array.isArray(page?.items) ? JSON.stringify([3, page.items.map(item => item.id)]) : null;
 }
 
 function fingerprint(value) {

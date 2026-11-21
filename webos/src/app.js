@@ -1,7 +1,8 @@
 import './compat.js';
 // SPDX-License-Identifier: GPL-3.0-only
 import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './core.js';
-import {client, Jellyfin, Plex, mediaSourceTracks, plexPin, pollPlexPin, plexServers} from './api.js';
+import {client, Jellyfin, Plex, PlexLibraryBoundaryChanged, mediaSourceTracks,
+  plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {EpisodeTrackPreferences} from './episode-track-preferences.js';
 import {previewDetailTracks} from './detail-track-status.js';
@@ -1446,7 +1447,7 @@ async function paginated(loader, currentRevision, options = {}) {
   // The first page may be a persisted snapshot. Refresh callbacks replace
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
-  let pageGeneration = 0, forceShiftedPages = false, firstPageRefresh = null;
+  let pageGeneration = 0, forceShiftedPages = false;
   const loadedPages = new Map();
   let watchedOverride;
   const watchExceptions = new Map();
@@ -1632,10 +1633,10 @@ async function paginated(loader, currentRevision, options = {}) {
     if (shifted) {
       for (const key of Array.from(loadedPages.keys()))
         if (key > offset) loadedPages.delete(key);
-      // Invalidate an already-started later load (even if its offset is
-      // reused) and bypass persisted pages from the previous ordering.
+      // Date grids validate cache lineage against the new predecessor.
+      // Other paginators still need to bypass their old offset cache.
       ++pageGeneration;
-      forceShiftedPages = true;
+      forceShiftedPages = !windowed;
       loading = false;
       pendingFocus = null;
       errorMessage.textContent = '';
@@ -1650,22 +1651,53 @@ async function paginated(loader, currentRevision, options = {}) {
     if (completed) cleanup();
     else { listen(); requestAnimationFrame(check); }
   }
+  function predecessorOf(offset) {
+    if (!windowed) return null;
+    let predecessor = null;
+    for (const [key, page] of loadedPages) {
+      if (key >= offset) break;
+      predecessor = {offset:key, page};
+    }
+    return predecessor;
+  }
+  async function repairBoundary(offset, isCurrent) {
+    // Walk back only if Plex also moved the preceding boundary. The first
+    // verifiable update discards shifted successors through applyFresh.
+    for (let previous = predecessorOf(offset); previous && isCurrent();) {
+      const {offset, page} = previous;
+      previous = predecessorOf(offset);
+      try {
+        const result = await loader(offset, false, previous);
+        if (!isCurrent()) return;
+        // A detached refresh may already have repaired this page on disk.
+        if (result.cached && JSON.stringify(page) !== JSON.stringify(result.value)) {
+          await applyFresh(offset, page, {value:result.value, changed:true});
+          watchFresh(offset, result.value, result.fresh);
+          return;
+        }
+        const update = result.fresh ? await result.fresh : {value:result.value, changed:true};
+        if (update.error) throw update.error;
+        if (isCurrent() && update.changed) await applyFresh(offset, page, update);
+        return;
+      } catch (error) {
+        if (!(error instanceof PlexLibraryBoundaryChanged)) throw error;
+      }
+    }
+  }
   function watchFresh(offset, initialPage, pending) {
+    if (!pending) return;
     const watchEpoch = detailWatchEpoch;
     const requestRevision = mountedRevision;
-    if (pending) return pending.then(update => {
-      if (watchEpoch === detailWatchEpoch && (!windowed || mountedRevision === requestRevision))
-        return applyFresh(offset, initialPage, update);
-    })
-      .catch(() => { /* Offline updates keep the saved view usable. */ });
-  }
-  function trackFirstPageRefresh(pending) {
-    firstPageRefresh = pending;
-    pending.catch(() => { /* Keep the consistent cached grid offline. */ }).finally(() => {
-      if (firstPageRefresh !== pending) return;
-      firstPageRefresh = null;
-      requestAnimationFrame(check);
-    });
+    const requestGeneration = pageGeneration;
+    const isCurrent = () => watchEpoch === detailWatchEpoch &&
+      (!windowed || (mountedRevision === requestRevision && mountedRevision === revision &&
+        grid.isConnected && pageGeneration === requestGeneration));
+    pending.then(update => {
+      if (!isCurrent()) return;
+      if (update.error instanceof PlexLibraryBoundaryChanged)
+        return repairBoundary(offset, isCurrent);
+      return applyFresh(offset, initialPage, update);
+    }).catch(() => { /* Offline updates keep the saved view usable. */ });
   }
   async function revalidateFirstPage(requestRevision) {
     const reconcile = page => {
@@ -1700,18 +1732,22 @@ async function paginated(loader, currentRevision, options = {}) {
   };
   grid._suspendCatalog = grid._destroyCatalog = () => {
     pendingFocus = null;
-    windowed?.suspend();
+    if (windowed) {
+      ++pageGeneration;
+      loading = false;
+      windowed.suspend();
+    }
     cleanup();
   };
   grid._resumeCatalog = restoredRevision => {
     mountedRevision = restoredRevision;
     windowed?.resume();
     if (options.reloadFirstPage && loadedPages.has(0))
-      trackFirstPageRefresh(revalidateFirstPage(restoredRevision));
+      revalidateFirstPage(restoredRevision).catch(() => { /* Keep the cached grid offline. */ });
     if (!completed) { listen(); requestAnimationFrame(check); }
   };
   async function load() {
-    if (loading || firstPageRefresh || completed || mountedRevision !== revision || !grid.isConnected) return;
+    if (loading || completed || mountedRevision !== revision || !grid.isConnected) return;
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
@@ -1722,12 +1758,18 @@ async function paginated(loader, currentRevision, options = {}) {
       requestGeneration === pageGeneration &&
       (!windowed || (requestRevision === mountedRevision && offset === start));
     try {
-      const previousOffset = Array.from(loadedPages.keys()).filter(key => key < offset).pop();
-      const predecessor = windowed && previousOffset !== undefined
-        ? {offset:previousOffset, page:loadedPages.get(previousOffset)} : null;
-      const response = options.initialPage && start === 0
-        ? options.initialPage : await loader(start, forceShiftedPages, predecessor);
+      let response = offset === 0 ? options.initialPage : null;
       options.initialPage = null;
+      if (!response) {
+        try {
+          response = await loader(offset, forceShiftedPages, predecessorOf(offset));
+        } catch (error) {
+          if (!(error instanceof PlexLibraryBoundaryChanged) || !canApply()) throw error;
+          await repairBoundary(offset, canApply);
+          if (!canApply()) return;
+          response = await loader(offset, true, predecessorOf(offset));
+        }
+      }
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
       const fresh = response && response.fresh;
@@ -1760,8 +1802,7 @@ async function paginated(loader, currentRevision, options = {}) {
       if (completed) { pendingFocus = null; cleanup(); }
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
       schedulePosters();
-      const update = watchFresh(offset, page, fresh);
-      if (windowed && offset === 0 && update) trackFirstPageRefresh(update);
+      watchFresh(offset, page, fresh);
     } catch (error) {
       if (canApply()) {
         pendingFocus = null;
@@ -1778,7 +1819,7 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   function check() {
     if (mountedRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
-    if (loading || firstPageRefresh || (windowed && errorMessage.textContent)) return;
+    if (loading || (windowed && errorMessage.textContent)) return;
     const rect = sentinel.getBoundingClientRect();
     const pane = main.getBoundingClientRect();
     if (rect.top <= pane.bottom + pane.height * 0.8) load();
@@ -1989,8 +2030,10 @@ async function render(prepared = null) {
         (selected === 'recent' || selected === 'release');
       const libraryLoader = (start, count, shifted = false, predecessor, force = forceRefresh) =>
         savedPage(browseKey(start, count),
-          () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
-            currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
+          () => predecessor
+            ? currentApi.listAfter(libraryRoute.library.id, selected, selectedFilter, predecessor)
+            : currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
+              currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
           {force:force || shifted, priority:start === 0 && !libraryRoute.alpha,
             predecessor:predecessor ? {key:browseKey(predecessor.offset), page:predecessor.page} : null});
       if (currentApi instanceof Plex && selected === 'title') {

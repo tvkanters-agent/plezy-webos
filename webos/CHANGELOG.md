@@ -1,3 +1,8 @@
+## 1.22.35 — Verify Plex date-sort page boundaries
+
+- Verify the preceding page against the same Plex response as each live successor, then repair moved boundaries in place.
+- Keep coherent cached pages browsable while Plex refreshes them, including when the first request stalls.
+
 ## 1.22.34 — Fix Plex date-sort page ordering after refresh
 
 - Keep pending page requests separate when Plex shifts the order twice during browsing.

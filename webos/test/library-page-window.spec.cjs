@@ -1,5 +1,14 @@
 const {test, expect} = require('@playwright/test');
 
+function pageRequest(url) {
+  const rangeStart = Number(url.searchParams.get('X-Plex-Container-Start'));
+  const rangeSize = Number(url.searchParams.get('X-Plex-Container-Size'));
+  const sort = url.searchParams.get('sort');
+  const overlap = ['addedAt:desc','originallyAvailableAt:desc'].includes(sort)
+    ? Math.max(0, rangeSize - 60) : 0;
+  return {start:rangeStart + overlap, rangeStart, rangeSize, sort};
+}
+
 async function mockLibrary(page, total, beforePage = () => {}) {
   await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
     deviceId:'device', active:'plex', servers:[{id:'plex', kind:'plex', name:'Plex',
@@ -14,14 +23,13 @@ async function mockLibrary(page, total, beforePage = () => {}) {
     if (url.pathname === '/library/sections') {
       data.Directory = [{key:'movies', title:'Movies', type:'movie'}];
     } else if (url.pathname === '/library/sections/movies/all') {
-      const start = Number(url.searchParams.get('X-Plex-Container-Start'));
-      const size = Number(url.searchParams.get('X-Plex-Container-Size'));
-      const sort = url.searchParams.get('sort');
-      requests.push({start, size, sort});
-      const response = await beforePage({start, size, sort, titles});
+      const request = pageRequest(url);
+      const {rangeStart, rangeSize} = request;
+      requests.push(request);
+      const response = await beforePage({...request, titles});
       if (response?.status)
         return route.fulfill({status:response.status, json:{error:'Simulated Plex outage'}});
-      data = response?.snapshot || {totalSize:titles.length, Metadata:titles.slice(start, start + size)};
+      data = response?.snapshot || {totalSize:titles.length, Metadata:titles.slice(rangeStart, rangeStart + rangeSize)};
     } else if (url.pathname.startsWith('/library/metadata/')) {
       data.Metadata = titles.filter(item => item.ratingKey === url.pathname.split('/').pop());
     }
@@ -332,7 +340,7 @@ for (const [sortLabel, plexSort] of [
   test(`${sortLabel} keeps pending successors tied to their ordering across restart`, async ({page}) => {
     let arrival, offline = false;
     const successors = [];
-    await mockLibrary(page, 180, async ({start, size, sort, titles}) => {
+    await mockLibrary(page, 180, async ({start, rangeStart, rangeSize, sort, titles}) => {
       if (sort !== plexSort) return;
       if (start === 0 && arrival) {
         titles.unshift({ratingKey:arrival, type:'movie', title:'Arrival ' + arrival});
@@ -340,7 +348,7 @@ for (const [sortLabel, plexSort] of [
       }
       if (start === 60) {
         if (offline) return {status:503};
-        const snapshot = {totalSize:titles.length, Metadata:titles.slice(start,start + size)};
+        const snapshot = {totalSize:titles.length, Metadata:titles.slice(rangeStart, rangeStart + rangeSize)};
         await new Promise(resolve => successors.push(resolve));
         return {snapshot};
       }
@@ -370,7 +378,7 @@ for (const [sortLabel, plexSort] of [
     const oldResponse = page.waitForResponse(response => {
       const url = new URL(response.url());
       return url.hostname === 'plex.test' && url.searchParams.get('sort') === plexSort &&
-        url.searchParams.get('X-Plex-Container-Start') === '60';
+        pageRequest(url).start === 60;
     });
     successors[0]();
     await oldResponse;
@@ -421,3 +429,149 @@ for (const [sortLabel, plexSort] of [
       node._libraryWindow.focusById(id)?._libraryWindowIndex))).toEqual([59,60,61]);
   });
 }
+
+for (const [sortLabel, plexSort] of [
+  ['Recently added', 'addedAt:desc'], ['Release date', 'originallyAvailableAt:desc']
+]) {
+  test(`${sortLabel} can browse a cached chain during a held first-page refresh`, async ({page}) => {
+    let hold = false;
+    const requests = new Map();
+    await mockLibrary(page, 180, ({start, sort}) => {
+      if (hold && sort === plexSort)
+        return new Promise(resolve => requests.set(start, resolve));
+    });
+    const grid = page.locator('.paged-window-grid');
+    const scrollToEnd = () => pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+    await page.goto('/');
+    await openDateSort(page, sortLabel);
+    for (const offset of [60,120]) {
+      await scrollToEnd();
+      await expect.poll(async () => (await cachedPage(page,plexSort,offset))?.data.items[0].id)
+        .toBe(String(offset));
+    }
+    hold = true;
+    await page.reload();
+    await openDateSort(page, sortLabel);
+    await expect.poll(() => requests.has(0)).toBe(true);
+    for (const offset of [60,120]) {
+      await scrollToEnd();
+      await expect.poll(() => grid.evaluate((node, index) =>
+        node._libraryWindow.reveal(index)?.dataset.focus, offset)).toBe(String(offset));
+    }
+    requests.forEach(resolve => resolve({status:503}));
+  });
+
+  for (const mutation of ['insert','remove']) {
+    test(`${sortLabel} proves a live boundary beyond a held cached page (${mutation})`, async ({page}) => {
+      let phase = 'seed';
+      let releaseSecond;
+      await mockLibrary(page, 180, async ({start, rangeStart, rangeSize, sort, titles}) => {
+        if (sort !== plexSort) return;
+        if (phase === 'shift') {
+          if (mutation === 'insert') titles.splice(80,0,{ratingKey:'new',type:'movie',title:'Arrival'});
+          else titles.splice(80,1);
+          phase = 'hold';
+        }
+        if (phase === 'offline' && start >= 60) return {status:503};
+        if (phase === 'hold' && start === 60) {
+          const snapshot = {totalSize:titles.length, Metadata:titles.slice(rangeStart,rangeStart + rangeSize)};
+          await new Promise(resolve => { releaseSecond = resolve; });
+          return {snapshot};
+        }
+      });
+      const grid = page.locator('.paged-window-grid');
+      const scrollToEnd = () => pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+      const boundary = () => grid.evaluate(node => [118,119,120,121].map(index =>
+        node._libraryWindow.reveal(index)?.dataset.focus || null));
+      const oldBoundary = ['118','119',null,null];
+      const correctedBoundary = mutation === 'insert'
+        ? ['117','118','119','120'] : ['119','120','121','122'];
+      const successorResponse = status => page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.hostname === 'plex.test' && pageRequest(url).sort === plexSort &&
+          pageRequest(url).start === 120 && response.status() === status;
+      });
+      await page.goto('/');
+      await openDateSort(page,sortLabel);
+      await scrollToEnd();
+      await expect.poll(async () => (await cachedPage(page,plexSort,60))?.data.items[0].id).toBe('60');
+      expect(await cachedPage(page,plexSort,120)).toBeNull();
+
+      phase = 'shift';
+      await page.reload();
+      await openDateSort(page,sortLabel);
+      await scrollToEnd();
+      await expect.poll(() => !!releaseSecond).toBe(true);
+      await expect.poll(boundary).toEqual(oldBoundary);
+      const live = successorResponse(200);
+      await scrollToEnd();
+      await live;
+      // The new third page arrived before the held second page. It cannot
+      // extend the old second page in either the grid or IndexedDB.
+      await waitForLayout(page);
+      expect(await boundary()).toEqual(oldBoundary);
+      expect(await cachedPage(page,plexSort,120)).toBeNull();
+
+      // Restart before any repair can land. Offline, the two coherent cached
+      // pages are still available and the third cannot be resurrected.
+      phase = 'offline';
+      await page.reload();
+      await openDateSort(page,sortLabel);
+      const offline = successorResponse(503);
+      await scrollToEnd();
+      await expect.poll(boundary).toEqual(oldBoundary);
+      await scrollToEnd();
+      await offline;
+      await expect(page.getByText(/Could not load library titles:/)).toBeVisible();
+      expect(await boundary()).toEqual(oldBoundary);
+      expect(await cachedPage(page,plexSort,120)).toBeNull();
+      releaseSecond();
+
+      // A subsequent online visit repaginates in the new order and persists
+      // a complete, correctly joined boundary.
+      phase = 'online';
+      await page.reload();
+      await openDateSort(page,sortLabel);
+      await scrollToEnd();
+      await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
+      await scrollToEnd();
+      await expect.poll(boundary).toEqual(correctedBoundary);
+      await expect.poll(async () => (await cachedPage(page,plexSort,120))?.data.items[0].id)
+        .toBe(correctedBoundary[2]);
+      phase = 'offline';
+      await page.reload();
+      await openDateSort(page,sortLabel);
+      await scrollToEnd();
+      await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
+      await scrollToEnd();
+      await expect.poll(boundary).toEqual(correctedBoundary);
+    });
+  }
+}
+
+test('a live date grid repairs a shift before multiple already loaded boundaries', async ({page}) => {
+  let insert = false;
+  const requests = await mockLibrary(page, 240, ({start, sort, titles}) => {
+    if (insert && start === 120 && sort === 'addedAt:desc') {
+      insert = false;
+      titles.unshift({ratingKey:'new',type:'movie',title:'Arrival'});
+    }
+  });
+  const grid = page.locator('.paged-window-grid');
+  const scrollToEnd = () => pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+  await page.goto('/');
+  await openDateSort(page);
+  await scrollToEnd();
+  await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
+  insert = true;
+  await scrollToEnd();
+  await expect.poll(() => grid.evaluate(node =>
+    node._libraryWindow.focusById('new')?._libraryWindowIndex)).toBe(0);
+  await scrollToEnd();
+  await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
+  await scrollToEnd();
+  await expect.poll(() => grid.evaluate(node => [59,60,119,120].map(index =>
+    node._libraryWindow.reveal(index)?.dataset.focus))).toEqual(['58','59','118','119']);
+  expect(requests.filter(request => request.sort === 'addedAt:desc' && request.start === 120)
+    .map(request => [request.rangeStart,request.rangeSize])).toEqual([[60,120],[60,120]]);
+});
