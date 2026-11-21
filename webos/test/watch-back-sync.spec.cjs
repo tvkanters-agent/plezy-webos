@@ -112,3 +112,131 @@ for (const watched of [true,false]) {
     } finally {server.releasePlex();}
   });
 }
+
+async function seasonWatchServer(page, initialWatched) {
+  await page.addInitScript(()=>localStorage.setItem('plezy.webos',JSON.stringify({
+    deviceId:'fixture',active:'plex',
+    servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}]
+  })));
+  let releaseWrite, releasePage, writeRequests = 0, laterPageRequests = 0;
+  const writeGate = new Promise(resolve=>{ releaseWrite = resolve; });
+  const pageGate = new Promise(resolve=>{ releasePage = resolve; });
+  const show = {ratingKey:'show',type:'show',title:'Watch State Series'};
+  const season = (id, number, leafCount) => ({ratingKey:id,type:'season',
+    title:'Season '+number,index:number,parentRatingKey:show.ratingKey,parentTitle:show.title,
+    leafCount,viewedLeafCount:initialWatched ? leafCount : 0});
+  const first = season('first',1,2), other = season('other',2,1);
+  const episode = (parent, number) => ({ratingKey:parent.ratingKey+'-'+number,type:'episode',
+    title:'Episode '+number,index:number,parentRatingKey:parent.ratingKey,
+    grandparentRatingKey:show.ratingKey,duration:120000,viewCount:initialWatched ? 1 : 0,
+    viewOffset:number === 1 && !initialWatched ? 15000 : 0});
+  await page.route('http://plex.test/**',async route=>{
+    const {pathname,searchParams} = new URL(route.request().url());
+    const reply = (rows,totalSize=rows.length) =>
+      route.fulfill({json:{MediaContainer:{Metadata:rows,totalSize}}});
+    switch (pathname) {
+      case '/:/scrobble':
+      case '/:/unscrobble':
+        expect(searchParams.get('key')).toBe(first.ratingKey);
+        writeRequests++;
+        await writeGate;
+        return route.fulfill({status:200,body:''});
+      case '/hubs':
+        return route.fulfill({json:{MediaContainer:{Hub:[{title:'Series',Metadata:[show]}]}}});
+      case '/library/metadata/show': return reply([show]);
+      case '/library/metadata/show/children': return reply([first,other]);
+      case '/library/metadata/first': return reply([first]);
+      case '/library/metadata/other': return reply([other]);
+      case '/library/metadata/first/children':
+        if (searchParams.get('X-Plex-Container-Start') !== '1') return reply([episode(first,1)],2);
+        laterPageRequests++;
+        await pageGate;
+        // Return the state captured before the season acknowledgment.
+        return reply([episode(first,2)],2);
+      case '/library/metadata/other/children': return reply([episode(other,1)]);
+      default: return reply([]);
+    }
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:show.title,exact:true}).click();
+  return {releaseWrite,releasePage,writeRequests:()=>writeRequests,laterPageRequests:()=>laterPageRequests};
+}
+
+for (const watched of [true,false]) {
+  test('reopened season updates loaded and pending episodes on '+(watched?'watch':'unwatch'),async({page})=>{
+    const server = await seasonWatchServer(page,!watched);
+    const season = page.getByRole('button',{name:/^Season 1/});
+    const initial = page.getByRole('button',{name:watched?'Mark watched':'Mark unwatched',exact:true});
+    const committed = page.getByRole('button',{name:watched?'Mark unwatched':'Mark watched',exact:true});
+    const first = page.locator('.episode-entry[data-catalog-id="first-1"]');
+    const more = first.getByRole('button',{name:/More options/});
+    try {
+      await season.click();
+      await expect(first).toBeVisible();
+      await initial.click();
+      await expect.poll(server.writeRequests).toBe(1);
+      await page.keyboard.press('Escape');
+      await season.click();
+      await expect(initial).toBeVisible();
+      await expect(first.locator('.episode-progress')).toHaveCount(watched?1:0);
+      await expect(first.locator('.badge')).toHaveCount(watched?0:1);
+      await expect.poll(server.laterPageRequests).toBeGreaterThan(0);
+      await more.focus();
+      server.releaseWrite();
+      await expect(committed).toBeVisible();
+      await expect(first.locator('.badge')).toHaveCount(watched?1:0);
+      await expect(first.locator('.episode-progress')).toHaveCount(0);
+      await expect(more).toBeFocused();
+      await more.click();
+      await expect(page.getByRole('button',{name:watched?'Mark as Unwatched':'Mark as Watched',exact:true})).toBeVisible();
+      await expect(page.getByRole('button',{name:watched?'Mark as Watched':'Mark as Unwatched',exact:true})).toHaveCount(0);
+      await page.keyboard.press('Escape');
+
+      server.releasePage();
+      const later = page.locator('.episode-entry[data-catalog-id="first-2"]');
+      await expect(later).toBeVisible();
+      await expect(later.locator('.badge')).toHaveCount(watched?1:0);
+      await expect.poll(()=>page.evaluate(()=>new Promise((resolve,reject)=>{
+        const open = indexedDB.open('plezy-catalog-v1',1);
+        open.onerror = ()=>reject(open.error);
+        open.onsuccess = ()=>{
+          const db = open.result;
+          const request = db.transaction('pages').objectStore('pages').getAll();
+          request.onerror = ()=>reject(request.error);
+          request.onsuccess = ()=>{
+            db.close();
+            const pages = request.result.filter(row=>row.key.includes(':children:["first","season",false,'));
+            resolve(pages.flatMap(row=>row.data.items.map(item=>[item.id,item.watched,item.resume])));
+          };
+        };
+      }))).toEqual([['first-1',watched,0],['first-2',watched,0]]);
+    } finally {
+      server.releaseWrite();
+      server.releasePage();
+    }
+  });
+}
+
+test('a delayed season acknowledgment leaves another season and its episode unchanged',async({page})=>{
+  const server = await seasonWatchServer(page,false);
+  try {
+    await page.getByRole('button',{name:/^Season 1/}).click();
+    await page.getByRole('button',{name:'Mark watched',exact:true}).click();
+    await expect.poll(server.writeRequests).toBe(1);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:/^Season 2/}).click();
+    const episode = page.locator('.episode-entry[data-catalog-id="other-1"]');
+    await expect(episode.locator('.episode-progress')).toBeVisible();
+    const acknowledged = page.waitForResponse(response=>new URL(response.url()).pathname==='/:/scrobble');
+    server.releaseWrite();
+    await acknowledged;
+    await episode.getByRole('button',{name:/More options/}).click();
+    await expect(page.getByRole('button',{name:'Mark watched',exact:true})).toBeVisible();
+    await expect(episode.locator('.episode-progress')).toBeVisible();
+    await expect(episode.locator('.badge')).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Mark as Watched',exact:true})).toBeVisible();
+  } finally {
+    server.releaseWrite();
+    server.releasePage();
+  }
+});

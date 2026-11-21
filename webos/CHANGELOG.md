@@ -1,3 +1,8 @@
+## 1.22.32 — Synchronize episode watch state on reopened seasons
+
+- Apply delayed season watch and unwatch acknowledgments to the reopened season's episode badges, progress and More options.
+- Keep loaded and pending episode pages consistent in the saved catalog.
+
 ## 1.22.31 — Fix watched action on reopened Plex details
 
 - Reconcile delayed Plex watched/unwatched acknowledgments with the reopened detail of the same title, including its accessible button label.
