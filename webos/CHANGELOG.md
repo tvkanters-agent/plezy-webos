@@ -1,3 +1,8 @@
+## 1.22.33 — Synchronize episode watch state on reopened seasons
+
+- Apply delayed season watch and unwatch acknowledgments to the reopened season's episode badges, progress and More options.
+- Keep loaded and pending episode pages consistent in the saved catalog.
+
 ## 1.22.32 — Publish webOS pre-releases after multi-commit pushes
 
 - Compare the version before the master push with the version at the tested tip, so release notes committed after a version bump can ship in the same push.
