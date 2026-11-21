@@ -467,3 +467,123 @@ test('Simkl tracker reads and writes movie/series personal ratings using matched
    assert.ok(calls.filter(c=>c.method==='GET').every(c=>c.headers['simkl-api-key']===SIMKL_CLIENT_ID));
  }finally{restore();}
 });
+
+test('Simkl personal rating snapshots coalesce concurrent reads and index other titles',async()=>{
+  let complete;const calls=[];
+  const pending=new Promise(resolve=>{complete=resolve;});
+  const restore=mock(async(url)=>{
+    const path=new URL(url).pathname;calls.push(path);
+    if(path==='/sync/ratings/movies')return pending;
+    return respond([]);
+  });
+  try{
+    const tracker=new SimklTracker(()=>saved(),()=>{});
+    const other={type:'movie',raw:{Guid:[{id:'imdb://tt7654321'}]}};
+    const first=tracker.getTitleRating({},movie);
+    const second=tracker.getTitleRating({},other);
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.deepEqual(calls,['/sync/ratings/movies'],'simultaneous lookups share one request');
+    complete(respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:9},
+      {movie:{ids:{imdb:'tt7654321'}},user_rating:7}]));
+    assert.deepEqual(await Promise.all([first,second]),[9,7]);
+    assert.equal(await tracker.getTitleRating({},movie),9);
+    assert.equal(await tracker.getTitleRating({},other),7);
+    assert.deepEqual(calls,['/sync/ratings/movies'],'cached snapshots serve repeat navigation');
+  }finally{restore();}
+});
+test('Simkl caches show and anime misses and only downloads each list once',async()=>{
+  const calls=[];
+  const restore=mock(async(url)=>{
+    const path=new URL(url).pathname;calls.push(path);
+    if(path==='/sync/ratings/shows')return respond([{show:{ids:{tvdb:123}},user_rating:8}]);
+    if(path==='/sync/ratings/anime')return respond([{show:{ids:{tvdb:321}},user_rating:6}]);
+    return respond([]);
+  });
+  try{
+    const tracker=new SimklTracker(()=>saved(),()=>{});
+    const show=n=>({type:'show',raw:{Guid:[{id:'tvdb://'+n}]}});
+    assert.equal(await tracker.getTitleRating({},show(123)),8);
+    assert.equal(await tracker.getTitleRating({},show(321)),6);
+    assert.equal(await tracker.getTitleRating({},show(456)),null);
+    assert.equal(await tracker.getTitleRating({},show(456)),null);
+    assert.deepEqual(calls,['/sync/ratings/shows','/sync/ratings/anime']);
+  }finally{restore();}
+});
+test('Simkl refreshes expired snapshots, retries failures, and preserves cache across token refresh',async()=>{
+  let reads=0,fail=false,refreshes=0,session=saved();
+  const restore=mock(async(url)=>{
+    const path=new URL(url).pathname;
+    if(path==='/oauth2/token'){refreshes++;return respond(token('simkl_at_rotated'));}
+    if(path==='/sync/ratings/movies'){
+      reads++;return fail?respond({},503):respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:reads}]);
+    }
+    return respond([]);
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,value=>{session=value;});
+    assert.equal(await tracker.getTitleRating({},movie),1);
+    await tracker.refresh();
+    assert.equal(await tracker.getTitleRating({},movie),1,'token rotation must retain the snapshot');
+    assert.equal(reads,1);
+    assert.equal(refreshes,1);
+    tracker.personalRatingSnapshots.get('movies').at=Date.now()-10*60*1000;
+    assert.equal(await tracker.getTitleRating({},movie),2);
+    tracker.personalRatingSnapshots.get('movies').at=Date.now()-10*60*1000;
+    fail=true;
+    await assert.rejects(tracker.getTitleRating({},movie),/HTTP 503/);
+    fail=false;
+    assert.equal(await tracker.getTitleRating({},movie),4,'errors must not be cached');
+  }finally{restore();}
+});
+test('Simkl rating changes invalidate relevant snapshots and failed writes do not',async()=>{
+  let session=saved(),movieReads=0,showReads=0,animeReads=0,failWrite=false;
+  const restore=mock(async(url,opts)=>{
+    const path=new URL(url).pathname;
+    if(path==='/sync/ratings/movies'){movieReads++;return respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:movieReads}]);}
+    if(path==='/sync/ratings/shows'){showReads++;return respond([]);}
+    if(path==='/sync/ratings/anime'){animeReads++;return respond([{show:{ids:{tvdb:321}},user_rating:animeReads}]);}
+    if(opts.method==='POST')return respond({},failWrite?503:200);
+    return respond([]);
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,value=>{session=value;});
+    const show={type:'show',raw:{Guid:[{id:'tvdb://321'}]}};
+    assert.equal(await tracker.getTitleRating({},movie),1);
+    assert.equal(await tracker.getTitleRating({},show),1);
+    await tracker.rateTitle({},movie,8);tracker.lastWrite=0;
+    assert.equal(await tracker.getTitleRating({},movie),2);
+    assert.equal(await tracker.getTitleRating({},show),1,'movie writes must not clear show/anime');
+    await tracker.rateTitle({},show,null);tracker.lastWrite=0;
+    assert.equal(await tracker.getTitleRating({},show),2);
+    assert.deepEqual([showReads,animeReads],[2,2]);
+    failWrite=true;
+    await assert.rejects(tracker.rateTitle({},movie,5),/HTTP 503/);
+    assert.equal(await tracker.getTitleRating({},movie),2,'failed writes preserve cached reads');
+    assert.equal(movieReads,2);
+  }finally{restore();}
+});
+test('Simkl ignores stale in-flight personal ratings on account replacement',async()=>{
+  let session=saved(),complete,reads=0;
+  const pending=new Promise(resolve=>{complete=resolve;});
+  const restore=mock(async(url)=>{
+    if(new URL(url).pathname==='/sync/ratings/movies'){
+      reads++;
+      return reads===1?pending:respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:4}]);
+    }
+    return respond([]);
+  });
+  try{
+    const tracker=new SimklTracker(()=>session,value=>{session=value;});
+    const first=tracker.getTitleRating({},movie);
+    await new Promise(resolve=>setTimeout(resolve,0));
+    tracker.reset();
+    session=saved({accessToken:'simkl_at_other_account'});
+    complete(respond([{movie:{ids:{imdb:'tt1234567'}},user_rating:10}]));
+    assert.equal(await first,null,'data from a disconnected account is discarded');
+    assert.equal(await tracker.getTitleRating({},movie),4);
+    assert.equal(reads,2);
+    session=saved({accessToken:'simkl_at_third_account'}); // Guard direct changes too.
+    assert.equal(await tracker.getTitleRating({},movie),4);
+    assert.equal(reads,3,'a new account cannot inherit another account snapshot');
+  }finally{restore();}
+});
