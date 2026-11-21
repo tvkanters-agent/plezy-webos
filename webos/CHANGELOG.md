@@ -1,3 +1,8 @@
+## 1.22.32 — Publish webOS pre-releases after multi-commit pushes
+
+- Compare the version before the master push with the version at the tested tip, so release notes committed after a version bump can ship in the same push.
+- Skip separate same-version pushes and use the original push SHAs on retries.
+
 ## 1.22.31 — Fix watched action on reopened Plex details
 
 - Reconcile delayed Plex watched/unwatched acknowledgments with the reopened detail of the same title, including its accessible button label.
