@@ -11,18 +11,8 @@ const script = await readFile(path.join(root, 'dist/app.js'), 'utf8');
 const html = await readFile(path.join(root, 'dist/index.html'), 'utf8');
 const appinfo = JSON.parse(await readFile(path.join(root, 'dist/appinfo.json'), 'utf8'));
 const pixi = await readFile(path.join(root,'dist/pixi.min.js'),'utf8');
-const assAssets = path.join(root,'dist/libass/v' + appinfo.version);
-const assWrapper = await readFile(path.join(assAssets,'subtitles-octopus.js'),'utf8');
-const assLegacyIndex = await readFile(path.join(assAssets,'subtitles-octopus-worker-legacy-assets.js'),'utf8');
-const assWasmIndex = await readFile(path.join(assAssets,'subtitles-octopus-worker-assets.js'),'utf8');
-if (!assWrapper.includes('plezyUseExternalClock') ||
-    !/window\.plezyAssPartCount = [1-9]\d*;/.test(assLegacyIndex) ||
-    !/window\.plezyAssPartCount = [1-9]\d*;/.test(assWasmIndex))
-  throw new Error('Versioned libass worker assets are incomplete.');
-// The generic old path must never be used for a worker after upgrading the IPK.
-if (script.includes('libass/' + 'subtitles-octopus-worker-'))
-  throw new Error('Build still references unversioned libass worker assets.');
-
+if (script.includes('SubtitlesOctopus') || script.includes('plezyAssAssets'))
+  throw new Error('Removed enhanced ASS renderer is still bundled.');
 const pixiLicense = await readFile(path.join(root,'dist/pixi-LICENSE.txt'),'utf8');
 if (!pixi.includes('PIXI') || !pixiLicense.includes('MIT License'))
   throw new Error('PixiJS 4 subtitle renderer or its license was not packaged.');

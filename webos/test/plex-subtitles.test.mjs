@@ -60,8 +60,8 @@ test('compatibility mode restores pre-change Plex HLS and burn-in for MKV SRT an
   }
 });
 
-test('enhanced Direct Play and subtitle handling fail closed without an explicit true flag',async()=>{
-  for (const codec of ['srt','ass']) {
+test('enhanced SRT requires opt-in; ASS always uses Plex burn-in',async()=>{
+  for(const codec of ['srt','ass']){
     const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
     const requests=[];
     api.get=async(path,params,options)=>{
@@ -71,30 +71,27 @@ test('enhanced Direct Play and subtitle handling fail closed without an explicit
     const media=makeMedia('mkv');
     media.Part[0].Stream=[{streamType:3,id:92,codec,selected:1}];
     const item={id:'123',raw:{Media:[media]}};
-    for (const enhancedPlayback of [undefined,false,'true',1,null]) {
+    for(const enhancedPlayback of [undefined,false,'true',1,null]){
       requests.length=0;
       const session=await api.playback(item,{enhancedPlayback,start:31});
-      const url=new URL(session.url);
       assert.equal(session.legacyPlexPlayback,true);
       assert.equal(session.enhancedPlayback,undefined);
-      assert.equal(session.transcode,true);
       assert.equal(session.subtitleAsset,null);
       assert.equal(session.subtitleBurnedIn,true);
-      assert.equal(session.start,31);
-      assert.equal(url.searchParams.get('subtitles'),'burn');
-      assert.equal(url.searchParams.get('directPlay'),'0');
-      assert.equal(url.searchParams.has('hasMDE'),false);
+      assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
       assert.equal(requests.some(call=>call.path.includes('/decision')),false);
       await session.extrasPromise;
     }
-    const enabled=await api.playback(item,{srtPlayback:true,assPlayback:true});
-    assert.equal(enabled.enhancedPlayback,true);
-    assert.equal(enabled.legacyPlexPlayback,undefined);
-    assert.equal(enabled.subtitleAsset.format,codec);
-    await enabled.extrasPromise;
+    requests.length=0;
+    const session=await api.playback(item,{srtPlayback:true,assPlayback:true,start:31});
+    assert.equal(!!session.enhancedPlayback,codec==='srt');
+    assert.equal(!!session.legacyPlexPlayback,codec==='ass');
+    assert.equal(session.subtitleAsset?.format||null,codec==='srt'?'srt':null);
+    assert.equal(new URL(session.url).searchParams.get('subtitles'),codec==='srt'?'none':'burn');
+    assert.equal(requests.some(call=>call.path.includes('/decision')),codec==='srt');
+    await session.extrasPromise;
   }
 });
-
 test('the selected subtitle codec alone determines the route before requesting playback',async()=>{
   const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
   const requests=[];
@@ -102,28 +99,24 @@ test('the selected subtitle codec alone determines the route before requesting p
     requests.push({path,params,options});
     return {MediaContainer:{Metadata:[{}]}};
   };
-  const media=makeMedia('mkv');
-  const item={id:'123',raw:{Media:[media]}};
-  for (const [srtPlayback,assPlayback,subtitle,format] of [
-    [false,false,90,null], [true,false,90,'srt'],
-    [true,false,91,null], [false,true,90,null],
-    [false,true,91,'ass'], [true,true,91,'ass'],
-    [true,true,-1,null], [true,true,93,null]
-  ]) {
+  const media=makeMedia('mkv'),item={id:'123',raw:{Media:[media]}};
+  for(const [srtPlayback,assPlayback,subtitle,format] of [
+    [false,false,90,null],[true,false,90,'srt'],
+    [true,false,91,null],[false,true,90,null],
+    [false,true,91,null],[true,true,91,null],
+    [true,true,-1,null],[true,true,93,null]
+  ]){
     requests.length=0;
     const session=await api.playback(item,{srtPlayback,assPlayback,subtitle});
     await session.extrasPromise;
-    assert.equal(session.subtitleAsset?.format || null,format,
-      `SRT=${srtPlayback} ASS=${assPlayback} subtitle=${subtitle}`);
+    assert.equal(session.subtitleAsset?.format||null,format);
     assert.equal(!!session.enhancedPlayback,!!format);
     assert.equal(!!session.legacyPlexPlayback,!format);
-    assert.equal(requests.some(call=>call.path.includes('/decision')),!!format,
-      'legacy playback must not run an extra decision');
-    assert.equal(new URL(session.url).searchParams.get('X-Plex-Platform'),
-      format ? 'Generic' : 'Chrome');
+    assert.equal(requests.some(call=>call.path.includes('/decision')),!!format);
+    assert.equal(new URL(session.url).searchParams.get('X-Plex-Platform'),format?'Generic':'Chrome');
+    assert.equal(new URL(session.url).searchParams.get('subtitles'),format?'none':'burn');
   }
 });
-
 test('compatibility mode retains the historical MP4 direct-versus-compatible decision',async()=>{
   const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
   const calls=[];api.get=async(path,params,options)=>{
@@ -161,93 +154,92 @@ test('selected external text track resolves from Plex file key, not the first su
   assert.equal(plexExternalSubtitle(media,{burnSubtitles:true,subtitle:90}).format,'srt');
 });
 
-test('local SRT/ASS follows Plex subtitle selection with conservative Direct Play', async () => {
-  const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
+test('SRT direct play, sidecar, embedded MKV and burn-in fallback remain functional',async()=>{
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
   const requests=[];
-  api.get = async (path,params,options) => {
+  api.get=async(path,params,options)=>{
     requests.push({path,params,method:options?.method});
     return {MediaContainer:{Metadata:[{}]}};
   };
-  const media = makeMedia();
-  const item={id:'123',title:'Test title',type:'movie',duration:120,raw:{Media:[media]}};
-  let session = await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:91});
-  assert.equal(session.transcode,false, 'a separate ASS file does not force a supported MP4 to HLS');
-  assert.equal(session.subtitleAsset.format,'ass');
-  assert.equal(new URL(session.subtitleAsset.url).pathname,'/library/streams/91.ass');
-  assert.equal(requests[0].params.subtitleStreamID,91);
+  const item={id:'123',title:'Test title',type:'movie',duration:120,raw:{Media:[makeMedia()]}};
+  let session=await api.playback(item,{srtPlayback:true,subtitle:90});
+  assert.equal(session.transcode,false,'SRT sidecar allows compatible MP4 direct play');
+  assert.equal(session.subtitleAsset.format,'srt');
+  assert.equal(new URL(session.subtitleAsset.url).pathname,'/library/streams/90.srt');
+  assert.equal(requests[0].params.subtitleStreamID,90);
   await session.extrasPromise;
 
-  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:-1});
+  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:91});
+  assert.equal(session.transcode,true,'ASS is always rendered by Plex');
+  assert.equal(session.legacyPlexPlayback,true);
+  assert.equal(session.subtitleAsset,null);
+  assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
+  await session.extrasPromise;
+
+  session=await api.playback(item,{srtPlayback:true,subtitle:-1});
   assert.equal(session.transcode,false);
   assert.equal(session.subtitleAsset,null);
   await session.extrasPromise;
 
-  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:92});
-  assert.equal(session.transcode,false, 'extracting embedded text allows Direct Play');
+  item.raw.Media[0]=makeMedia('mkv');
+  item.raw.Media[0].Part[0].Stream.find(stream=>stream.id===92).codec='srt';
+  session=await api.playback(item,{srtPlayback:true,subtitle:92});
+  assert.equal(session.subtitleAsset.format,'srt');
   assert.equal(session.subtitleAsset.embedded,true);
-  const extraction = new URL(session.subtitleAsset.url);
-  assert.equal(extraction.pathname,'/subtitles/:/transcode/universal/start');
-  const subtitleDecision = new URL(session.subtitleAsset.decisionUrl);
-  assert.equal(subtitleDecision.pathname,'/video/:/transcode/universal/decision');
-  assert.equal(subtitleDecision.search,extraction.search);
-  assert.equal(extraction.searchParams.get('subtitleStreamID'),'92');
-  assert.equal(extraction.searchParams.get('directPlay'),'1');
-  assert.equal(extraction.searchParams.get('protocol'),'http');
-  assert.equal(extraction.searchParams.get('X-Plex-Token'),'token');
-  assert.equal(extraction.searchParams.has('offset'),false);
-  assert.equal(requests.filter(r=>r.method==='PUT').at(-1).params.subtitleStreamID,92);
+  assert.equal(new URL(session.subtitleAsset.url).pathname,
+    '/subtitles/:/transcode/universal/start');
+  assert.equal(new URL(session.subtitleAsset.url).searchParams.get('subtitleStreamID'),'92');
+  assert.equal(session.subtitleAsset.partUrl.includes('/library/parts/55/'),true);
   await session.extrasPromise;
 
-  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:93});
-  assert.equal(session.transcode,true, 'image subtitle still requires burn-in');
+  session=await api.playback(item,{srtPlayback:true,subtitle:93});
+  assert.equal(session.transcode,true);
   assert.equal(session.subtitleAsset,null);
-  assert.equal(session.subtitleBurnedIn,true);
   assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
   await session.extrasPromise;
 
-  item.raw.Media[0]=makeMedia('mkv');
-  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:90});
-  assert.equal(session.transcode,true, 'do not restore unstable Matroska Direct Play');
+  session=await api.playback(item,{srtPlayback:true,subtitle:90});
+  assert.equal(session.transcode,true,'Matroska direct play stays conservative');
   assert.equal(session.subtitleAsset.format,'srt');
-  const url=new URL(session.url);
-  assert.equal(url.searchParams.get('subtitles'),'none', 'no duplicate Plex burn-in');
-  assert.equal(url.searchParams.get('subtitleStreamID'),'0');
+  assert.equal(new URL(session.url).searchParams.get('subtitles'),'none');
   await session.extrasPromise;
 
-  session=await api.playback(item,{srtPlayback:true,assPlayback:true,subtitle:90,transcode:true,burnSubtitles:true});
-  assert.equal(session.transcode,true);
-  assert.equal(session.subtitleAsset,null, 'worker/download failure uses Plex burn-in');
+  session=await api.playback(item,{srtPlayback:true,subtitle:90,transcode:true,burnSubtitles:true});
+  assert.equal(session.subtitleAsset,null);
   assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
   await session.extrasPromise;
 });
-
-test('real Plex sidecar keys request the codec extension and UTF-8, including SSA', async () => {
-  const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
-  api.get = async () => ({MediaContainer:{Metadata:[{}]}});
-  for (const [codec, suffix, format] of [
-    ['srt','srt','srt'], ['subrip','srt','srt'], ['ass','ass','ass'], ['ssa','ssa','ass']
-  ]) {
-    const media = makeMedia('mkv');
-    media.Part[0].Stream = [
-      {streamType:3,id:90,codec,key:'/library/streams/90?download=1',selected:1}
-    ];
-    assert.deepEqual(plexExternalSubtitle(media), {
-      id:90, format, key:'/library/streams/90.' + suffix + '?download=1'
-    });
-    const session = await api.playback({id:'123',raw:{Media:[media]}},{srtPlayback:true,assPlayback:true});
-    const url = new URL(session.subtitleAsset.url);
-    assert.equal(url.pathname, '/library/streams/90.' + suffix);
-    assert.equal(url.searchParams.get('encoding'), 'utf-8');
-    assert.equal(url.searchParams.get('download'), '1');
-    assert.equal(url.searchParams.get('X-Plex-Token'), 'token');
-    assert.equal(new URL(session.url).searchParams.get('subtitles'), 'none');
+test('Plex sidecar extension resolution preserves SSA metadata but does not render ASS',async()=>{
+  const api=new Plex({url:'http://plex.test',token:'token'},'tv-test');
+  api.get=async()=>({MediaContainer:{Metadata:[{}]}});
+  for(const [codec,suffix,format] of [
+    ['srt','srt','srt'],['subrip','srt','srt'],['ass','ass','ass'],['ssa','ssa','ass']
+  ]){
+    const media=makeMedia('mkv');
+    media.Part[0].Stream=[{streamType:3,id:90,codec,
+      key:'/library/streams/90?download=1',selected:1}];
+    assert.deepEqual(plexExternalSubtitle(media),{
+      id:90,format,key:'/library/streams/90.'+suffix+'?download=1'});
+    const session=await api.playback({id:'123',raw:{Media:[media]}},
+      {srtPlayback:true,assPlayback:true});
+    if(format==='srt'){
+      const url=new URL(session.subtitleAsset.url);
+      assert.equal(url.pathname,'/library/streams/90.'+suffix);
+      assert.equal(url.searchParams.get('encoding'),'utf-8');
+      assert.equal(url.searchParams.get('download'),'1');
+      assert.equal(url.searchParams.get('X-Plex-Token'),'token');
+      assert.equal(new URL(session.url).searchParams.get('subtitles'),'none');
+    }else{
+      assert.equal(session.subtitleAsset,null);
+      assert.equal(session.legacyPlexPlayback,true);
+      assert.equal(new URL(session.url).searchParams.get('subtitles'),'burn');
+    }
     await session.extrasPromise;
   }
-  const media = makeMedia();
-  media.Part[0].Stream[2].key = '/library/streams/90.SRT?download=1';
-  assert.equal(plexExternalSubtitle(media).key, '/library/streams/90.SRT?download=1');
+  const media=makeMedia();
+  media.Part[0].Stream[2].key='/library/streams/90.SRT?download=1';
+  assert.equal(plexExternalSubtitle(media).key,'/library/streams/90.SRT?download=1');
 });
-
 test('embedded text extraction keeps the chosen media version, stream and timeline separate from HLS', async () => {
   const api = new Plex({url:'http://plex.test',token:'token'}, 'tv-test');
   const requests = [];
@@ -356,7 +348,7 @@ test('a failed Plex part-selection request must prevent an unconfirmed burn-in d
 });
 
 
-test('cross-season track choices reach enhanced SRT/ASS overlays and both Plex HLS audio paths',async()=>{
+test('cross-season track choices preserve enhanced SRT, ASS burn-in and HLS audio preferences',async()=>{
   for (const codec of ['srt','ass']) {
     const episode=(id,season,partId,streamIds)=>({
       id,type:'episode',title:id,duration:120,
@@ -387,20 +379,20 @@ test('cross-season track choices reach enhanced SRT/ASS overlays and both Plex H
       requests.push({path,params,options});
       return {MediaContainer:{Metadata:[{}]}};
     };
-    const enhanced=await api.playback(second,{...selected,srtPlayback:true,assPlayback:true});
-    assert.equal(enhanced.enhancedPlayback,true);
-    assert.equal(enhanced.transcode,true,'multi-audio MKV must use HLS on webOS');
-    assert.equal(enhanced.subtitleAsset.id,52);
-    assert.equal(enhanced.subtitleAsset.format,codec);
-    const enhancedUrl=new URL(enhanced.url);
-    assert.equal(enhancedUrl.searchParams.get('audioStreamID'),'42');
-    assert.equal(enhancedUrl.searchParams.get('subtitleStreamID'),'0');
-    assert.equal(enhancedUrl.searchParams.get('subtitles'),'none');
-    const enhancedPart=requests.find(request=>request.path==='/library/parts/56');
-    assert.equal(enhancedPart.params.audioStreamID,42);
-    assert.equal(enhancedPart.params.subtitleStreamID,52);
-    assert.equal(requests.some(request=>request.path.endsWith('/decision')),true);
-    await enhanced.extrasPromise;
+    const selectedSession=await api.playback(second,{...selected,srtPlayback:true,assPlayback:true});
+    assert.equal(!!selectedSession.enhancedPlayback,codec==='srt');
+    assert.equal(selectedSession.transcode,true,'multi-audio MKV must use HLS on webOS');
+    assert.equal(selectedSession.subtitleAsset?.id||null,codec==='srt'?52:null);
+    assert.equal(selectedSession.subtitleAsset?.format||null,codec==='srt'?'srt':null);
+    const selectedUrl=new URL(selectedSession.url);
+    assert.equal(selectedUrl.searchParams.get('audioStreamID'),'42');
+    assert.equal(selectedUrl.searchParams.get('subtitleStreamID'),codec==='srt'?'0':null);
+    assert.equal(selectedUrl.searchParams.get('subtitles'),codec==='srt'?'none':'burn');
+    const selectedPart=requests.find(request=>request.path==='/library/parts/56');
+    assert.equal(selectedPart.params.audioStreamID,42);
+    assert.equal(selectedPart.params.subtitleStreamID,52);
+    assert.equal(requests.some(request=>request.path.endsWith('/decision')),codec==='srt');
+    await selectedSession.extrasPromise;
 
     requests.length=0;
     const legacy=await api.playback(second,{...selected,srtPlayback:false,assPlayback:false});

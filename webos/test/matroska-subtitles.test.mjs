@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {assFixture, srtFixture} from './fixtures/matroska.cjs';
+import {srtFixture} from './fixtures/matroska.cjs';
 import {extractMatroskaSubtitle} from '../src/matroska-subtitles.js';
 
 const movie = await readFile(new URL('./fixtures/embedded-subtitles.mkv', import.meta.url));
@@ -23,7 +23,7 @@ function serveRanges(t, source = movie, beforeRead = () => {}) {
   return requests;
 }
 
-test('extracts actual indexed SRT and ASS blocks with full-title times and style intact', async t => {
+test('extracts indexed SRT blocks with correct times without reading full movie', async t => {
   const requests = serveRanges(t);
   const signal = new AbortController().signal;
   const srt = await extractMatroskaSubtitle({...asset,streamIndex:2,format:'srt'}, signal);
@@ -33,10 +33,6 @@ test('extracts actual indexed SRT and ASS blocks with full-title times and style
   assert.ok(requests.some(range => range.start > movie.length * 0.9), 'read the tail index');
   assert.ok(requests.reduce((sum,range) => sum + range.end - range.start, 0) < movie.length,
     'do not fetch all the audio and video blocks');
-  const ass = await extractMatroskaSubtitle({...asset,streamIndex:3,format:'ass'}, signal);
-  assert.match(ass, /^\[V4\+ Styles\]/m);
-  assert.match(ass, /Dialogue: 0,0:00:03\.00,0:00:05\.00,Default,,0,0,0,,\{\\pos\(300,75\)\}Embedded ASS/);
-  assert.doesNotMatch(ass, /Embedded SRT/);
 });
 
 test('MKV diagnostics are completely inactive without a timing callback', async t => {
@@ -57,70 +53,6 @@ test('opt-in MKV diagnostics report range, index and completion times', async t 
   assert.equal(timings.filter(([event])=>event==='index').length,1);
   assert.equal(timings.filter(([event])=>event==='complete').length,1);
   assert.ok(timings.every(([,ms])=>Number.isFinite(ms) && ms>=0));
-});
-
-test('reads compressed MKV ASS without relative cue offsets or a stored Events section', async t => {
-  const {source, firstCluster} = assFixture();
-  let release;
-  let sawPreview;
-  const pending = new Promise(resolve => { release = resolve; });
-  const preview = new Promise(resolve => { sawPreview = resolve; });
-  serveRanges(t, source, start => start === firstCluster ? pending : undefined);
-  const reading = extractMatroskaSubtitle({...asset,partSize:source.length,streamIndex:0,format:'ass'},
-    new AbortController().signal, {position:160, preview:sawPreview});
-  // Playback can already present the resumed cue while early distant clusters
-  // are still waiting on the server.
-  try {
-    const firstCaptions = await Promise.race([preview, reading.then(() => '')]);
-    assert.match(firstCaptions, /\[Events\]\nFormat: Layer, Start, End/);
-    assert.match(firstCaptions, /0:02:40\.01,0:02:41\.01,Default,,0,0,0,,Subtitle 16/);
-    assert.doesNotMatch(firstCaptions, /Subtitle 0\b/);
-  } finally {
-    release();
-  }
-  assert.match(await reading, /0:00:00\.01,0:00:01\.01,Default,,0,0,0,,Subtitle 0/);
-});
-
-test('reuses same-series ASS font attachments instead of downloading their bytes again', async t => {
-  const font = Buffer.alloc(8192, 0x41);
-  const {source} = assFixture(6000, 'ass', font);
-  const requests = serveRanges(t, source);
-  const selected = {...asset,partSize:source.length,streamIndex:0,format:'ass',fontScope:'plex:series-725'};
-  let loaded;
-  const read = () => extractMatroskaSubtitle(selected,new AbortController().signal,
-    {onFonts:fonts => {loaded = fonts;}});
-  await read();
-  assert.equal(loaded[0].bytes.length,font.length);
-  const firstReadCount = requests.filter(range => range.end - range.start === font.length).length;
-  assert.equal(firstReadCount,1,'the initial episode must read the embedded font once');
-  await read();
-  assert.equal(requests.filter(range => range.end - range.start === font.length).length,1,
-    'a sibling episode with the same font identity must reuse the cached bytes');
-  assert.deepEqual(Buffer.from(loaded[0].bytes),font);
-});
-
-test('same-sized updated ASS fonts are fetched instead of using stale cached glyphs', async t => {
-  const a=assFixture(6000,'ass',Buffer.alloc(8192,0x11));
-  const b=assFixture(6000,'ass',Buffer.alloc(8192,0x22));
-  let source=a.source;
-  let fullFontReads=0;
-  t.mock.method(globalThis,'fetch',async (url,options)=>{
-    assert.equal(url,asset.partUrl);
-    const [,begin,last]=/^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
-    const start=Number(begin),end=Math.min(Number(last)+1,source.length);
-    if (end-start === 8192) fullFontReads++;
-    return new Response(source.subarray(start,end),{status:206,
-      headers:{'Content-Range':`bytes ${start}-${end-1}/${source.length}`}});
-  });
-  let fonts;
-  const read=()=>extractMatroskaSubtitle({...asset,partSize:source.length,
-    streamIndex:0,format:'ass',fontScope:'plex:series-updated'},
-  new AbortController().signal,{onFonts:value=>{fonts=value;}});
-  await read();
-  source=b.source;
-  await read();
-  assert.equal(fullFontReads,2,'the changed attachment must be read in full');
-  assert.equal(fonts[0].bytes[0],0x22,'the new glyph data must replace the stale cache entry');
 });
 
 test('embedded SRT previews the resume cue before reading distant clusters', async t => {
@@ -234,35 +166,5 @@ test('webOS requests one MKV range at a time and cancels the network transfer', 
   await assert.rejects(reading,{name:'AbortError'});
   assert.equal(aborted,3);
   assert.equal(active,0);
-  source=assFixture(6000,'ass',Buffer.alloc(8192,0x51)).source;
-  mode='partial';
-  let fonts;
-  assert.match(await extractMatroskaSubtitle({...asset,partSize:source.length,
-    streamIndex:0,format:'ass',fontScope:'native:series'},new AbortController().signal,
-  {onFonts:value=>{fonts=value;}}),/Dialogue:.*한/);
-  assert.equal(fonts[0].bytes.length,8192);
-  assert.equal(maximum,1,'font and subtitle XHRs must share the same native request queue');
 });
 
-test('a failed MKV font read cannot publish a fontless ASS track',async t=>{
-  const font=Buffer.alloc(8192,0x55);
-  const {source}=assFixture(6000,'ass',font);
-  const fontOffset=source.indexOf(font);
-  assert.ok(fontOffset>0);
-  let fail=true;
-  serveRanges(t,source,start=>{
-    if (fail && start===fontOffset) throw new Error('temporary Plex font range failure');
-  });
-  const selected={...asset,partSize:source.length,streamIndex:0,format:'ass',
-    fontScope:'plex:font-recovery-fixture'};
-  let published;
-  await assert.rejects(extractMatroskaSubtitle(selected,new AbortController().signal,
-    {onFonts:fonts=>{published=fonts;}}),/temporary Plex font range failure/);
-  assert.equal(published,undefined,'a failed font fetch must not publish an empty manifest');
-  fail=false;
-  const script=await extractMatroskaSubtitle(selected,new AbortController().signal,
-    {onFonts:fonts=>{published=fonts;}});
-  assert.match(script,/\[Events\]/);
-  assert.equal(published.length,1);
-  assert.deepEqual(Buffer.from(published[0].bytes),font);
-});

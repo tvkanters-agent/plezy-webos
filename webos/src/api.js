@@ -102,8 +102,7 @@ function plexTextSubtitle(stream) {
 function enabledLocalSubtitle(media, options) {
   if (options.burnSubtitles) return null;
   const subtitle = plexTextSubtitle(selectedPlexSubtitle(media, options));
-  return subtitle && (subtitle.format === 'srt' && options.srtPlayback === true ||
-    subtitle.format === 'ass' && options.assPlayback === true) ? subtitle : null;
+  return subtitle?.format === 'srt' && options.srtPlayback === true ? subtitle : null;
 }
 
 export function plexExternalSubtitle(media, options = {}) {
@@ -587,8 +586,8 @@ export class Plex {
       ...mediaSourceTracks(item, mediaIndex),
       options};
   }
-  // Pure URL construction: switching between enabled text tracks needs only
-  // a replacement overlay, never a new video transcode/decoder session.
+  // Enhanced SRT changes only the overlay; ASS/SSA requires Plex burn-in
+  // and a new decoder stream.
   localSubtitleAsset(item, options = {}) {
     const media = (item.raw.Media || [])[options.mediaIndex ?? 0];
     const part = media?.Part?.[0];
@@ -615,12 +614,6 @@ export class Plex {
         asset.partUrl = this.url(part.key);
         asset.partSize = part.size;
         asset.streamIndex = selectedPlexSubtitle(media, options).index;
-        // Stable across token/URL changes, but distinct for media revisions
-        // and different embedded streams. Never persist authentication URLs.
-        asset.partCacheKey = this.server.id + ':' + part.id + ':' + part.size + ':' + asset.streamIndex;
-        // A series' similarly named fonts can be reused across episodes.
-        asset.fontScope = this.server.id + ':' +
-          (item.raw.grandparentRatingKey || item.raw.parentRatingKey || item.id);
       }
     }
     const aspect = Number(media.aspectRatio) || Number(media.width) / Number(media.height);

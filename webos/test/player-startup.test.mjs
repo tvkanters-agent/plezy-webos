@@ -29,36 +29,6 @@ test('paused reopen needs one decoded frame while a resume target stays gated',(
   player.checkStartupProgress();assert.notEqual(player.startupComplete,true);
   player.initialSeekPending=false;player.checkStartupProgress();assert.equal(player.startupComplete,true);
 });
-test('initial-resume ASS prewarm starts the cache before native frames but gates uncached range reads',async()=>{
-  const session={subtitleAsset:{format:'ass',partUrl:'http://plex.test/episode.mkv'}};
-  const seen=[];
-  const player=Object.assign(Object.create(Player.prototype),{
-    session,generation:8,enhancedPlaybackActive:true,options:{},
-    initialSeekPending:true,initialSeekTarget:125,pendingStart:0,
-    subtitleSyncOffsetMs:0,video:{currentTime:0},
-    subtitleOverlay:{load:async(asset,offset,position,timing,networkReady)=>{
-      seen.push({stage:'cache',asset,position,networkReady});
-      await networkReady;
-      seen.push({stage:'network'});
-    }}
-  });
-  player.startEmbeddedAssPreload(session,8);
-  assert.equal(seen.length,1,'persistent ASS/cache work begins while initial seek is pending');
-  assert.equal(seen[0].position,125,'the initial cache preview targets the resume position');
-  assert.equal(seen[0].asset,session.subtitleAsset);
-  player.scheduleEmbeddedSubtitle();
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(seen.length,1,'no MKV range request before the video resumes');
-  player.initialSeekPending=false;
-  player.video.currentTime=125;
-  player.scheduleEmbeddedSubtitle();
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(seen.length,2,'decoder readiness releases only the MKV network stage');
-  assert.equal(player.assSubtitleNetworkGate,null);
-  player.scheduleEmbeddedSubtitle();
-  assert.equal(seen.length,2,'the same subtitle is not reloaded');
-});
-
 test('an active LG decoder schedules MKV subtitles before the later clock gate, only once', t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const session={subtitleAsset:{partUrl:'http://plex.test/movie.mkv'}};
@@ -101,39 +71,41 @@ test('early MKV subtitle reads do not bypass resume seeks or compatibility playb
   // The first decoded frame also exists on an intentionally paused reopen.
   // Don't depend on another 'playing' event that may never arrive.
   player.options.skipMatroskaSubtitles=false;player.pauseAfterOpen=true;
-  player.session.subtitleAsset.format='ass';
-  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(0);
-  assert.equal(reads,1,'ASS starts on the first frame without a 200ms deferral');
+  player.session.subtitleAsset.format='srt';
+  player.scheduleEmbeddedSubtitle();t.mock.timers.tick(199);
+  assert.equal(reads,0,'embedded SRT waits for its short decoder-readiness delay');
+  t.mock.timers.tick(1);
+  assert.equal(reads,1,'embedded SRT starts once after resume');
 });
-test('switching enabled SRT and ASS replaces only the overlay; burn-in requires reopening',()=>{
+test('switching enhanced SRT tracks or Off reuses video; ASS requires Plex burn-in',()=>{
   const api=new Plex({url:'http://plex.test',token:'fixture'},'tv');
   const media={container:'mkv',Part:[{id:55,key:'/library/parts/55/file.mkv',Stream:[
     {streamType:3,id:90,codec:'srt',selected:1},
+    {streamType:3,id:92,codec:'srt',selected:0},
     {streamType:3,id:91,codec:'ass',selected:0}
   ]}]};
   const item={id:'movie',raw:{Media:[media]}};
   const session={enhancedPlayback:true,subtitleAsset:{id:90,format:'srt'},subtitleBurnedIn:false,
-    subtitles:[{id:90,selected:true},{id:91,selected:false}]};
-  const prefs={srtPlayback:true,assPlayback:true};
-  let clears=0,reads=0,reloads=0;
+    subtitles:[{id:90,selected:true},{id:92,selected:false},{id:91,selected:false}]};
+  let clears=0,reads=0;
   const player=Object.assign(Object.create(Player.prototype),{
     api,item,session,options:{},closing:false,generation:1,
-    subtitleOverlay:{clear(){clears++;}},preferences:()=>prefs,
-    scheduleEmbeddedSubtitle(){reads++;},updateSubtitleSyncControls(){},
-    reopen(){reloads++;}
+    subtitleOverlay:{clear(){clears++;}},preferences:()=>({srtPlayback:true,assPlayback:true}),
+    scheduleEmbeddedSubtitle(){reads++;},updateSubtitleSyncControls(){}
   });
-  assert.equal(player.switchLocalSubtitle(91),true);
-  assert.equal(player.session,session);
-  assert.equal(session.subtitleAsset.format,'ass');
-  assert.equal(player.options.subtitle,91);
-  assert.deepEqual([clears,reads,reloads],[1,1,0]);
-  prefs.assPlayback=false;
-  assert.equal(player.switchLocalSubtitle(91),false,'disabled ASS must use Plex burn-in');
-  assert.deepEqual([clears,reads,reloads],[1,1,0]);
-  assert.equal(player.switchLocalSubtitle(90),true,'enabled SRT can replace ASS without reopening');
-  assert.equal(player.switchLocalSubtitle(-1),true,'turning subtitles off needs no video reload');
+  assert.equal(player.switchLocalSubtitle(92),true);
+  assert.equal(session.subtitleAsset.format,'srt');
+  assert.equal(player.options.subtitle,92);
+  assert.deepEqual([clears,reads],[1,1]);
+  assert.equal(player.switchLocalSubtitle(91),false,
+    'even a stale saved ASS setting cannot bypass Plex burn-in');
+  assert.deepEqual([clears,reads],[1,1],
+    'switching to burn-in must not disturb the current stream before reopen');
+  assert.equal(player.switchLocalSubtitle(-1),true,'turning subtitles off needs no reload');
   assert.equal(session.subtitleAsset,null);
-  assert.deepEqual([clears,reads,reloads],[3,2,0]);
+  assert.equal(player.switchLocalSubtitle(90),true,'switching Off back to SRT needs no reload');
+  assert.equal(session.subtitleAsset.format,'srt');
+  assert.deepEqual([clears,reads],[3,2]);
 });
 test('Play rejection without a media error invokes recovery, while autoplay denial waits for a gesture',async()=>{
   for(const name of ['NotSupportedError','NotAllowedError','AbortError']) {
@@ -369,7 +341,7 @@ test('a hung Plex timeline cannot indefinitely block release and native fallback
 test('a dimensionless LG video with a known first frame can finish subtitle startup',t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const player=Object.assign(Object.create(Player.prototype),{
-    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv',format:'ass'}},
+    session:{subtitleAsset:{partUrl:'http://plex.test/part.mkv',format:'srt'}},
     video:{videoWidth:0,webkitDecodedFrameCount:0,currentTime:0,readyState:2},
     initialSeekTarget:0,initialSeekPending:false,pendingStart:0,hasFirstFrame:true,
     openIntentPlaying:false,enhancedPlaybackActive:true,options:{},
@@ -378,8 +350,10 @@ test('a dimensionless LG video with a known first frame can finish subtitle star
   });
   player.checkStartupProgress();
   assert.equal(player.startupComplete,true);
-  t.mock.timers.tick(0);
-  assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
+  t.mock.timers.tick(199);
+  assert.equal(player.loaded,undefined,'SRT range requests wait for decoder-readiness delay');
+  t.mock.timers.tick(1);
+  assert.equal(player.loaded,true,'dimensionless native decoders still load SRT');
 });
 
 test('burn-in resume waits for a frame at the target before loading seek thumbnails once',()=>{
