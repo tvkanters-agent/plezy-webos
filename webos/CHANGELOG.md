@@ -1,3 +1,9 @@
+## 1.22.26 — Preserve queued webOS releases on consecutive merges
+
+- Isolate every master workflow run in its own concurrency group so rapid merges cannot discard a pending version's validation and publication.
+- Continue cancelling superseded pull-request runs, and retain the full master release QA gate.
+- Add a regression guard for workflow concurrency and release prerequisites.
+
 ## 1.22.25 — Fix replay after stopping a native HLS resume
 
 - Retire the LG video element when Stop interrupts HLS startup so replay opens with a fresh decoder.

@@ -11,7 +11,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: webos-${{ github.event.pull_request.number || github.ref }}
+  # PRs share a group to supersede outdated revisions. Each other run gets
+  # its own group: GitHub only retains ONE pending run per concurrency group,
+  # even with cancel-in-progress: false. A shared master group can skip releases.
+  group: webos-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   # Never interrupt a master build or release; cancel obsolete PR revisions.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
