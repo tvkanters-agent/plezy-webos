@@ -49,6 +49,26 @@ async function mockServer(page,{saved=true,failed=false}={}){
     await route.fulfill({json:data});
   });return calls;
 }
+async function mockDelayedPlexHome(page) {
+  await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',name:'Plex test',url:'http://plex.test',token:'test-token'}]
+  })));
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  let requests = 0, fulfilled = 0;
+  await page.route('http://plex.test/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/hubs') {
+      requests++;
+      await pending;
+      await route.fulfill({json:{MediaContainer:{Hub:[{title:'Continue watching',
+        Metadata:[{ratingKey:'delayed-film',title:'Loaded Home Film',type:'movie'}]}]}}});
+      fulfilled++;
+    } else await route.fulfill({json:{MediaContainer:{Metadata:[],Directory:[]}}});
+  });
+  return {release, requests:() => requests, fulfilled:() => fulfilled};
+}
 async function mockPlexEpisodeWatch(page) {
   await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
     deviceId:'device', active:'plex', servers:[{
@@ -171,6 +191,63 @@ test('slow library loading fades the first grid without re-fading back navigatio
   await expect(page.getByRole('heading',{name:'Movies',exact:true})).toBeVisible();
   await expect(page.locator('main .grid')).not.toHaveClass(/content-enter/);
   await expect(page.locator('main .grid .card')).toHaveCount(1);
+});
+for (const returnBeforeResponse of [false, true]) {
+  test('leaving Home while loading restores its shelves when returning ' +
+    (returnBeforeResponse ? 'before' : 'after') + ' the response', async ({page}) => {
+    const home = await mockDelayedPlexHome(page);
+    await page.goto('/');
+    await expect(page.getByRole('heading',{name:'Your next watch'})).toBeVisible();
+    await expect.poll(home.requests).toBe(1);
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
+    if (!returnBeforeResponse) {
+      home.release();
+      await expect.poll(home.fulfilled).toBe(1);
+      // Allow the original Home continuation to observe its invalid revision.
+      await page.waitForTimeout(100);
+    }
+    await page.getByRole('button',{name:'Home',exact:true}).click();
+    if (returnBeforeResponse) home.release();
+    await expect(page.getByRole('button',{name:'Loaded Home Film',exact:true})).toBeVisible();
+    expect(home.requests()).toBe(1);
+    // A second Home selection must not keep the incomplete heading snapshot.
+    await page.getByRole('button',{name:'Home',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Loaded Home Film',exact:true})).toBeVisible();
+    expect(home.requests()).toBe(1);
+  });
+}
+
+test('completed Home tab snapshots retain vertical and horizontal scroll', async ({page}) => {
+  await page.addInitScript(() => localStorage.setItem('plezy.webos', JSON.stringify({
+    deviceId:'device',active:'plex',quality:'auto',
+    servers:[{id:'plex',kind:'plex',name:'Plex test',url:'http://plex.test',token:'test-token'}]
+  })));
+  const hubs = Array.from({length:8},(_,row)=>({title:'Shelf '+row,
+    Metadata:Array.from({length:15},(_,i)=>({ratingKey:row+'-'+i,title:'Film '+row+'-'+i,type:'movie'}))}));
+  await page.route('http://plex.test/**',route => route.fulfill({
+    json:new URL(route.request().url()).pathname === '/hubs'
+      ? {MediaContainer:{Hub:hubs}} : {MediaContainer:{Metadata:[],Directory:[]}}
+  }));
+  await page.goto('/');
+  await expect(page.locator('#main .shelf')).toHaveCount(8);
+  const before = await page.evaluate(() => {
+    const pane = document.querySelector('#main'), row = pane.querySelector('.shelf .cards');
+    pane.scrollTop = 350;
+    row.scrollLeft = 400;
+    return {vertical:pane.scrollTop,horizontal:row.scrollLeft};
+  });
+  expect(before.vertical).toBeGreaterThan(0);
+  expect(before.horizontal).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(page.locator('#main .shelf')).toHaveCount(8);
+  // Focus restoration runs in requestAnimationFrame; check the settled view.
+  await expect.poll(() => page.evaluate(() => ({
+    vertical:document.querySelector('#main').scrollTop,
+    horizontal:document.querySelector('#main .shelf .cards').scrollLeft
+  }))).toEqual(before);
 });
 test('slow home shelves fade in together instead of popping in',async({page})=>{
   await mockServer(page);

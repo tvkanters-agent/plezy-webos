@@ -40,6 +40,8 @@ let playbackLaunch = 0;
 // Sidebar destinations are persistent tabs, not pushed navigator routes.
 // Bounded detached DOM snapshots keep returning to a library instantaneous.
 const rootSnapshots = new Map();
+// A Home heading is not a reusable tab until the asynchronous shelves paint.
+let homeRenderedRevision = null;
 let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = null;
 let settingsDialogReturnFocus = null;
 let episodeTrackReturnFocus = null;
@@ -773,11 +775,14 @@ function capturePage(previousPaneFocus = null) {
   main.querySelectorAll('.content-enter').forEach(node => node.classList.remove('content-enter'));
   while (main.firstChild) snapshot.appendChild(main.firstChild);
   return {route:{...route,scroll,focus:focused,shelfScrolls},snapshot,sourceApi:api,alphabet,
+    homeComplete:route.type === 'home' && homeRenderedRevision === revision,
     catalogGeneration:catalogCache.generation};
 }
 function cacheRootPage(entry) {
   if (!entry || !entry.snapshot || !entry.snapshot.childNodes.length ||
-      entry.sourceApi !== api) { releaseSnapshot(entry); return; }
+      entry.sourceApi !== api || (entry.route.type === 'home' && !entry.homeComplete)) {
+    releaseSnapshot(entry); return;
+  }
   const key = rootKey(entry.route);
   if (!key) { releaseSnapshot(entry); return; }
   releaseSnapshot(rootSnapshots.get(key));
@@ -796,7 +801,8 @@ function takeRootPage(key) {
   if (!entry) return null;
   // Playback and watch-state updates invalidate Home's session-only shelves.
   if (entry.sourceApi !== api || !entry.snapshot.childNodes.length ||
-      (key === 'home' && entry.catalogGeneration !== catalogCache.generation)) {
+      (key === 'home' && (!entry.homeComplete ||
+        entry.catalogGeneration !== catalogCache.generation))) {
     releaseSnapshot(entry);
     return null;
   }
@@ -854,6 +860,7 @@ function restoreRootPage(entry) {
   enterPaneAfterNavigation = false;
   route = entry.route;
   const mountedRevision = ++revision;
+  if (route.type === 'home') homeRenderedRevision = mountedRevision;
   pendingRailEntryRevision = null;
   lastRailRightRevision = null;
   cancelAuth(); detailMenu = null;
@@ -861,9 +868,13 @@ function restoreRootPage(entry) {
   main.textContent = '';
   main.appendChild(entry.snapshot);
   updateDetailTrackStatus = null;
-  main.scrollTop = route.scroll || 0;
-  restoreShelfScrolls(route.shelfScrolls);
+  main.classList.toggle('settings-view', route.type === 'settings' || route.type === 'settings-page');
   main.classList.toggle('has-alpha-bar', !!entry.alphabet);
+  const restoreOffsets = () => {
+    main.scrollTop = entry.route.scroll || 0;
+    restoreShelfScrolls(entry.route.shelfScrolls);
+  };
+  restoreOffsets();
   navigation();
   const libraryTabs = main.querySelector('.library-tabs');
   if (libraryTabs && libraryTabs._resumeLibraryView)
@@ -877,6 +888,11 @@ function restoreRootPage(entry) {
     node => node.dataset.focus === route.focus);
   if (focused) focusWithoutJump(focused, false);
   else focusFirst(main, fromRail ? preferredPaneControl() : null, fromRail);
+  // focusFirst is deferred by a frame. Restore offsets after its focus change
+  // too, so Chromium cannot pull a cached Home shelf or pane back to the top.
+  requestAnimationFrame(() => {
+    if (revision === mountedRevision) restoreOffsets();
+  });
   schedulePosters();
   revalidateRestoredLibrary(route, mountedRevision);
 }
@@ -929,17 +945,25 @@ async function go(next, remember = true) {
     history.find(entry => rootKey(entry.route) === destinationKey));
   const usableRoot = readyRoot && readyRoot.sourceApi === sourceApi &&
     readyRoot.snapshot && readyRoot.snapshot.childNodes.length &&
-    (destinationKey !== 'home' || readyRoot.catalogGeneration === catalogCache.generation);
+    (destinationKey !== 'home' || readyRoot.homeComplete &&
+      readyRoot.catalogGeneration === catalogCache.generation);
   if (!usableRoot) {
     try { await prepareNavigation(next, sourceApi); } catch (_) { /* Cache is optional. */ }
   }
   if (intent !== navigationIntent || sourceApi !== api) return;
 
-  // Re-selecting an active sidebar destination leaves its view untouched.
-  if ((next.type === 'home' && route.type === 'home' &&
-       catalogCache.peek('home', {allowExpired:true})) ||
-      (rootKey(next) && rootKey(next) === rootKey(route) && !['home','library'].includes(next.type) && !next.forceRefresh))
+  // Home can have cached API results while its previous render was canceled.
+  // Re-select an incomplete Home without pushing a duplicate Back entry.
+  if (next.type === 'home' && route.type === 'home') {
+    if (!next.forceRefresh && homeRenderedRevision === revision &&
+        catalogCache.peek('home', {allowExpired:true})) return;
+    route = next;
+    render();
     return;
+  }
+  // Re-selecting other active sidebar destinations leaves their views intact.
+  if (rootKey(next) && rootKey(next) === rootKey(route) &&
+      !['home','library'].includes(next.type) && !next.forceRefresh) return;
   if (next.type === 'library' && route.type === 'library' &&
       next.library.id === route.library.id && (next.view || 'browse') === (route.view || 'browse') &&
       (next.sort || 'title') === (route.sort || 'title') &&
@@ -1000,8 +1024,10 @@ function back() {
     const previous = history.pop();
     route = previous.route || previous;
     if (previous.snapshot && previous.sourceApi === api && previous.snapshot.childNodes.length &&
-        (route.type !== 'home' || previous.catalogGeneration === catalogCache.generation)) {
+        (route.type !== 'home' || previous.homeComplete &&
+          previous.catalogGeneration === catalogCache.generation)) {
       ++revision;
+      if (route.type === 'home') homeRenderedRevision = revision;
       cancelAuth();
       main.querySelector('.detail')?._disposeDetail?.();
       main.textContent = '';
@@ -1669,6 +1695,8 @@ async function render(prepared = null) {
         main.append(fadeDelayedContent(empty, contentStartedAt));
       }
       rows.forEach(row => { const section = el('section', undefined, 'shelf'); section.append(el('h2', row.title), cards(row.items)); main.append(fadeDelayedContent(section, contentStartedAt)); });
+      // Empty-state content is a completed render too; a heading alone is not.
+      homeRenderedRevision = currentRevision;
     } else if (route.type === 'libraries') {
       title('Libraries', activeServer().name);
       const contentStartedAt = beginContentEntrance();
