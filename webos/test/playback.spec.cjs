@@ -308,10 +308,12 @@ test('previous and next chapter controls use the same traversal as Plezy',async(
   await expect(prev).toBeVisible();
   await next.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
-  await page.locator('video').evaluate(video=>{video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
+  // Seeks now resume automatically, so freeze the clock before checking the
+  // exact three-second chapter restart threshold.
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
   await prev.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(1);
-  await page.locator('video').evaluate(video=>{video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
   await prev.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
 });
