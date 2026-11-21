@@ -1264,10 +1264,13 @@ export class Player {
     if (!this.session) return;
     // A Pause command during a seek is an explicit veto, even when the
     // decoder was already paused before the preview started.
-    const pause = this.seeking || this.remoteSeeking ||
-      this.resumeAfterSeekTarget != null || !this.video.paused;
+    const seekInFlight = this.seeking || this.remoteSeeking ||
+      this.resumeAfterSeekTarget != null;
+    const pause = seekInFlight || !this.video.paused;
     this.openIntentPlaying = !pause;
-    this.pauseAfterOpen = false;
+    // Some LG decoders deliver a late playing event after pause() cancels
+    // an unresolved Play request. Reassert Pause once if that happens.
+    this.pauseAfterOpen = pause && seekInFlight;
     this.clearResumeAfterSeek();
     this.seekWasPlaying = false;
     this.cancelRemoteSeek();
@@ -1537,7 +1540,12 @@ export class Player {
     // seeks started from Pause. Only an explicit pause/override vetoes it.
     const shouldResume = resumePlayback !== false;
     this.clearResumeAfterSeek();
-    if (shouldResume) this.queueResumeAfterSeek(target);
+    if (shouldResume) {
+      // A new confirmed seek supersedes any earlier explicit Pause latch.
+      this.openIntentPlaying = true;
+      this.pauseAfterOpen = false;
+      this.queueResumeAfterSeek(target);
+    }
     if (fromSkipMarker) this.hideAfterSeek = false;
     if (!fromSkipMarker) this.skippedMarker = null;
     // The hardware media clock can remain at its previous timestamp for
