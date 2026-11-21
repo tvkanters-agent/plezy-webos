@@ -1,3 +1,9 @@
+## 1.22.19 — Reconcile Resume after asynchronous Stop
+
+- Keep Stop and decoder cleanup immediate while waiting separately for the final playback report to settle before refreshing the mounted detail metadata.
+- Prevent old report/metadata results from overwriting newer playback sessions, navigation state, or saved detail snapshots.
+- Verify delayed and failed progress reporting plus saved Resume updates with unit and browser regressions.
+
 ## 1.22.18 — Parallel, scoped webOS CI
 
 - Parallelize unit, bundle/IPK and two browser E2E shards while preserving the final QA gate.
