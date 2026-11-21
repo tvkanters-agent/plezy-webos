@@ -3,6 +3,85 @@ import assert from 'node:assert/strict';
 import {Player} from '../src/player.js';
 import {Plex} from '../src/api.js';
 
+
+
+test('Stop during pending playback negotiation retires the stale session before replay',async()=>{
+  let resolveFirst,resolveOldStop,oldStops=0,starts=0;
+  const api={
+    playback(){starts++;if(starts===1)return new Promise(resolve=>{resolveFirst=resolve;});
+      throw new Error('second open reached negotiation');},
+    stop(){oldStops++;return new Promise(resolve=>{resolveOldStop=resolve;});}
+  };
+  const control={hidden:false,textContent:'',focus(){},classList:{add(){},remove(){}}};
+  const player=Object.assign(Object.create(Player.prototype),{
+    generation:0,session:null,root:{hidden:true,querySelector(){return control;},
+      classList:{remove(){}}},video:{style:{},currentTime:0,paused:true,
+      pause(){},removeAttribute(){},querySelectorAll(){return [];},load(){}},
+    sheet:{hidden:true},status:{textContent:''},preferences:()=>({}),
+    report(){return null;},track(){},clearSkipMarker(){},showBuffering(){},
+    reveal(){},onClose(){}
+  });
+  const item={id:'movie',title:'Test',duration:120};
+  const oldDocument=globalThis.document;
+  globalThis.document={hidden:false};
+  try {
+  const first=player.open(api,item,{start:85});
+  for(let i=0;i<10&&!resolveFirst;i++) await Promise.resolve();
+  assert.equal(starts,1,'the initial playback negotiation must be pending');
+  await player.close();
+  const replay=player.open(api,item,{start:85});
+  await Promise.resolve();
+  assert.equal(starts,1,'replay must wait for the cancelled negotiation');
+  resolveFirst({transcode:true,sessionId:'stale'});
+  for(let i=0;i<10&&!resolveOldStop;i++) await Promise.resolve();
+  assert.equal(oldStops,1,'the old HLS session must be stopped');
+  assert.equal(starts,1,'replay must wait until the stop finishes');
+  resolveOldStop();
+  await Promise.all([first,replay]);
+  assert.equal(starts,2,'replay proceeds after the stale session is retired');
+  } finally { globalThis.document=oldDocument; }
+});
+
+test('an interrupted HLS startup stops on Plex without blocking Stop, then gates replay',async()=>{
+  let resolveStop, stopCalls=0;
+  const session={transcode:true,start:85};
+  const player=Object.assign(Object.create(Player.prototype),{
+    generation:3,session,startupComplete:false,api:{stop(){stopCalls++;
+      return new Promise(resolve=>{resolveStop=resolve;});}},
+    video:{style:{},currentTime:0,pause(){},removeAttribute(){},
+      querySelectorAll(){return [];},load(){}},
+    report(){return null;},track(){},clearSkipMarker(){},showBuffering(){}
+  });
+  // Stop must release the hardware decoder immediately, even if Plex hangs.
+  await player.release();
+  await Promise.resolve();
+  assert.equal(stopCalls,1);
+  assert.equal(player.session,null);
+  let started=false;
+  const waiting=player.waitForStartupTeardown().then(()=>{started=true;});
+  await Promise.resolve();
+  assert.equal(started,false,'replay cannot overtake a still-running Plex stop');
+  resolveStop();
+  await waiting;
+  assert.equal(started,true);
+  assert.equal(player.pendingStartupTeardown,null);
+});
+
+test('interrupted HLS stop waits are bounded even if the server never replies',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const player=Object.assign(Object.create(Player.prototype),{pendingStartupTeardown:null});
+  player.queueStartupTeardown(new Promise(()=>{}));
+  let finished=false;
+  const waiting=player.waitForStartupTeardown().then(()=>{finished=true;});
+  await Promise.resolve();
+  t.mock.timers.tick(2999);
+  await Promise.resolve();
+  assert.equal(finished,false);
+  t.mock.timers.tick(1);
+  await waiting;
+  assert.equal(finished,true,'a hung stop must not block replay indefinitely');
+});
+
 test('metadata and decoded-but-frozen startup keep the recovery deadline; clock progress clears it',t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   let expired=0;

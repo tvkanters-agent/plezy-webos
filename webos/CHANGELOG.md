@@ -1,3 +1,9 @@
+## 1.22.24 — Prevent interrupted HLS startup from poisoning replay
+
+- Retire an interrupted Plex HLS transcode session before starting playback again, without delaying Stop itself.
+- Stop stale sessions whose playback negotiation finishes after Stop; cap the replay handoff to three seconds if Plex hangs.
+- Preserve normal decoder restart and seek behavior; test interrupted startup, delayed Plex Stop, and hung cleanup.
+
 ## 1.22.23 — Bound Plex date-sorted library grids
 
 - Mount only the visible and nearby poster rows in Recently added and Release date.
