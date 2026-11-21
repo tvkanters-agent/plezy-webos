@@ -2135,3 +2135,51 @@ test('Stop waits for the final Plex timeline before refreshing mounted and saved
     };
   }))).toBeGreaterThan(0);
 });
+
+test('Back during hidden queued HLS replay leaves Home without opening the old title',async({page})=>{
+  await page.addInitScript(()=>{
+    window.PalmSystem={};
+    window.hlsOpens=[];
+    document.addEventListener('error',event=>{
+      if(event.isTrusted && (event.target instanceof HTMLSourceElement ||
+          event.target instanceof HTMLVideoElement))event.stopImmediatePropagation();
+    },true);
+    const load=HTMLMediaElement.prototype.load;
+    const play=HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.load=function(){
+      const source=this.querySelector('source');
+      if(!source?.src.includes('/start.m3u8'))return load.call(this);
+      window.hlsOpens.push(source.src);
+    };
+    HTMLMediaElement.prototype.play=function(){
+      if(this.querySelector('source')?.src.includes('/start.m3u8'))return new Promise(()=>{});
+      return play.call(this);
+    };
+  });
+  await setup(page,{viewOffset:85000,Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'dts',
+    Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:32,codec:'ass',selected:1}]}]}]},
+    undefined,[],{},null,null,null,false);
+  const opened=()=>page.evaluate(()=>window.hlsOpens.length);
+  await expect.poll(opened).toBe(1);
+  let stopRequests=0,releaseStop;
+  const gate=new Promise(resolve=>{releaseStop=resolve;});
+  await page.route('http://plex.test/video/:/transcode/universal/stop**',async route=>{
+    stopRequests++;
+    await gate;
+    return route.fulfill({body:''});
+  });
+  try {
+    await page.getByRole('button',{name:'Stop',exact:true}).click();
+    await expect.poll(()=>stopRequests).toBe(1);
+    await expect(page.locator('#player')).toBeHidden();
+    await page.locator('#main .detail-play').click();
+    await expect(page.locator('#player')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#main .detail')).toHaveCount(0);
+    releaseStop();
+    await page.waitForTimeout(200);
+    expect(await opened()).toBe(1);
+    await expect(page.locator('#player')).toBeHidden();
+    await expect(page.getByRole('button',{name:'Test Movie',exact:true}).first()).toBeVisible();
+  } finally {releaseStop();}
+});
