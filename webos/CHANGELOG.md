@@ -1,8 +1,13 @@
-## 1.22.33 — Fix Plex date-sort page ordering after refresh
+## 1.22.34 — Fix Plex date-sort page ordering after refresh
 
 - Keep pending page requests separate when Plex shifts the order twice during browsing.
 - Reconcile first-page updates completed while the library tab was detached.
 - Discard successor cache entries from older builds that could have saved the wrong ordering.
+
+## 1.22.33 — Synchronize episode watch state on reopened seasons
+
+- Apply delayed season watch and unwatch acknowledgments to the reopened season's episode badges, progress and More options.
+- Keep loaded and pending episode pages consistent in the saved catalog.
 
 ## 1.22.32 — Publish webOS pre-releases after multi-commit pushes
 

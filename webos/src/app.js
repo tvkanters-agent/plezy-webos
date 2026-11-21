@@ -2389,6 +2389,11 @@ async function render(prepared = null) {
         });
       }
       const actions = el('div', undefined, 'detail-actions');
+      const refreshWatchState = watched => {
+        refreshDetailWatchActions(actions, item);
+        if (item.folder && detailActive())
+          forEachPagedGrid(main, grid => grid._markWatched(watched));
+      };
       // The original watch request may finish while this detail is reopened
       // from a cached item. Refresh this instance only when identity and
       // account scope match; do not remount the DOM or steal focus.
@@ -2398,7 +2403,7 @@ async function render(prepared = null) {
             String(detailRoute.id) !== String(sourceRoute.id) ||
             detailRoute.kind !== sourceRoute.kind) return;
         updateLocalWatchState(item, watched);
-        refreshDetailWatchActions(actions, item);
+        refreshWatchState(watched);
       };
       let watchMutationPending = false;
       const markDetailWatched = async watched => {
@@ -2422,14 +2427,11 @@ async function render(prepared = null) {
             simklTracker.markWatched(currentApi, item, watched);
           // Keep the original detached snapshot coherent, but also reconcile a
           // newly mounted detail for this same title after Back/reopening.
-          if (!detailDisposed) refreshDetailWatchActions(actions, item);
+          if (!detailDisposed) refreshWatchState(watched);
           const visibleDetail = main.querySelector('.detail');
           if (visibleDetail && visibleDetail !== content)
             visibleDetail._syncWatchState?.(currentApi, detailServerScope, detailRoute, watched);
           if (!detailActive()) return;
-          if (item.folder) {
-            main.querySelectorAll('.episode-list,.grid').forEach(grid => grid._markWatched?.(watched));
-          }
           notify(watched ? 'Marked as watched' : 'Marked as unwatched');
         } finally { watchMutationPending = false; }
       };
