@@ -1686,8 +1686,9 @@ async function paginated(loader, currentRevision, options = {}) {
       requestGeneration === pageGeneration &&
       (!windowed || (requestRevision === mountedRevision && offset === start));
     try {
+      const predecessor = Array.from(loadedPages.keys()).filter(key => key < offset).pop();
       const response = options.initialPage && start === 0
-        ? options.initialPage : await loader(start, forceShiftedPages);
+        ? options.initialPage : await loader(start, forceShiftedPages, predecessor);
       options.initialPage = null;
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
@@ -1942,12 +1943,18 @@ async function render(prepared = null) {
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
       const libraryRoute = {...route};
-      const libraryLoader = (start, count, shifted = false) => savedPage(
-        'browse:' + JSON.stringify([libraryRoute.library.id, selected, selectedFilter,
-          libraryRoute.alpha || '', start, count || null]),
+      const browseKey = (offset, count) => 'browse:' + JSON.stringify([
+        libraryRoute.library.id, selected, selectedFilter, libraryRoute.alpha || '',
+        offset, count || null]);
+      const isPlexDateSort = currentApi instanceof Plex &&
+        (selected === 'recent' || selected === 'release');
+      const libraryLoader = (start, count, shifted = false, predecessor) => savedPage(
+        browseKey(start, count),
         () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
           currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
-        {force:forceRefresh || shifted, priority:start === 0 && !libraryRoute.alpha});
+        {force:forceRefresh || shifted, priority:start === 0 && !libraryRoute.alpha,
+          predecessorKey:isPlexDateSort && predecessor !== undefined
+            ? browseKey(predecessor) : null});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -2029,8 +2036,9 @@ async function render(prepared = null) {
             {initialPage:firstPage, startedAt:contentStartedAt});
         }
       } else {
-        await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision, {startedAt:contentStartedAt,
-          windowed:currentApi instanceof Plex && (selected === 'recent' || selected === 'release')});
+        await paginated((start, shifted, predecessor) =>
+          libraryLoader(start, undefined, shifted, predecessor), currentRevision, {startedAt:contentStartedAt,
+          windowed:isPlexDateSort});
       }
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {

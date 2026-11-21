@@ -9,6 +9,12 @@ export const CATALOG_MEMORY_BYTES = 16 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const TOUCH_INTERVAL_MS = 60000;
 
+// A successor cache is valid only for the precise ordered IDs of its predecessor.
+// Metadata-only changes do not invalidate it. Exact IDs avoid hash collisions.
+function pageLineage(page) {
+  return Array.isArray(page?.items) ? JSON.stringify(page.items.map(item => item.id)) : null;
+}
+
 function fingerprint(value) {
   // Do not store the Plex/Jellyfin access token in IndexedDB keys.
   let a = 2166136261, b = 5381;
@@ -65,7 +71,7 @@ export class PersistentCatalogCache {
     if (entry) this.memoryBytes -= entry.bytes;
     this.memory.delete(key);
   }
-  remember(key, data, bytes, priority = false, diskUsed = null) {
+  remember(key, data, bytes, priority = false, diskUsed = null, lineage = undefined) {
     if (!bytes) {
       try { bytes = JSON.stringify(data).length * 2; }
       catch (_) { return; }
@@ -76,7 +82,8 @@ export class PersistentCatalogCache {
       ? previous ? previous.used : this.now() : diskUsed;
     this.forget(key);
     if (bytes > this.memoryLimit) return;
-    this.memory.set(key, {data, bytes, priority: protectedPage, used:lastDiskTouch});
+    this.memory.set(key, {data, bytes, priority: protectedPage, used:lastDiskTouch,
+      lineage: lineage === undefined ? previous?.lineage : lineage});
     this.memoryBytes += bytes;
     // Landing pages are compact but essential to instant reopening. Evict
     // scrolled-through pages first, regardless of how many pages exist.
@@ -140,7 +147,7 @@ export class PersistentCatalogCache {
               store.put(entry);
             }
             this.remember(key, entry.data, entry.bytes,
-              priority || !!entry.priority, entry.used);
+              priority || !!entry.priority, entry.used, entry.lineage);
             resolve(entry.data);
           } else resolve(null);
         };
@@ -149,17 +156,19 @@ export class PersistentCatalogCache {
       } catch (_) { resolve(null); }
     });
   }
-  async write(key, data, priority = false) {
+  async write(key, data, priority = false, lineage = undefined) {
     let bytes;
     try { bytes = JSON.stringify(data).length * 2; }
     catch (_) { return; }
     if (!bytes || bytes > MAX_ENTRY_BYTES) return;
+    const savedLineage = lineage === undefined ? this.memory.get(key)?.lineage : lineage;
     const db = await this.open();
     if (!db) return;
     const put = () => new Promise((resolve, reject) => {
       try {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put({key, data, bytes, used: this.now(), priority});
+        tx.objectStore(STORE).put({key, data, bytes, used: this.now(), priority,
+          lineage: savedLineage});
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);
@@ -222,7 +231,8 @@ export class PersistentCatalogCache {
   // Start revalidation at the same time as disk lookup. Fresh responses only
   // replace a page when different; a failed request leaves the saved page.
   // Every open has a fresh task, even if the data is in memory.
-  async page(scope, key, loader, {force = false, priority = false} = {}) {
+  async page(scope, key, loader, {force = false, priority = false,
+    predecessorKey = null} = {}) {
     const id = this.id(scope, key);
     // A forced refresh supersedes an ordinary in-flight revalidation. A
     // second forced caller can still share an already-forced request.
@@ -241,24 +251,34 @@ export class PersistentCatalogCache {
       });
     }
     const {serial, live} = flight;
+    // Capture the ordered predecessor IDs before this request settles, so
+    // an in-flight result cannot acquire a newer page's cache lineage.
+    const predecessorId = predecessorKey === null ? null : this.id(scope, predecessorKey);
+    const preceding = predecessorId ? await this.read(predecessorId) : null;
+    const lineage = predecessorId ? pageLineage(preceding) : undefined;
+    const stillCurrent = async () => !predecessorId || (lineage !== null &&
+      pageLineage(await this.read(predecessorId)) === lineage);
     const cached = force ? null : await this.read(id, priority);
-    if (cached !== null && cached !== undefined) {
-      const fresh = live.then(result => {
+    // Legacy successors without lineage cannot safely follow a refreshed
+    // first page. A live error must leave that page unavailable, not mixed.
+    if (cached !== null && cached !== undefined &&
+        (!predecessorId || (lineage !== null && this.memory.get(id)?.lineage === lineage))) {
+      const fresh = live.then(async result => {
         if (result.error) return {error:result.error,changed:false};
-        if (this.generations.get(id) !== serial)
+        if (this.generations.get(id) !== serial || !await stillCurrent())
           return {value:result.value,changed:false};
         const changed = JSON.stringify(cached) !== JSON.stringify(result.value);
-        this.remember(id, result.value, undefined, priority);
-        if (changed) this.write(id, result.value, priority).catch(() => {});
+        this.remember(id, result.value, undefined, priority, null, lineage);
+        if (changed) this.write(id, result.value, priority, lineage).catch(() => {});
         return {value:result.value,changed};
       });
       return {value:cached, fresh, cached:true};
     }
     const result = await live;
     if (result.error) throw result.error;
-    if (this.generations.get(id) === serial) {
-      this.remember(id, result.value, undefined, priority);
-      this.write(id, result.value, priority).catch(() => {});
+    if (this.generations.get(id) === serial && await stillCurrent()) {
+      this.remember(id, result.value, undefined, priority, null, lineage);
+      this.write(id, result.value, priority, lineage).catch(() => {});
     }
     return {value:result.value, fresh:null, cached:false};
   }
