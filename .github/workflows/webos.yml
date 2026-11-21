@@ -52,6 +52,22 @@ jobs:
         with:
           name: plezy-webos-ipk
           path: release-assets
+      - name: Mark existing GitHub releases as pre-releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_ids=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.prerelease == false) | .id')
+          while IFS= read -r release_id; do
+            if [[ -n "$release_id" ]]; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+                -F prerelease=true >/dev/null
+            fi
+          done <<< "$release_ids"
       - name: Publish versioned webOS release when release notes exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,12 +77,10 @@ jobs:
           notes="webos/releases/v${version}.md"
           if [ ! -f "$notes" ]; then exit 0; fi
           if gh release view "v${version}" >/dev/null 2>&1; then exit 0; fi
-          release_flags=()
           release_suffix=""
           if [[ "$version" == 0.* ]]; then
-            release_flags+=(--prerelease)
             release_suffix=" alpha"
           fi
           gh release create "v${version}" release-assets/*.ipk \
-            --target "$GITHUB_SHA" "${release_flags[@]}" \
+            --prerelease --target "$GITHUB_SHA" \
             --title "Plezy webOS ${version}${release_suffix}" --notes-file "$notes"
