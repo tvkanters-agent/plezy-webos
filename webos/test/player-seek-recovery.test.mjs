@@ -61,10 +61,16 @@ test('Pause during a seek from paused cancels automatic recovery through bufferi
   player.toggle();
   assert.equal(player.video.paused,true);
   assert.equal(player.resumeAfterSeekTarget,null);
+  assert.equal(player.pauseAfterOpen,true, 'late playing must be caught after Pause');
   player.video.seeking = false;
   player.resumeAfterSeekLanded = true;
   player.tryResumeAfterSeek();
   assert.equal(plays(),1, 'late decoder readiness must not restart a deliberate pause');
+
+  player.seekTo(60);
+  assert.equal(player.pauseAfterOpen,false, 'a new confirmed seek clears the old Pause latch');
+  assert.equal(player.openIntentPlaying,true);
+  assert.equal(plays(),2);
 });
 
 test('Play/Pause during a paused remote preview means Pause, not Play', t => {
