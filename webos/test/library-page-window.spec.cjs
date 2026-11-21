@@ -18,7 +18,9 @@ async function mockLibrary(page, total, beforePage = () => {}) {
       const size = Number(url.searchParams.get('X-Plex-Container-Size'));
       const sort = url.searchParams.get('sort');
       requests.push({start, size, sort});
-      await beforePage({start, sort, titles});
+      const response = await beforePage({start, sort, titles});
+      if (response?.status)
+        return route.fulfill({status:response.status, json:{error:'Simulated Plex outage'}});
       data = {totalSize:titles.length, Metadata:titles.slice(start, start + size)};
     } else if (url.pathname.startsWith('/library/metadata/')) {
       data.Metadata = titles.filter(item => item.ratingKey === url.pathname.split('/').pop());
@@ -244,6 +246,82 @@ for (const [sortLabel, plexSort] of [
         .toBeGreaterThanOrEqual(2);
       expect(requests.filter(r => r.sort === plexSort && r.start === 120).length)
         .toBeGreaterThanOrEqual(2);
+    });
+  }
+}
+
+for (const [sortLabel, plexSort] of [
+  ['Recently added', 'addedAt:desc'], ['Release date', 'originallyAvailableAt:desc']
+]) {
+  for (const [mutation, failure] of [['insert','hold'], ['remove','503']]) {
+    test(`persisted ${sortLabel} rejects shifted page after restart (${mutation}, ${failure})`, async ({page}) => {
+      let changeFirstPage = false, afterRestart = false, releaseSecond;
+      const requests = await mockLibrary(page, 180, async ({start, sort, titles}) => {
+        if (sort !== plexSort) return;
+        if (start === 0 && changeFirstPage) {
+          changeFirstPage = false;
+          if (mutation === 'insert')
+            titles.unshift({ratingKey:'new',type:'movie',title:'New Film'});
+          else titles.shift();
+        }
+        if (start === 60 && afterRestart) {
+          if (failure === '503') return {status:503};
+          await new Promise(resolve => { releaseSecond = resolve; });
+        }
+      });
+      const cachedPage = async offset => page.evaluate(async ({plexSort,offset}) => {
+        const key = ':browse:' + JSON.stringify(['movies',
+          plexSort === 'addedAt:desc' ? 'recent' : 'release','all','',offset,null]);
+        return new Promise(resolve => {
+          const request = indexedDB.open('plezy-catalog-v1',1);
+          request.onerror = () => resolve(null);
+          request.onsuccess = () => {
+            const tx = request.result.transaction('pages','readonly');
+            const cursor = tx.objectStore('pages').openCursor();
+            cursor.onsuccess = () => {
+              const row = cursor.result;
+              if (!row) { resolve(null); return; }
+              if (String(row.key).endsWith(key)) resolve(row.value);
+              else row.continue();
+            };
+            cursor.onerror = () => resolve(null);
+          };
+        });
+      }, {plexSort,offset});
+      await page.goto('/');
+      await openDateSort(page, sortLabel);
+      const grid = page.locator('.paged-window-grid');
+      await pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+      await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(119))).toBe(true);
+      await expect.poll(async () => (await cachedPage(60))?.data?.items?.[0]?.id).toBe('60');
+      await pane(page).evaluate(main => { main.scrollTop = 0; });
+      await page.getByRole('button',{name:'Settings',exact:true}).click();
+      changeFirstPage = true;
+      await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+      await expect.poll(() => grid.evaluate((node, id) =>
+        node._libraryWindow.focusById(id)?._libraryWindowIndex,
+        mutation === 'insert' ? 'new' : '1')).toBe(0);
+      await expect.poll(async () => (await cachedPage(0))?.data?.items?.[0]?.id)
+        .toBe(mutation === 'insert' ? 'new' : '1');
+      expect((await cachedPage(60)).data.items[0].id).toBe('60');
+      const oldRequests = requests.filter(r => r.sort === plexSort && r.start === 60).length;
+      afterRestart = true;
+      await page.reload();
+      await openDateSort(page,sortLabel);
+      await pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+      await expect.poll(() => requests.filter(r =>
+        r.sort === plexSort && r.start === 60).length).toBeGreaterThan(oldRequests);
+      if (failure === 'hold') {
+        await expect.poll(() => !!releaseSecond).toBe(true);
+        expect(await grid.evaluate(node => node._libraryWindow.has(60))).toBe(false);
+        releaseSecond();
+        await expect.poll(() => grid.evaluate((node, id) =>
+          node._libraryWindow.focusById(id)?._libraryWindowIndex,
+          mutation === 'insert' ? '59' : '61')).toBe(60);
+      } else {
+        await expect(page.getByText(/Could not load library titles:/)).toBeVisible();
+        expect(await grid.evaluate(node => node._libraryWindow.has(60))).toBe(false);
+      }
     });
   }
 }

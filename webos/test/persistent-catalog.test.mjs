@@ -129,3 +129,40 @@ test('force refresh replaces a pending ordinary request, and logout cannot resto
   assert.equal((await pending.fresh).changed,false);
   assert.deepEqual((await cache.page('s','page',()=>['next'])).value,['next']);
 });
+
+test('successor cache identity survives first-page order shifts even with equal page lengths', async () => {
+  const cache = new PersistentCatalogCache({indexedDB:null});
+  const before = {items:[{id:'a'},{id:'b'}],total:4};
+  const after = {items:[{id:'new'},{id:'a'}],total:5};
+  await cache.page('s','browse:0',()=>before);
+  await cache.page('s','browse:2',()=>({items:[{id:'c'},{id:'d'}],total:4}),
+    {predecessorKey:'browse:0'});
+  const refreshed = await cache.page('s','browse:0',()=>after);
+  assert.equal((await refreshed.fresh).changed,true);
+  await assert.rejects(cache.page('s','browse:2',()=>{throw new Error('Plex 503');},
+    {predecessorKey:'browse:0'}), /Plex 503/);
+  const repaired = await cache.page('s','browse:2',()=>({items:[{id:'b'},{id:'c'}],total:5}),
+    {predecessorKey:'browse:0'});
+  assert.equal(repaired.cached,false);
+  const reuse = await cache.page('s','browse:2',()=>repaired.value,
+    {predecessorKey:'browse:0'});
+  assert.equal(reuse.cached,true);
+});
+
+test('late successor responses are not saved as belonging to a new predecessor', async () => {
+  const cache = new PersistentCatalogCache({indexedDB:null});
+  await cache.page('s','first',()=>({items:[{id:'0'}],total:3}));
+  let finish;
+  const pending = cache.page('s','second',()=>new Promise(resolve=>{finish=resolve;}),
+    {predecessorKey:'first'});
+  await Promise.resolve();
+  const refresh = await cache.page('s','first',()=>({items:[{id:'new'}],total:4}));
+  await refresh.fresh;
+  finish({items:[{id:'old'}],total:3});
+  const old = await pending;
+  assert.equal(old.cached,false);
+  const next = await cache.page('s','second',()=>({items:[{id:'fresh'}],total:4}),
+    {predecessorKey:'first'});
+  assert.equal(next.cached,false);
+  assert.equal(next.value.items[0].id,'fresh');
+});
