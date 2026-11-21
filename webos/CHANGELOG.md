@@ -1,3 +1,11 @@
+## 1.22.8 — Resume playback after seeking from paused
+
+- A committed timeline, chapter, pointer or skip seek now requests playback even when the media was paused beforehand. LG's paused decoder flag no longer suppresses seek recovery during buffering.
+- Explicit Pause during a seek preview or after committing the seek cancels the pending auto-resume. Canceling an unconfirmed remote preview still preserves the original paused state.
+- Add unit and browser regressions for paused seeks, preview cancellation, and delayed buffering.
+
+Actual LG decoder recovery still requires testing on the TV.
+
 ## 1.22.6 — Faster ASS subtitles on initial resume and after seeks
 
 - Begin reading verified, persistent ASS subtitle and font caches and warming the libass renderer while the native video pipeline resumes. Previously the player waited for the seek to finish before even checking its cached subtitles. Cached ASS preview now targets the saved resume position rather than 0:00.
