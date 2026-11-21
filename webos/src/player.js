@@ -1149,7 +1149,10 @@ export class Player {
     this.previewFrames = null;
     this.hideSeekPreview();
     const session = this.session, api = this.api;
-    const interruptedHls = !!(session?.transcode && !this.startupComplete);
+    // An explicit Stop may race Plex's transcode teardown even if LG has
+    // already reported startup complete. Track changes remain non-blocking
+    // once their old decoder has reached a confirmed first frame.
+    const interruptedHls = !!(session?.transcode && (!preserveTracking || !this.startupComplete));
     if (!session && this.pendingPlayback) this.queueStartupTeardown(this.pendingPlayback);
     this.lastPosition = this.position() || this.lastPosition || 0;
     const reportDone = session ? this.report('stopped') : null;
