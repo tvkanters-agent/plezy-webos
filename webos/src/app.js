@@ -2209,7 +2209,7 @@ async function render(prepared = null) {
           const spinner=el('span',undefined,'rating-spinner');
           spinner.setAttribute('aria-hidden','true');
           ratingLine.append(spinner);
-          if(!ratingLine.isConnected)chips.append(ratingLine);
+          if(!ratingLine.parentNode)chips.append(ratingLine);
           return;
         }
         const all=mergeRatings(ownRatings,community);
@@ -2241,8 +2241,8 @@ async function render(prepared = null) {
           entry.append(icon,el('span',String(ownRating)));
           ratingLine.append(entry);
         }
-        if(ratingLine.children.length&&!ratingLine.isConnected)chips.append(ratingLine);
-        if(!ratingLine.children.length&&ratingLine.isConnected)ratingLine.remove();
+        if(ratingLine.children.length&&!ratingLine.parentNode)chips.append(ratingLine);
+        if(!ratingLine.children.length&&ratingLine.parentNode)ratingLine.remove();
       }
       showRatings();
       if(ratingsLoading) {
