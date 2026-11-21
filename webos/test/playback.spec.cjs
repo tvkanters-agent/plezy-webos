@@ -67,7 +67,7 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   });
   await page.goto(entryUrl); await page.getByRole('button',{name:'Test Movie',exact:true}).click();
   if (version !== undefined) await page.getByLabel('Media version',{exact:true}).selectOption(String(version));
-  await page.getByRole('button',{name:'Play',exact:true}).first().click();
+  await page.locator('#main .detail-play').click();
   if (waitForPlayback) {
     await expect.poll(()=>page.locator('video').evaluate(v=>v.paused)).toBe(false);
     await expect.poll(()=>events.length).toBeGreaterThan(0);
@@ -197,52 +197,92 @@ test('closing playback preserves the detail screen and focused action without a 
   }))).toEqual({sameNode:true,detached:false});
 });
 
-test('Stop during an unfinished HLS startup retires Plex session before immediate replay',async({page})=>{
+test('Stop during native HLS resume retires the old decoder and replay displays its resume frame',async({page})=>{
+  await page.clock.install();
   await page.addInitScript(()=>{
-    window.interruptedHlsLoads=[];
-    const load=HTMLMediaElement.prototype.load,play=HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.load=function(){
-      // Model LG's incomplete native HLS open without depending on desktop HLS.
-      if(this.src.includes('/start.m3u8')) {
-        window.interruptedHlsLoads.push(this.src);
-        return;
-      }
-      return load.call(this);
+    window.PalmSystem = {};
+    window.hlsOpens = [];
+    // Chromium may inspect an appended source even though load and play are
+    // mocked. Its rejection of LG's mediaOption MIME is outside this fixture.
+    document.addEventListener('error', event=>{
+      if (event.isTrusted && (event.target instanceof HTMLSourceElement ||
+          event.target instanceof HTMLVideoElement)) event.stopImmediatePropagation();
+    }, true);
+    const load = HTMLMediaElement.prototype.load;
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.load = function() {
+      const source = this.querySelector('source');
+      if (!source?.src.includes('/start.m3u8')) return load.call(this);
+      window.hlsOpens.push({video:this, url:source.src, type:source.type});
     };
-    HTMLMediaElement.prototype.play=function(){
-      if(this.src.includes('/start.m3u8')) return new Promise(()=>{});
+    HTMLMediaElement.prototype.play = function() {
+      if (this.querySelector('source')?.src.includes('/start.m3u8')) return new Promise(()=>{});
       return play.call(this);
     };
   });
-  await setup(page,{Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'dts',
-    Part:[{id:'part',key:'/video.webm',Stream:[]}]}]},undefined,[],{},null,null,null,false);
-  await expect.poll(()=>page.evaluate(()=>window.interruptedHlsLoads.length)).toBe(1);
-  let stopRequests=0,releaseStop;
-  const stopGate=new Promise(resolve=>{releaseStop=resolve;});
+  await setup(page,{viewOffset:85000,Media:[{container:'mkv',videoCodec:'hevc',audioCodec:'dts',
+    Part:[{id:'part',key:'/video.webm',Stream:[{streamType:3,id:32,codec:'ass',selected:1}]}]}]},
+    undefined,[],{},null,null,null,false);
+  const opened = () => page.evaluate(()=>window.hlsOpens.length);
+  await expect.poll(opened).toBe(1);
+  let stopRequests = 0, stoppedSession, releaseStop;
+  const stopGate = new Promise(resolve=>{releaseStop=resolve;});
   await page.route('http://plex.test/video/:/transcode/universal/stop**',async route=>{
     stopRequests++;
+    stoppedSession = new URL(route.request().url()).searchParams.get('session');
     await stopGate;
-    return route.fulfill({json:{}});
+    return route.fulfill({body:''});
   });
+  const player = page.locator('#player');
+  const video = player.locator('video');
   try {
     await page.getByRole('button',{name:'Stop',exact:true}).click();
-    await expect(page.locator('#player')).toBeHidden();
+    await expect(player).toBeHidden();
     await expect.poll(()=>stopRequests).toBe(1);
     await page.locator('#main .detail-play').click();
     await page.waitForTimeout(100);
-    const startedSessions=()=>page.evaluate(()=>
-      new Set(window.interruptedHlsLoads.map(url=>new URL(url).searchParams.get('session'))).size);
-    // Wait before checking visibility: the new player deliberately remains
-    // hidden until Plex retires the old HLS session. Waiting for it to show
-    // first would cross the three-second fallback deadline.
-    // LG's video.load() during Stop may still reference the old HLS URL,
-    // so count distinct Plex sessions rather than native load() calls.
-    expect(await startedSessions()).toBe(1,
-      'the new Plex session must not start while the prior transcode stop is pending');
-    await expect(page.locator('#player')).toBeHidden();
+    expect(await opened()).toBe(1);
+    await expect(player).toBeHidden();
     releaseStop();
-    await expect(page.locator('#player')).toBeVisible();
-    await expect.poll(startedSessions).toBe(2);
+    await expect(player).toBeVisible();
+    await expect.poll(opened).toBe(2);
+    const replay = await page.evaluate(()=>{
+      const [first, next] = window.hlsOpens;
+      const session = open => new URL(open.url).searchParams.get('session');
+      const option = JSON.parse(decodeURIComponent(next.type.split(';mediaOption=')[1]));
+      return {oldSession:session(first),newSession:session(next),target:option.option.transmission.playTime.start,
+        oldConnected:first.video.isConnected, sameVideo:first.video===next.video};
+    });
+    expect(replay.oldSession).toBe(stoppedSession);
+    expect(replay.newSession).not.toBe(stoppedSession);
+    expect(replay.target).toBe(85000);
+    expect(replay.sameVideo).toBe(false);
+    expect(replay.oldConnected).toBe(false);
+
+    // Old native callbacks can arrive during replay. The new element owns
+    // playback, and its early playing event still has a stale LG clock.
+    await video.evaluate(current=>{
+      window.hlsOpens[0].video.dispatchEvent(new Event('ended'));
+      window.resumeClock = 0;
+      Object.defineProperty(current,'readyState',{configurable:true,value:1});
+      Object.defineProperty(current,'currentTime',{configurable:true,get:()=>window.resumeClock,
+        set:value=>{window.unexpectedSeek=value;}});
+      current.dispatchEvent(new Event('playing'));
+    });
+    await expect(player).toBeVisible();
+    await expect(player.locator('.player-status')).toBeEmpty();
+    await expect(video).toHaveCSS('visibility','hidden');
+    await expect(player.locator('.player-buffering')).toBeVisible();
+    await video.evaluate(current=>{
+      window.resumeClock = 86.5;
+      current.dispatchEvent(new Event('timeupdate'));
+    });
+    await expect(video).toHaveCSS('visibility','visible');
+    await expect(player.locator('.player-buffering')).toBeHidden();
+    expect(await page.evaluate(()=>window.unexpectedSeek)).toBeUndefined();
+    await page.clock.fastForward(31000);
+    await expect(player.locator('.player-status')).toBeEmpty();
+    expect(await opened()).toBe(2);
   } finally { releaseStop(); }
 });
 

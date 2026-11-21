@@ -255,6 +255,13 @@ Release removes source children before unloading so a later open cannot reuse
 an old URL or resume option. Tests verify source configuration, startup reporting,
 no second seek, and source cleanup; actual buffering on LG requires TV validation.
 
+When Stop interrupts HLS startup, webOS unloads and discards the video element,
+following Plezy's route-scoped player teardown in `_shutdownVideo` and `dispose`.
+The successor ignores callbacks from the retired element. LG can publish the
+resume position on `timeupdate` after `playing`, so the HLS first-frame gate
+also checks the playback clock when it updates. Playwright simulates these
+callback orders with no second seek.
+
 ### Browser decoder buffering vs native cache pause
 
 Native Plezy's buffering overlay follows mpv's `paused-for-cache` state and
