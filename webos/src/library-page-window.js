@@ -2,7 +2,7 @@
 
 const BUFFER_ROWS = 2;
 
-// Keep the paginator's loaded range and scroll extent, but mount only full
+// Keep the complete library's scroll extent, but mount only full
 // rows near the viewport, as Plezy's SliverGrid does.
 export function libraryPageWindow({main, grid, paint, focus}) {
   const before = document.createElement('div');
@@ -123,11 +123,6 @@ export function libraryPageWindow({main, grid, paint, focus}) {
   }
 
   return {
-    append(page) {
-      items.push(...page);
-      dirty = true;
-      update();
-    },
     replace(next) {
       const active = grid.contains(document.activeElement) ? document.activeElement : null;
       const activeId = active?.dataset.focus;

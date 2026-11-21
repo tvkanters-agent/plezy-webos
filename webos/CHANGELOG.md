@@ -1,3 +1,8 @@
+## 1.22.37 — Remove Plex date-sort pagination
+
+- Remove offset pagination from Plex Recently added and Release date. Each sort opens one complete library snapshot, including when browsing a saved library offline.
+- Keep scrolling and remote focus local to the visible rows. A truncated server response offers Retry and leaves the last complete snapshot available.
+
 ## 1.22.36 — Synchronize covered season details after a watch change
 
 - Apply Plex watch and unwatch acknowledgements to matching season pages on the Back stack.

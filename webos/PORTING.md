@@ -626,19 +626,12 @@ Following LibraryBrowseTab._computeVisibleRange and PaginatedItemLoader.ensureRa
 
 Scrolling cards mount immediately after metadata arrives, letting the bounded artwork queue hydrate placeholders independently, as native sliver cards do. Explicit alphabet jumps and initial navigation keep their cached-artwork preparation. Browser tests cover both grid and Chromium 53 flex geometry, blocked prewarming and delayed-request direction changes; hardware performance remains unverified.
 
-Plex's ordinary date sorts keep the same cached offset pages and render the
-viewport plus two nearby rows on either side with spacers. The flex fallback
-reserves a caption line on these cards to match Flutter's uniform sliver
-geometry even when a year is missing. A D-pad move into an unloaded row waits
-for that page while retaining the originating card's focus. Coherent cached
-pages remain browsable while Plex refreshes them. Each live successor request
-uses one contiguous Plex range covering the preceding page and the next
-page. The next page can be rendered and saved only if the overlapping IDs
-match the mounted predecessor in order. When Plex moves the boundary, the
-grid walks back to the first verifiable update and discards its shifted
-successors. The request is bounded to two pages during normal scrolling.
-Older successor entries lack this verification and are fetched again as
-needed.
+Plex Recently added and Release date request the sorted section without container
+offsets. Each response supplies the entire ordering for the scrollable grid and
+replaces one cached snapshot. This webOS adaptation avoids mixing offsets from
+different live orderings. The DOM still mounts the viewport and two nearby rows
+on either side, including on the Chromium 53 flex layout. A partial response
+offers Retry and a Browse by title action if the server enforces a cap.
 
 ### Seek play intent on the HTML decoder
 
