@@ -1,3 +1,11 @@
+## 1.22.11 — Fix Plex action timeouts and large-season navigation
+
+- Route Plex mark watched, mark unwatched and rating requests through the app's existing 15-second cancellable HTTP transport; accept empty/XML success responses without JSON parsing. Failed requests remain retryable without changing local watch state or syncing Simkl.
+- Remove the artificial 1,000-item pagination cutoff when finding the next Plex episode, so unusually long seasons do not jump to a later season before reaching the actual end.
+- Add regressions for Plex status/timeout failures, retries, long seasons, gaps in episode indices, short pages and empty pagination responses.
+
+The network and navigation cases are covered by automated tests; LG TV and live Plex server verification remains outstanding.
+
 ## 1.22.9 — Resume playback after seeking from paused
 
 - A committed timeline, chapter, pointer or skip seek now requests playback even when the media was paused beforehand. LG's paused decoder flag no longer suppresses seek recovery during buffering.
