@@ -616,6 +616,12 @@ Following LibraryBrowseTab._computeVisibleRange and PaginatedItemLoader.ensureRa
 
 Scrolling cards mount immediately after metadata arrives, letting the bounded artwork queue hydrate placeholders independently, as native sliver cards do. Explicit alphabet jumps and initial navigation keep their cached-artwork preparation. Browser tests cover both grid and Chromium 53 flex geometry, blocked prewarming and delayed-request direction changes; hardware performance remains unverified.
 
+Plex's ordinary date sorts keep the same cached offset pages and render the
+viewport plus two nearby rows on either side with spacers. The flex fallback
+reserves a caption line on these cards to match Flutter's uniform sliver
+geometry even when a year is missing. A D-pad move into an unloaded row waits
+for that page while retaining the originating card's focus.
+
 ### Seek play intent on the HTML decoder
 
 Native Plezy's seek coordination informs the webOS timeline behavior. HTMLMediaElement.paused is an observation of the LG pipeline, not a reliable record of user intent during buffering. Per the webOS remote behavior, confirming any timeline or chapter seek requests playback even when it began paused; explicit Pause during preview or buffering vetoes the automatic resume. Canceling an unconfirmed D-pad preview never seeks and retains the preceding paused state. Play is requested at confirmation even if the pipeline reports paused=false/seeking=true, and retried without expiring during slow buffering. A seeked event permits keyframe landing; actual advancing time ends recovery. Explicit Pause, source replacement, errors and backgrounding cancel recovery. The bounded pause/play wakeup is reserved for a landed, frozen decoder. Event-order simulations do not establish physical TV behavior.

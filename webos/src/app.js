@@ -18,6 +18,7 @@ import {CollectionIndex} from './collection-index.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
 import {shuffledEpisode} from './shuffle.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
+import {libraryPageWindow} from './library-page-window.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
 import {SUBTITLE_STYLE_BOUNDS} from './subtitle-style.js';
@@ -123,7 +124,8 @@ let pendingRailEntryRevision = null, libraryRenderRevision = null;
 let lastRailRightRevision = null;
 function preferredPaneControl() {
   // Enter media before the toolbar when coming from the remote's side rail.
-  return main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
+  return main.querySelector('.paged-window-grid')?._libraryWindow.visibleCard() ||
+    main.querySelector('.grid .card, .shelf .card, .episode-list .episode-row, .cards .card') ||
     main.querySelector('button:not(:disabled),input,select');
 }
 function el(tag, text, className) {
@@ -1445,6 +1447,27 @@ async function paginated(loader, currentRevision, options = {}) {
   const retry = button('Retry loading', () => load(), 'library-retry');
   retry.hidden = true;
   main.append(grid, sentinel, errorMessage, retry);
+  const windowed = options.windowed ? libraryPageWindow({main, grid, paint:paintWindow,
+    focus:focusWithoutJump}) : null;
+  let pendingFocus = null, total = 0;
+  if (windowed) {
+    grid._libraryWindow = windowed;
+    grid._moveAcrossPage = (current, direction) => {
+      pendingFocus = null;
+      const index = windowed.adjacentIndex(current, direction);
+      if (index < 0 || windowed.isMounted(index)) return false;
+      if (windowed.has(index)) {
+        focusWithoutJump(windowed.reveal(index));
+        return true;
+      }
+      if (completed || index >= total || errorMessage.textContent) return false;
+      pendingFocus = {current, direction, intent:navigationIntent};
+      load();
+      return true;
+    };
+    grid.addEventListener('focusout', () => { pendingFocus = null; });
+    windowed.resume();
+  }
   const startedAt = options.startedAt === undefined ? Date.now() : options.startedAt;
   function makeCard(item) {
     const node = options.episodes ? episodeCard(item,
@@ -1490,12 +1513,20 @@ async function paginated(loader, currentRevision, options = {}) {
     items.forEach((item, index) => {
       const key = String(item.id), signature = JSON.stringify(item);
       let node = existing.get(key);
+      existing.delete(key);
       if (!node || node._catalogSignature !== signature) node = makeCard(item);
       if (container.children[index] !== node)
         container.insertBefore(node, container.children[index] || null);
     });
     while (container.children.length > items.length)
       container.removeChild(container.lastChild);
+  }
+  function paintWindow(items) {
+    const wanted = new Set(items.map(item => item.id));
+    for (const node of Array.from(grid.children))
+      if (!wanted.has(node._catalogItem?.id)) node.remove();
+    reconcileCards(grid, items);
+    schedulePosters();
   }
   function repaintPages() {
     const oldFocus = grid.contains(document.activeElement) ?
@@ -1535,6 +1566,11 @@ async function paginated(loader, currentRevision, options = {}) {
     } else {
       const items = [];
       for (const page of loadedPages.values()) items.push(...page.items);
+      if (windowed) {
+        windowed.replace(items);
+        if (!items.length) grid.append(el('p', 'No titles found.', 'muted'));
+        return;
+      }
       reconcileCards(grid, items);
     }
     if (!grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
@@ -1561,12 +1597,15 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   async function applyFresh(offset, initialPage, update) {
     const watchEpoch = detailWatchEpoch;
+    const isCurrentPage = () => windowed ? loadedPages.get(offset) === initialPage : loadedPages.has(offset);
     if (!update || !update.changed || mountedRevision !== revision ||
-        !grid.isConnected || !loadedPages.has(offset)) return;
-    await prewarmPosters(update.value.items || [], api,
+        !grid.isConnected || !isCurrentPage()) return;
+    const requestRevision = mountedRevision;
+    if (!windowed) await prewarmPosters(update.value.items || [], api,
       {landscape:!!options.episodes, protectFirst:offset === 0 ? 24 : 0});
     if (mountedRevision !== revision || !grid.isConnected ||
-        !loadedPages.has(offset) || detailWatchEpoch !== watchEpoch) return;
+        (windowed && mountedRevision !== requestRevision) || !isCurrentPage() ||
+        detailWatchEpoch !== watchEpoch) return;
     if (watchedOverride !== undefined)
       update.value.items.forEach(applyWatchOverride);
     loadedPages.set(offset, update.value);
@@ -1578,15 +1617,19 @@ async function paginated(loader, currentRevision, options = {}) {
     let next = 0;
     for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
     start = next;
-    completed = !update.value.items.length || start >= update.value.total;
+    total = update.value.total;
+    completed = !update.value.items.length || start >= total;
     repaintPages();
     if (completed) cleanup();
     else { listen(); requestAnimationFrame(check); }
   }
   function watchFresh(offset, initialPage, pending) {
     const watchEpoch = detailWatchEpoch;
-    if (pending) pending.then(update => watchEpoch === detailWatchEpoch &&
-      applyFresh(offset, initialPage, update))
+    const requestRevision = mountedRevision;
+    if (pending) pending.then(update => {
+      if (watchEpoch === detailWatchEpoch && (!windowed || mountedRevision === requestRevision))
+        return applyFresh(offset, initialPage, update);
+    })
       .catch(() => { /* Offline updates keep the saved view usable. */ });
   }
   grid._markWatched = watched => {
@@ -1605,10 +1648,14 @@ async function paginated(loader, currentRevision, options = {}) {
     const original = loadedPages.get(offset);
     if (original) return applyFresh(offset, original, update);
   };
-  grid._suspendCatalog = cleanup;
-  grid._destroyCatalog = cleanup;
+  grid._suspendCatalog = grid._destroyCatalog = () => {
+    pendingFocus = null;
+    windowed?.suspend();
+    cleanup();
+  };
   grid._resumeCatalog = restoredRevision => {
     mountedRevision = restoredRevision;
+    windowed?.resume();
     if (!completed) { listen(); requestAnimationFrame(check); }
   };
   async function load() {
@@ -1616,34 +1663,50 @@ async function paginated(loader, currentRevision, options = {}) {
     loading = true;
     retry.hidden = true;
     errorMessage.textContent = '';
+    const offset = start;
+    const requestRevision = mountedRevision;
+    const canApply = () => mountedRevision === revision && grid.isConnected &&
+      (!windowed || (requestRevision === mountedRevision && offset === start));
     try {
-      const offset = start;
       const response = options.initialPage && start === 0
         ? options.initialPage : await loader(start);
       options.initialPage = null;
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
       const fresh = response && response.fresh;
-      if (mountedRevision !== revision || !grid.isConnected) return;
+      if (!canApply()) return;
       // Preserve first-frame cached navigation, but never gate scrolling
       // entries on disk reads or image decoding. schedulePosters handles them.
       if (offset === 0) await prewarmPosters(page.items, api,
         {landscape:!!options.episodes, protectFirst:24});
-      if (mountedRevision !== revision || !grid.isConnected) return;
+      if (!canApply()) return;
       if (start === 0) fadeDelayedContent(grid, startedAt);
       if (watchedOverride !== undefined)
         page.items.forEach(applyWatchOverride);
-      addPage(grid, page);
+      if (windowed) windowed.append(page.items);
+      else addPage(grid, page);
       loadedPages.set(offset, page);
       if (watchedOverride !== undefined) options.onWatchChanged?.(loadedPages);
       start += page.items.length;
-      completed = !page.items.length || start >= page.total;
-      if (completed) cleanup();
+      total = page.total;
+      completed = !page.items.length || start >= total;
+      if (pendingFocus && pendingFocus.intent === navigationIntent &&
+          pendingFocus.current === document.activeElement) {
+        const index = windowed.adjacentIndex(pendingFocus.current, pendingFocus.direction);
+        if (index >= 0 && windowed.has(index)) {
+          pendingFocus = null;
+          focusWithoutJump(windowed.reveal(index));
+        } else if (index >= 0 && !completed) {
+          requestAnimationFrame(() => { if (pendingFocus) load(); });
+        }
+      }
+      if (completed) { pendingFocus = null; cleanup(); }
       if (!start && !grid.children.length) grid.append(el('p', 'No titles found.', 'muted'));
       schedulePosters();
       watchFresh(offset, page, fresh);
     } catch (error) {
-      if (mountedRevision === revision && grid.isConnected) {
+      if (canApply()) {
+        pendingFocus = null;
         errorMessage.textContent = 'Could not load library titles: ' + error.message;
         retry.hidden = false;
       }
@@ -1655,7 +1718,7 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   function check() {
     if (mountedRevision !== revision || !grid.isConnected || completed) { cleanup(); return; }
-    if (loading) return;
+    if (loading || (windowed && errorMessage.textContent)) return;
     const rect = sentinel.getBoundingClientRect();
     const pane = main.getBoundingClientRect();
     if (rect.top <= pane.bottom + pane.height * 0.8) load();
@@ -1679,6 +1742,7 @@ async function render(prepared = null) {
   if (activeAlphabet) { activeAlphabet.destroy(); activeAlphabet = null; }
   main.classList.remove('has-alpha-bar');
   main.querySelector('.detail')?._disposeDetail?.();
+  main.querySelector('.paged-window-grid')?._destroyCatalog();
   main.textContent = ''; main.scrollTop = 0; navigation();
   main.classList.toggle('settings-view', route.type === 'settings' || route.type === 'settings-page');
   const valid = () => currentRevision === revision;
@@ -1945,7 +2009,8 @@ async function render(prepared = null) {
             {initialPage:firstPage, startedAt:contentStartedAt});
         }
       } else {
-        await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
+        await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt,
+          windowed:currentApi instanceof Plex && (selected === 'recent' || selected === 'release')});
       }
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
       if (valid() && pendingRailEntryRevision===currentRevision) {
@@ -3299,7 +3364,9 @@ window.addEventListener('keydown', event => {
     }
     const restored = rememberedPaneFocus && rememberedPaneFocus.isConnected &&
       main.contains(rememberedPaneFocus) ? rememberedPaneFocus : null;
-    const target = restored || preferredPaneControl();
+    const windowed = main.querySelector('.paged-window-grid')?._libraryWindow;
+    const target = restored || (windowed && rememberedPaneFocus?._libraryWindowIndex !== undefined &&
+      windowed.focusById(rememberedPaneFocus._catalogItem.id)) || preferredPaneControl();
     if (target) focusWithoutJump(target);
     else { main.tabIndex = -1; focusWithoutJump(main); }
     return;
@@ -3322,6 +3389,12 @@ window.addEventListener('keydown', event => {
     }
   };
   if (dialog.hidden && !player.active && (inRail || inMain)) {
+    const pagedGrid = inMain && current.closest('.paged-window-grid');
+    if (pagedGrid && pagedGrid._moveAcrossPage(current, direction)) return;
+    if (current === main && (direction === 'up' || direction === 'down')) {
+      const target = main.querySelector('.paged-window-grid')?._libraryWindow.visibleCard();
+      if (target) { focusWithoutJump(target); return; }
+    }
     // Match upstream CastMemberStrip's onNavigateDown/onNavigateUp: the
     // last season/episode row leads into Cast, not off to a distant action.
     if (inMain && direction==='down' && current.matches('.grid .card,.episode-list .episode-row')) {

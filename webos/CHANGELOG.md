@@ -1,3 +1,8 @@
+## 1.22.23 — Bound Plex date-sorted library grids
+
+- Mount only the visible and nearby poster rows in Recently added and Release date.
+- Preserve cached pages, scroll position and remote focus across pagination and detail navigation.
+
 ## 1.22.22 — Stop background playback during negotiation
 
 - Capture Pause intent when the app is hidden before server playback negotiation finishes.
