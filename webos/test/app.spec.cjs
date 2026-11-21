@@ -887,6 +887,40 @@ test('webOS 4.x missing browser APIs do not block first launch or Plex login',as
   await expect(page.getByRole('button',{name:'Cancel'})).toBeVisible();
 });
 
+test('yearless library posters align with dated items in CSS grid and webOS 4 flex rows',async({page})=>{
+  await mockServer(page);
+  const dated={...item,Id:'dated',Name:'Dated Film',ProductionYear:2025};
+  const undated={...item,Id:'undated',Name:'Undated Film'};
+  await page.route('http://media.test/Users/user/Items?**',route=>
+    route.fulfill({json:{Items:[dated,undated],TotalRecordCount:2}}));
+  await page.goto('/');
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  const cards=page.locator('main .grid .card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).locator('small')).toHaveText('2025');
+  await expect(cards.nth(1).locator('small')).toHaveText('');
+  const measure=()=>cards.evaluateAll(nodes=>nodes.map(node=>{
+    const card=node.getBoundingClientRect();
+    const poster=node.querySelector('.poster').getBoundingClientRect();
+    const subtitle=node.querySelector('small').getBoundingClientRect();
+    return {top:card.top,height:card.height,posterTop:poster.top,posterHeight:poster.height,
+      subtitleHeight:subtitle.height};
+  }));
+  const assertAligned=measurements=>{
+    expect(measurements[0].top).toBeCloseTo(measurements[1].top,1);
+    expect(measurements[0].posterTop).toBeCloseTo(measurements[1].posterTop,1);
+    expect(measurements[0].posterHeight).toBeCloseTo(measurements[1].posterHeight,1);
+    expect(measurements[0].height).toBeCloseTo(measurements[1].height,1);
+    expect(measurements[0].subtitleHeight).toBeGreaterThan(0);
+    expect(measurements[1].subtitleHeight).toBeCloseTo(measurements[0].subtitleHeight,1);
+  };
+  assertAligned(await measure());
+  // LG webOS 4.4/Chromium 53 has no CSS grid. Check its flex fallback,
+  // including a stretched row with a yearless card.
+  await page.addStyleTag({content:'main .grid {display:flex !important;align-items:stretch !important;} main .grid .card {flex:0 0 170px !important;width:170px !important;margin-right:20px !important;}'});
+  assertAligned(await measure());
+});
+
 test('TV D-pad navigation does not pin every library card to top of viewport',async({page})=>{
   await mockServer(page);
   await page.goto('/');

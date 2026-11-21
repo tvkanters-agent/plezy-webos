@@ -435,23 +435,43 @@ test('Plezy chapters show current row, timestamps, artwork and timeline gaps',as
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(45);
 });
 
-test('previous and next chapter controls use the same traversal as Plezy',async({page})=>{
-  await setup(page,{Chapter:[{title:'First',startTimeOffset:0},
-    {title:'Second',startTimeOffset:10000},{title:'Third',startTimeOffset:45000}]});
-  await page.locator('video').evaluate(video=>video.pause());
-  const prev=page.getByRole('button',{name:'Previous chapter'});
-  const next=page.getByRole('button',{name:'Next chapter'});
-  await expect(prev).toBeVisible();
-  await next.click();
-  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
-  // Seeks now resume automatically, so freeze the clock before checking the
-  // exact three-second chapter restart threshold.
-  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
-  await prev.click();
-  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(1);
-  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
-  await prev.click();
-  await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
+test('player transport discs remain fixed while chapters load asynchronously',async({page})=>{
+  let releaseExtras;
+  const delayedExtras=new Promise(resolve=>{releaseExtras=resolve;});
+  await setup(page,{},undefined,[],{},async(number,item)=>{
+    if(number===1)return item;
+    await delayedExtras;
+    return {...item,Chapter:[{title:'First',startTimeOffset:0},
+      {title:'Second',startTimeOffset:10000}]};
+  });
+  const actions=['backward','pause','forward','stop',
+    'options','tracks-options','chapter-options'];
+  const chapter=page.getByRole('button',{name:'Chapters',exact:true});
+  await expect(chapter).toBeVisible();
+  await expect(chapter).toBeDisabled();
+  for(const action of actions)
+    await expect(page.locator('[data-action="'+action+'"]')).toBeVisible();
+  await expect(page.locator('[data-action="previous-chapter"],[data-action="next-chapter"]')).toHaveCount(0);
+  const locations=()=>page.evaluate(actions=>actions.map(action=>{
+    const rect=document.querySelector('[data-action="'+action+'"]').getBoundingClientRect();
+    return {action,left:rect.left,top:rect.top,width:rect.width,height:rect.height};
+  }),actions);
+  const before=await locations();
+  releaseExtras();
+  await expect(chapter).toBeEnabled();
+  expect(await locations()).toEqual(before);
+  for(const action of actions)
+    await expect(page.locator('[data-action="'+action+'"]')).toBeVisible();
+});
+
+test('chapter and track controls stay visible even when a file has no chapters or alternate tracks',async({page})=>{
+  await setup(page);
+  const chapter=page.getByRole('button',{name:'Chapters',exact:true});
+  await expect(chapter).toBeVisible();
+  await expect(chapter).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Audio & Subtitles'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();
+  await expect(page.locator('.player-buttons .transport-icon')).toHaveCount(4);
 });
 
 test('Programme up/down navigate chapters with Plezy’s three-second restart rule',async({page})=>{
@@ -1477,7 +1497,8 @@ test('all seek entry points recover a decoder pause without another remote Play'
       set(value){video.pause();descriptor.set.call(video,value);}
     });
   });
-  await page.getByRole('button',{name:'Next chapter',exact:true}).click();
+  // Chapter seek now uses the existing Programme Up remote shortcut.
+  await page.keyboard.press('PageUp');
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(44);
   await page.locator('[data-action="seek"]').evaluate(slider=>{

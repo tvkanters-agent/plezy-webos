@@ -193,6 +193,17 @@ persistence across restarts. For HLS (including enhanced SRT/ASS video),
  matched subtitle ID only in the separate subtitle asset, with HLS subtitles
  disabled. LG hardware playback remains to be checked.
 
+### Stable transport discs and chapter metadata
+
+At the user's request, the webOS transport row omits the dedicated previous/next
+chapter discs found in Flutter's `DesktopVideoControls`. Chapter seeking remains
+available through the Chapters sheet and the Programme Up/Down remote keys.
+On webOS, Plex chapter metadata can arrive after playback has already started.
+The Chapters menu disc stays in the row from the first frame (disabled until
+chapters are available), rather than changing transport geometry; Audio &
+Subtitles also remains mounted even when only the default tracks are present.
+This is a deliberate webOS UI adjustment to prevent startup chrome flicker.
+
 ## Simkl-specific parity decision
 
 Upstream `SimklTracker._scrobbleBody` sends:
