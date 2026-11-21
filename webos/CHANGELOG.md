@@ -1,3 +1,10 @@
+## 1.22.21 — Reconcile Plex Recommended shelves without full remounts
+
+- Update changed Recommended cards incrementally, preserving unaffected shelf/card nodes, artwork and focus.
+- Preserve vertical and horizontal scroll positions and reconcile additions, removals and reordering.
+- Use the same incremental refresh on restored cached tabs, including after reload.
+- Add browser regression coverage for DOM/artwork identity and persistence.
+
 ## 1.22.20 — Bound MDBList requests
 
 - Time out stalled MDBList key verification and title-rating requests, including response-body stalls, and restore retryability.
