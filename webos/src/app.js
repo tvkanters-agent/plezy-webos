@@ -15,6 +15,7 @@ import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
 import {CollectionIndex} from './collection-index.js';
 import {showPlexAlphaBar} from './alpha-bar.js';
+import {shuffledEpisode} from './shuffle.js';
 import {alphabetTopInset, mountAlphabetLibrary} from './library-alpha.js';
 import {mountMediaBrowserAlphabet} from './library-prefix-alpha.js';
 import {SimklTracker, validSession, beginSimklLink, pollSimklLink} from './simkl.js';
@@ -2340,20 +2341,22 @@ async function render(prepared = null) {
           else notify('No playable episodes were found.');
         }, 'play', 'detail-play'));
         // Show/season actions from MediaDetailScreen.action_buttons.dart.
+        let shuffleRequest = 0;
         actions.append(detailButton('Shuffle', async () => {
           const currentApi = api, expected = revision;
-          let start = 0, all = [];
-          while (start < 10000) {
-            const page = await currentApi.children(item.id, start, item.type);
-            all = all.concat(page.items.filter(x => x.type === 'episode' || x.type === 'Episode'));
-            start += page.items.length;
-            if (!page.items.length || start >= page.total) break;
+          const playbackAtStart = playbackLaunch, request = ++shuffleRequest;
+          const isCurrent = () => detailActive() && expected === revision && currentApi === api &&
+            request === shuffleRequest && playbackAtStart === playbackLaunch;
+          let random;
+          try {
+            random = await shuffledEpisode(currentApi, item, isCurrent);
+          } catch (error) {
+            if (isCurrent()) throw error;
+            return;
           }
-          if (!detailActive() || expected !== revision || currentApi !== api) return;
-          if (all.length) {
-            const random = all[Math.floor(Math.random() * all.length)];
-            play(random, 0);
-          } else notify('No playable episodes were found.');
+          if (!isCurrent()) return;
+          if (random) return play(random, 0);
+          notify('No playable episodes were found.');
         }, 'shuffle', 'detail-icon'));
         actions.append(detailButton(item.watched ? 'Mark unwatched' : 'Mark watched', async () => {
           await markDetailWatched(!item.watched);
