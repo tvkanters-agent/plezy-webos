@@ -14,6 +14,35 @@ const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 const WRITE_GAP_MS = 1000;
 const SAVED_RETRY_BASE_MS = 60000;
 const SAVED_RETRY_MAX_MS = 3600000;
+const PERSONAL_RATING_TTL_MS = 5 * 60 * 1000;
+
+// Index the downloaded list once rather than scanning it for every title.
+// First-match order matches the original list traversal, including unrated titles.
+function indexPersonalRatings(data, bucket) {
+  const entries = Array.isArray(data) ? data :
+    (Array.isArray(data?.[bucket]) ? data[bucket] : []);
+  const index = new Map();
+  entries.forEach((entry, order) => {
+    const ids = (bucket === 'movies' ? entry?.movie : entry?.show)?.ids || entry?.ids || {};
+    const amount = Number(entry?.user_rating ?? entry?.rating);
+    const score = Number.isFinite(amount) && amount > 0 ? Math.min(10, Math.round(amount)) : null;
+    for (const [kind, value] of Object.entries(ids)) {
+      if (value == null) continue;
+      const key = kind + ':' + String(value);
+      if (!index.has(key)) index.set(key, {order, score});
+    }
+  });
+  return index;
+}
+function matchPersonalRating(index, ids) {
+  let first;
+  for (const [kind, value] of Object.entries(ids)) {
+    if (value == null) continue;
+    const candidate = index.get(kind + ':' + String(value));
+    if (candidate && (!first || candidate.order < first.order)) first = candidate;
+  }
+  return first;
+}
 
 // Persisted stops from earlier versions may contain title/year fields, while
 // current ones are ID-only. Compare media identity, not serialized payloads.
@@ -162,12 +191,33 @@ export class SimklTracker {
     this.lastWrite = 0;
     this.holdUntil = Number(this.getSession()?.retryNotBefore) || 0;
     this.epoch = 0;
+    this.personalRatingSnapshots = new Map();
+    this.personalRatingToken = null;
+    this.personalRatingGeneration = 0;
    }
+  invalidatePersonalRatings(bucket) {
+    // Series can be stored in either shows or anime.
+    if (bucket === 'shows') {
+      this.personalRatingSnapshots.delete('shows');
+      this.personalRatingSnapshots.delete('anime');
+    } else if (bucket) this.personalRatingSnapshots.delete(bucket);
+    else this.personalRatingSnapshots.clear();
+    ++this.personalRatingGeneration;
+  }
+  syncPersonalRatingAccount(session) {
+    const token = validSession(session) ? session.accessToken : null;
+    if (token !== this.personalRatingToken) {
+      this.invalidatePersonalRatings();
+      this.personalRatingToken = token;
+    }
+  }
   reset() {
     // Pending writes from a disconnected account must never be sent using
     // credentials for a different account linked on the same TV.
     ++this.epoch;
     this.holdUntil = 0; this.lastWrite = 0;
+    this.invalidatePersonalRatings();
+    this.personalRatingToken = null;
   }
   async itemPayload(api, item) {
     // Match TrackerIdResolver: fetch the movie or parent SHOW identity through
@@ -344,25 +394,69 @@ export class SimklTracker {
       ids=await api.fetchExternalIds(item.id);
     return ids;
   }
+  personalRatingBucket(bucket) {
+    const previous = this.personalRatingSnapshots.get(bucket);
+    if (previous && (previous.promise || Date.now() - previous.at < PERSONAL_RATING_TTL_MS))
+      return previous.promise || Promise.resolve(previous.index);
+
+    const epoch = this.epoch, generation = this.personalRatingGeneration;
+    const task = (async () => {
+      let session = this.getSession();
+      if (!validSession(session)) return null;
+      if (session.expiresAt < Date.now() + 60000) session = await this.refresh();
+      if (epoch !== this.epoch) return null;
+      let response = await send('/sync/ratings/' + bucket, {token: session.accessToken});
+      if (response.status === 401 && epoch === this.epoch) {
+        // Use an existing refresh where possible; do not refresh per title.
+        session = this.getSession()?.accessToken !== session.accessToken ?
+          this.getSession() : await this.refresh();
+        if (epoch !== this.epoch || !validSession(session)) return null;
+        response = await send('/sync/ratings/' + bucket, {token: session.accessToken});
+      }
+      if (epoch !== this.epoch) return null;
+      if (response.status !== 200)
+        throw new Error('Simkl rating lookup failed (HTTP ' + response.status + ').');
+      return indexPersonalRatings(response.data, bucket);
+    })();
+    const record = {promise: task, index: null, at: 0};
+    this.personalRatingSnapshots.set(bucket, record);
+    // Do not retain failed requests or responses superseded by a rating change.
+    task.then(index => {
+      if (index && epoch === this.epoch && generation === this.personalRatingGeneration &&
+          this.personalRatingSnapshots.get(bucket) === record) {
+        record.promise = null;
+        record.index = index;
+        record.at = Date.now();
+      }
+    }, () => {
+      if (this.personalRatingSnapshots.get(bucket) === record)
+        this.personalRatingSnapshots.delete(bucket);
+    });
+    return task;
+  }
   async getTitleRating(api,item) {
     if (!['movie','show'].includes(item?.type)) return null;
-    let session=this.getSession();
+    const session = this.getSession();
+    this.syncPersonalRatingAccount(session);
     if (!validSession(session)) return null;
-    const ids=await this.ratingIds(api,item);
-    if (!Object.keys(ids).length) return null;
-    if (session.expiresAt < Date.now()+60000) session=await this.refresh();
-    const buckets=item.type==='movie'?['movies']:['shows','anime'];
-    for(const bucket of buckets){
-      const response=await send('/sync/ratings/'+bucket,{token:session.accessToken});
-      if(response.status!==200)throw new Error('Simkl rating lookup failed (HTTP '+response.status+').');
-      const entries=Array.isArray(response.data)?response.data:
-        (Array.isArray(response.data?.[bucket])?response.data[bucket]:[]);
-      for(const entry of entries){
-        const remote=(item.type==='movie'?entry.movie:entry.show)?.ids || entry.ids || {};
-        if(!Object.keys(ids).some(key=>remote[key]!=null && String(remote[key])===String(ids[key])))continue;
-        const score=Number(entry.user_rating??entry.rating);
-        return Number.isFinite(score)&&score>0?Math.min(10,Math.round(score)):null;
-      }
+    const epoch = this.epoch;
+    const ids = await this.ratingIds(api,item);
+    if (epoch !== this.epoch || !Object.keys(ids).length) return null;
+    const buckets = item.type === 'movie' ? ['movies'] : ['shows','anime'];
+    for (const bucket of buckets) {
+      const current = this.getSession();
+      this.syncPersonalRatingAccount(current);
+      if (!validSession(current)) return null;
+      const generation = this.personalRatingGeneration;
+      const index = await this.personalRatingBucket(bucket);
+      if (epoch !== this.epoch) return null;
+      this.syncPersonalRatingAccount(this.getSession());
+      // Never publish a stale in-flight read after a write or account change.
+      if (generation !== this.personalRatingGeneration)
+        return this.getTitleRating(api,item);
+      if (!index) return null;
+      const matched = matchPersonalRating(index, ids);
+      if (matched) return matched.score;
     }
     return null;
   }
@@ -375,8 +469,11 @@ export class SimklTracker {
       throw Error('Invalid Simkl rating.');
     const bucket=item.type==='movie'?'movies':'shows',payload={[bucket]:[{ids,...(score===null?{}:{rating:score})}]};
     const epoch=this.epoch;
-    const task=this.queue.catch(()=>{}).then(()=>this.post(
-      score===null?'/sync/ratings/remove':'/sync/ratings',payload,false,epoch));
+    const task=this.queue.catch(()=>{}).then(async()=>{
+      await this.post(score===null?'/sync/ratings/remove':'/sync/ratings',payload,false,epoch);
+      if (epoch===this.epoch && validSession(this.getSession()))
+        this.invalidatePersonalRatings(bucket);
+    });
     this.queue=task;
     return task;
   }
@@ -396,6 +493,9 @@ export class SimklTracker {
         session.pendingStops = this.pendingStops();
         session.retryNotBefore = this.holdUntil;
         this.setSession(session);
+        // An ordinary token refresh keeps the same account's snapshots.
+        if (this.personalRatingToken === existing.accessToken)
+          this.personalRatingToken = session.accessToken;
         return session;
       })().finally(() => { this.refreshTask = null; });
     }

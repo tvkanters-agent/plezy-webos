@@ -1,3 +1,10 @@
+## 1.22.12 — Cache personal Simkl ratings
+
+- Reuse five-minute, account-scoped Simkl personal-rating snapshots for movies, shows and anime instead of downloading full lists for each detail page.
+- Coalesce concurrent lookups, index ratings by external IDs, and cache both ratings and misses.
+- Refresh snapshots after successful rate/unrate or expiration, discard them on disconnect/relink, retry failed reads and preserve data across normal token refreshes.
+- Add tests for concurrency, account isolation, category fallbacks, errors and expiry.
+
 ## 1.22.11 — Fix Plex action timeouts and large-season navigation
 
 - Route Plex mark watched, mark unwatched and rating requests through the app's existing 15-second cancellable HTTP transport; accept empty/XML success responses without JSON parsing. Failed requests remain retryable without changing local watch state or syncing Simkl.
