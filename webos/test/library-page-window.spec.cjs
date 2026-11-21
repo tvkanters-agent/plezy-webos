@@ -175,3 +175,75 @@ test('a cached date sort paints before refresh and keeps the focused poster on i
   await expect(card(page,'10')).toBeFocused();
   expect(await card(page,'10').evaluate(node => node === window.cachedPoster)).toBe(true);
 });
+
+for (const [sortLabel, plexSort] of [
+  ['Recently added', 'addedAt:desc'], ['Release date', 'originallyAvailableAt:desc']
+]) {
+  for (const mutation of ['insert', 'remove']) {
+    test(`restored ${sortLabel} repaginates after a first-page ${mutation}`, async ({page}) => {
+      let mutateOnRefresh = false;
+      const requests = await mockLibrary(page, 180, ({start, sort, titles}) => {
+        if (!mutateOnRefresh || start !== 0 || sort !== plexSort) return;
+        mutateOnRefresh = false;
+        if (mutation === 'insert')
+          titles.unshift({ratingKey:'new', type:'movie', title:'New Film'});
+        else titles.shift();
+      });
+      await page.goto('/');
+      await openDateSort(page, sortLabel);
+      const grid = page.locator('.paged-window-grid');
+      // Load three contiguous pages before leaving the tab.
+      for (const offset of [60, 120]) {
+        const previousHeight = await pane(page).evaluate(main => {
+          main.scrollTop = main.scrollHeight;
+          return main.scrollHeight;
+        });
+        await expect.poll(() => requests.some(r => r.sort === plexSort && r.start === offset))
+          .toBe(true);
+        await expect.poll(() => pane(page).evaluate(main => main.scrollHeight))
+          .toBeGreaterThan(previousHeight);
+      }
+      await expect.poll(() => grid.evaluate(node => node._libraryWindow.has(179)))
+        .toBe(true);
+      await page.getByRole('button', {name:'Settings',exact:true}).click();
+      mutateOnRefresh = true;
+      await page.locator('.rail-library-items').getByRole('button',{name:'Movies'}).click();
+      // Wait for the first page's changed identity, then scroll through the
+      // replacement pages: the bounded window only fetches what is reached.
+      await expect.poll(() => grid.evaluate((node, id) =>
+        node._libraryWindow.focusById(id)?._libraryWindowIndex,
+        mutation === 'insert' ? 'new' : '1')).toBe(0);
+      for (const [offset, lastIndex] of [
+        [60, 119], [120, mutation === 'insert' ? 179 : 178],
+        ...(mutation === 'insert' ? [[180, 180]] : [])
+      ]) {
+        await pane(page).evaluate(main => { main.scrollTop = main.scrollHeight; });
+        await expect.poll(() =>
+          requests.filter(r => r.sort === plexSort && r.start === offset).length)
+          .toBeGreaterThanOrEqual(offset === 180 ? 1 : 2);
+        await expect.poll(() =>
+          grid.evaluate((node, index) => node._libraryWindow.has(index), lastIndex))
+          .toBe(true);
+      }
+      // The restored tab must not splice old offsets 60/120 into the changed
+      // first page, even when both first pages contain exactly 60 titles.
+      const ids = mutation === 'insert'
+        ? ['new','59','60','119','120','179']
+        : ['1','59','60','119','120','179'];
+      const expected = mutation === 'insert'
+        ? [0,60,61,120,121,180]
+        : [0,58,59,118,119,178];
+      await expect.poll(async () => grid.evaluate((node, ids) => {
+        const windowed = node._libraryWindow;
+        return ids.map(id => {
+          const card = windowed.focusById(id);
+          return card ? card._libraryWindowIndex : -1;
+        });
+      }, ids)).toEqual(expected);
+      expect(requests.filter(r => r.sort === plexSort && r.start === 60).length)
+        .toBeGreaterThanOrEqual(2);
+      expect(requests.filter(r => r.sort === plexSort && r.start === 120).length)
+        .toBeGreaterThanOrEqual(2);
+    });
+  }
+}
