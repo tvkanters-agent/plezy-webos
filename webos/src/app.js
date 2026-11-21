@@ -2432,21 +2432,17 @@ async function render(prepared = null) {
         });
       }
       const actions = el('div', undefined, 'detail-actions');
-      const refreshWatchState = watched => {
-        refreshDetailWatchActions(actions, item);
-        if (item.folder && detailActive())
-          forEachPagedGrid(main, grid => grid._markWatched(watched));
-      };
-      // The original watch request may finish while this detail is reopened
-      // from a cached item. Refresh this instance only when identity and
-      // account scope match; do not remount the DOM or steal focus.
+      // A covered detail and its grid share the same retained fragment.
+      // Resolve the acknowledgement against this view, even while detached.
       content._syncWatchState = (sourceApi, sourceScope, sourceRoute, watched) => {
-        if (!detailActive() || currentApi !== sourceApi ||
+        if (detailDisposed || currentApi !== sourceApi ||
             detailServerScope !== sourceScope ||
             String(detailRoute.id) !== String(sourceRoute.id) ||
             detailRoute.kind !== sourceRoute.kind) return;
         updateLocalWatchState(item, watched);
-        refreshWatchState(watched);
+        refreshDetailWatchActions(actions, item);
+        if (item.folder && content.parentNode)
+          forEachPagedGrid(content.parentNode, grid => grid._markWatched(watched));
       };
       let watchMutationPending = false;
       const markDetailWatched = async watched => {
@@ -2468,12 +2464,11 @@ async function render(prepared = null) {
           persistDetailWatchState(item, detailRoute, detailServerScope);
           if (currentApi instanceof Plex && simklTracker.epoch === trackerEpochAtMutation)
             simklTracker.markWatched(currentApi, item, watched);
-          // Keep the original detached snapshot coherent, but also reconcile a
-          // newly mounted detail for this same title after Back/reopening.
-          if (!detailDisposed) refreshWatchState(watched);
-          const visibleDetail = main.querySelector('.detail');
-          if (visibleDetail && visibleDetail !== content)
-            visibleDetail._syncWatchState?.(currentApi, detailServerScope, detailRoute, watched);
+          // Back can restore any retained instance, including one opened
+          // after this request started. Update the newest view last.
+          for (const container of [...history.map(entry => entry.snapshot), main])
+            container?.querySelector('.detail')?._syncWatchState?.(
+              currentApi, detailServerScope, detailRoute, watched);
           if (!detailActive()) return;
           notify(watched ? 'Marked as watched' : 'Marked as unwatched');
         } finally { watchMutationPending = false; }

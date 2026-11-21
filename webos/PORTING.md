@@ -295,8 +295,11 @@ server acknowledgement. It does not call the route renderer or reset artwork,
 scroll or remote focus. In-flight detail revalidation from before the action is
 retired to prevent stale responses from remounting the page during a mark.
 The episode More options watched actions use the same mounted-control refresh.
-Browser tests assert DOM identity and uninterrupted focus for both paths;
-actual LG playback and focus remain hardware-verification items.
+Like native detail screens kept alive beneath a pushed route, webOS detail
+snapshots on the Back stack receive acknowledgements for the same title and
+account. A season's retained grid updates its episode rows and applies the
+acknowledged state to pages arriving later. Browser tests assert DOM identity
+and focus continuity. Actual LG playback and focus require hardware verification.
 
 ### Alphabet rail in large libraries
 
