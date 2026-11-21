@@ -476,7 +476,12 @@ export class Plex {
       session: sessionId, subtitleSize: 100, subtitles: 'burn',
       // Match native Plezy's HLS burn request. The TV seeks on the full
       // timeline while PMS can serve a segment as it encodes it.
-      ...(selectedSubtitle ? {fastSeek: 1, 'X-Plex-Incomplete-Segments': '1'} : {}),
+      ...(selectedSubtitle ? {
+        fastSeek: 1, 'X-Plex-Incomplete-Segments': '1',
+        // Short segments reduce the video preceding an unbuffered seek.
+        // PMS decides whether the selected audio fits the AAC HLS target.
+        secondsPerSegment: 2, directStreamAudio: 1
+      } : {}),
       // The Plex HLS endpoint needs the selected source audio ID as well as
       // the part-level PUT; otherwise it can play the default audio instead.
       ...(options.audio !== undefined ? {audioStreamID:options.audio} : {}),
