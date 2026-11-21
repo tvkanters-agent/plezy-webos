@@ -1,8 +1,13 @@
-## 1.22.32 — Fix Plex date-sort page ordering after refresh
+## 1.22.33 — Fix Plex date-sort page ordering after refresh
 
 - Keep pending page requests separate when Plex shifts the order twice during browsing.
 - Reconcile first-page updates completed while the library tab was detached.
 - Discard successor cache entries from older builds that could have saved the wrong ordering.
+
+## 1.22.32 — Publish webOS pre-releases after multi-commit pushes
+
+- Compare the version before the master push with the version at the tested tip, so release notes committed after a version bump can ship in the same push.
+- Skip separate same-version pushes and use the original push SHAs on retries.
 
 ## 1.22.31 — Fix watched action on reopened Plex details
 
