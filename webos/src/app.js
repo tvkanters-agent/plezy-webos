@@ -10,6 +10,7 @@ import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
 import {artworkPrefetchMargin, artworkWindowCount, artworkWindowStart, shelfWindow} from './artwork-window.js';
 import {CatalogCache} from './catalog-cache.js';
 import {cardLabels} from './card-labels.js';
+import {reconcileRecommendedShelves} from './recommended-shelves.js';
 import {PersistentCatalogCache, catalogScope} from './persistent-catalog.js';
 import {beginContentEntrance, fadeDelayedContent} from './content-entrance.js';
 import {mergedCollectionLoader} from './collection-merge.js';
@@ -856,7 +857,13 @@ function revalidateRestoredLibrary(expectedRoute, mountedRevision) {
         paged._applyCatalogUpdate(0, update);
         return;
       }
-      // Recommended shelves have their own renderer; rebuild only if changed.
+      // A restored Recommended tab owns its still-mounted shelves. Update
+      // those nodes in place rather than re-rendering the entire library.
+      const tabs = main.querySelector('.library-tabs');
+      if (view === 'recommended' && tabs?._applyRecommendedUpdate) {
+        tabs._applyRecommendedUpdate(update.value).catch(() => {});
+        return;
+      }
       const focused = main.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
       route = {...route, scroll:main.scrollTop, focus:focused || route.focus};
       render();
@@ -1754,37 +1761,41 @@ async function render(prepared = null) {
         if (!valid()) return;
         const anchor = document.createComment('recommended-shelves');
         main.append(anchor);
-        let mounted = [];
+        let mounted = [], paintGeneration = 0;
         async function paintShelves(shelves, updated = false) {
+          const generation = ++paintGeneration;
           await prewarmShelves(shelves, currentApi);
-          if (!valid() || !anchor.isConnected) return;
-          const fragment = document.createDocumentFragment(), next = [];
-          if (!shelves.length) next.push(el('p', 'No recommendations for this library.', 'muted'));
-          shelves.forEach(shelf => {
-            const section = el('section', undefined, 'shelf');
-            section.append(el('h2', shelf.title), cards(shelf.items));
-            next.push(section);
-          });
-          const focus = updated && main.contains(document.activeElement) ?
-            document.activeElement.dataset.focus : null;
+          if (!valid() || !anchor.isConnected || generation !== paintGeneration) return;
+          const focused = updated && main.contains(document.activeElement)
+            ? document.activeElement : null;
+          const section = focused?.closest('.shelf');
+          const focusKey = focused?.dataset.focus;
           const scroll = main.scrollTop;
-          next.forEach(node => {
-            if (!updated) fadeDelayedContent(node, contentStartedAt);
-            fragment.appendChild(node);
-          });
-          main.insertBefore(fragment, anchor);
-          mounted.forEach(node => node.remove());
-          mounted = next;
+          const horizontal = new Map(mounted.filter(node => node.classList.contains('shelf'))
+            .map(node => [node, node.querySelector('.cards').scrollLeft]));
+          mounted = reconcileRecommendedShelves(anchor, mounted, shelves, card);
+          if (!updated) mounted.forEach(node => fadeDelayedContent(node, contentStartedAt));
           if (updated) {
-            main.scrollTop = scroll;
-            if (focus) {
-              const selected = Array.from(main.querySelectorAll('[data-focus]')).find(
-                node => node.dataset.focus === focus);
+            if (focused && document.activeElement !== focused) {
+              const originalSection = section && mounted.includes(section) ? section : null;
+              const candidates = originalSection
+                ? Array.from(originalSection.querySelectorAll('[data-focus]'))
+                : [];
+              let selected = focused.isConnected ? focused : candidates.find(
+                node => node.dataset.focus === focusKey);
+              if (!selected && focusKey) selected = Array.from(
+                main.querySelectorAll('.shelf [data-focus]')).find(
+                node => node.dataset.focus === focusKey);
               if (selected) focusWithoutJump(selected, false);
             }
+            main.scrollTop = scroll;
+            horizontal.forEach((left, node) => {
+              if (mounted.includes(node)) node.querySelector('.cards').scrollLeft = left;
+            });
           }
           schedulePosters();
         }
+        tabs._applyRecommendedUpdate = shelves => paintShelves(shelves, true);
         await paintShelves(result.value);
         if (result.fresh) result.fresh.then(update => {
           if (update.changed && valid()) paintShelves(update.value, true).catch(() => {});
