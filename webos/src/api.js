@@ -306,7 +306,7 @@ export class Plex {
   // Avoid fetching a whole series' thousands of episodes for a single next item.
   async episodeChildren(parentId) {
     const episodes = [];
-    for (let start = 0; start < 1000; ) {
+    for (let start = 0; ; ) {
       const page = await this.children(parentId, start);
       episodes.push(...page.items);
       if (!page.items.length) break;
@@ -443,20 +443,16 @@ export class Plex {
     // Upstream markAsWatched/markAsUnwatched only require HTTP success;
     // parsing these responses as JSON falsely reports a failed watch action.
     const path = played ? '/:/scrobble' : '/:/unscrobble';
-    const response = await fetch(this.url(path, {key:item.id,
-      identifier:'com.plexapp.plugins.library'}));
-    if (!response.ok) {
-      const error = new Error('Plex watched state returned HTTP ' + response.status + '.');
-      error.status = response.status; throw error;
-    }
+    await request(this.url(path, {key:item.id,
+      identifier:'com.plexapp.plugins.library'}), {responseType:'none'});
   }
   async rate(item, value) {
     if (!Number.isFinite(value) || (value !== -1 && (value < 0 || value > 10)))
       throw new Error('Invalid Plex rating.');
     // Plex responds with XML or an empty body, not necessarily JSON.
-    const response=await fetch(this.url('/:/rate',{
-      key:item.id,identifier:'com.plexapp.plugins.library',rating:value}),{method:'PUT'});
-    if (!response.ok) throw new Error('Plex rating returned HTTP '+response.status+'.');
+    await request(this.url('/:/rate',{
+      key:item.id,identifier:'com.plexapp.plugins.library',rating:value}),
+    {method:'PUT',responseType:'none'});
     return true;
   }
   // Preserve the v1.10.2 Plex playback path independently of the newer
