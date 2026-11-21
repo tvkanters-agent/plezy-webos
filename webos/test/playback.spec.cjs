@@ -1497,7 +1497,8 @@ test('all seek entry points recover a decoder pause without another remote Play'
       set(value){video.pause();descriptor.set.call(video,value);}
     });
   });
-  await page.getByRole('button',{name:'Next chapter',exact:true}).click();
+  // Chapter seek now uses the existing Programme Up remote shortcut.
+  await page.keyboard.press('PageUp');
   await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(44);
   await page.locator('[data-action="seek"]').evaluate(slider=>{
