@@ -1,3 +1,10 @@
+## 1.22.17 — Parallel, scoped webOS CI
+
+- Parallelize unit, bundle/IPK and two browser E2E shards while preserving the final QA gate.
+- Avoid duplicate PR/push runs and cancel superseded PR revisions, but never cancel master releases.
+- Run feature-specific E2E only for isolated changes; use full browser coverage for shared/unknown changes and every master build.
+- Add selection regressions and safe merge instructions.
+
 ## 1.22.16 — Fix Plex series Shuffle
 
 - Shuffle now traverses seasons and paginated episodes in Plex series rather than treating season rows as unplayable.

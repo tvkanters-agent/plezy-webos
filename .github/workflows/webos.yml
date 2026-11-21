@@ -1,15 +1,24 @@
 name: webOS TV
 on:
+  # PRs run once, not as duplicate branch push and pull_request checks.
   push:
+    branches: [master]
     paths: ['webos/**', '.github/workflows/webos.yml']
   pull_request:
+    branches: [master]
     paths: ['webos/**', '.github/workflows/webos.yml']
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: webos-${{ github.event.pull_request.number || github.ref }}
+  # Never interrupt a master build or release; cancel obsolete PR revisions.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  test-and-package:
+  unit:
+    name: Unit tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: webos
@@ -22,24 +31,96 @@ jobs:
           cache-dependency-path: webos/package-lock.json
       - run: npm ci
       - run: npm test
-      # Generate native PNG splash with the Chromium already used for E2E.
-      # Ubuntu runners already include Chromium's headless runtime libraries.
-      # Installing --with-deps forces an apt update/upgrade, which can hang on
-      # mirrors even though no missing shared libraries are needed for tests.
+
+  build-and-package:
+    name: Chromium 53 bundle and IPK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webos/package-lock.json
+      - run: npm ci
+      # The splash build itself uses Chromium, independently of E2E.
       - run: npx playwright install chromium
       - run: npm run build
       - run: npm run test:bundle
-      - run: npm run test:e2e
-      - run: npm run package
+      - run: npx ares-package --no-minify dist service -o build
       - uses: actions/upload-artifact@v4
         with:
           name: plezy-webos-ipk
           path: webos/build/*.ipk
+          if-no-files-found: error
+
+  e2e:
+    name: E2E (shard ${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    defaults:
+      run:
+        working-directory: webos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: selection
+        name: Select relevant browser regressions
+        run: node scripts/ci-select-e2e.mjs >> "$GITHUB_OUTPUT"
+      # Two runners for full suites; targeted suites run only on shard 1.
+      - uses: actions/setup-node@v4
+        if: steps.selection.outputs.mode == 'full' || (steps.selection.outputs.mode == 'targeted' && matrix.shard == 1)
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webos/package-lock.json
+      - run: npm ci
+        if: steps.selection.outputs.mode == 'full' || (steps.selection.outputs.mode == 'targeted' && matrix.shard == 1)
+      - run: npx playwright install chromium
+        if: steps.selection.outputs.mode == 'full' || (steps.selection.outputs.mode == 'targeted' && matrix.shard == 1)
+      - run: npm run build
+        if: steps.selection.outputs.mode == 'full' || (steps.selection.outputs.mode == 'targeted' && matrix.shard == 1)
+      - name: Run browser regressions
+        if: steps.selection.outputs.mode == 'full' || (steps.selection.outputs.mode == 'targeted' && matrix.shard == 1)
+        run: |
+          if [ "${{ steps.selection.outputs.mode }}" = full ]; then
+            npm run test:e2e -- --shard=${{ matrix.shard }}/2
+          else
+            npm run test:e2e -- ${{ steps.selection.outputs.specs }}
+          fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: webos-test-results
+          name: webos-test-results-${{ matrix.shard }}
           path: webos/test-results/
+
+  # Keep the original required check name. It turns green only after ALL jobs
+  # succeed, including both E2E shards and successful IPK packaging.
+  test-and-package:
+    name: test-and-package
+    needs: [unit, build-and-package, e2e]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every validation job to succeed
+        env:
+          UNIT: ${{ needs.unit.result }}
+          BUNDLE: ${{ needs.build-and-package.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          test "$UNIT" = success
+          test "$BUNDLE" = success
+          test "$E2E" = success
+
   release:
     needs: test-and-package
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
