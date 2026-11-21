@@ -1298,7 +1298,7 @@ export class Player {
     this.buffering.style.display = show ? 'flex' : 'none';
   }
   async loadSeekFrames(session, generation) {
-    if (typeof this.api?.scrubPreview !== 'function') return;
+    if (this.previewAbort || typeof this.api?.scrubPreview !== 'function') return;
     const controller = new AbortController();
     this.previewAbort = controller;
     try {
@@ -1311,6 +1311,9 @@ export class Player {
   renderSeekPreview(seconds) {
     const duration = this.timelineDuration();
     if (!this.session || duration <= 0 || !this.active) return;
+    // A user scrub takes priority over waiting for the burn-in startup frame.
+    if (this.seeking && this.session.subtitleBurnedIn && !this.previewAbort)
+      this.loadSeekFrames(this.session, this.generation);
     const frame = bifFrameAt(this.previewFrames, seconds);
     const hasImage = !!frame;
     this.seekTooltip.classList.toggle('no-image', !hasImage);
