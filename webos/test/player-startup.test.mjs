@@ -381,3 +381,22 @@ test('a dimensionless LG video with a known first frame can finish subtitle star
   t.mock.timers.tick(0);
   assert.equal(player.loaded,true,'native decoders without reported dimensions still load subtitles');
 });
+
+test('burn-in resume waits for a frame at the target before loading seek thumbnails once',()=>{
+  const session={legacyPlexPlayback:true,subtitleBurnedIn:true};
+  const requests=[];
+  const player=Object.assign(Object.create(Player.prototype),{
+    session,generation:7,initialSeekPending:true,video:{readyState:2},
+    loadSeekFrames(...args){requests.push(args);}
+  });
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[]);
+  player.initialSeekPending=false;
+  player.video.readyState=1;
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[]);
+  player.hasFirstFrame=true;
+  player.checkStartupProgress();
+  player.checkStartupProgress();
+  assert.deepEqual(requests,[[session,7]]);
+});

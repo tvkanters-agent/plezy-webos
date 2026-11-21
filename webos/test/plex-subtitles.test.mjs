@@ -39,7 +39,9 @@ test('compatibility mode restores pre-change Plex HLS and burn-in for MKV SRT an
     assert.equal(url.searchParams.get('directPlay'),'0');
     assert.equal(url.searchParams.has('hasMDE'),false);
     assert.equal(url.searchParams.has('subtitleStreamID'),false);
-    assert.equal(url.searchParams.has('fastSeek'),false);
+    assert.equal(url.searchParams.get('fastSeek'),'1');
+    assert.equal(url.searchParams.get('X-Plex-Incomplete-Segments'),'1');
+    assert.equal(url.searchParams.has('offset'),false);
     assert.deepEqual(calls.map(call=>call.path),['/library/parts/55','/library/metadata/123']);
     assert.equal(calls[0].params.subtitleStreamID,92);
     await session.extrasPromise;
@@ -135,6 +137,7 @@ test('compatibility mode retains the historical MP4 direct-versus-compatible dec
   await burned.extrasPromise;
   const compatible=await api.playback(item,{srtPlayback:false,assPlayback:false,transcode:true,subtitle:-1});
   assert.equal(compatible.transcode,true);
+  assert.equal(new URL(compatible.url).searchParams.has('X-Plex-Incomplete-Segments'),false);
   assert.equal(new URL(compatible.url).searchParams.get('subtitles'),'burn');
   assert.equal(calls.at(-2).params.subtitleStreamID,0);
   assert.ok(!calls.some(call=>call.path==='/video/:/transcode/universal/decision'));
