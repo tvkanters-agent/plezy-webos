@@ -222,3 +222,155 @@ test('simultaneous poster probes share one disk lookup', async () => {
   assert.equal(await cache.cachedSource('same'),null);
   assert.equal(reads,1);
 });
+
+
+test('persistent artwork keys omit Plex and Jellyfin tokens and isolate accounts', () => {
+  const plex='https://plex.test/photo?X-Plex-Token=private-plex-token&X-Plex-Version=1.2.1&width=320';
+  const jellyfin='https://jf.test/Items/1/Images/Primary?api_key=private-jellyfin-key';
+  const scopeA='account-a', scopeB='account-b';
+  for (const url of [plex,jellyfin]) {
+    const key=artworkCacheKey(url,'revision-1',scopeA);
+    assert.ok(key.startsWith('artwork:'));
+    assert.ok(!key.includes('private-plex-token'));
+    assert.ok(!key.includes('private-jellyfin-key'));
+    assert.ok(!key.includes('X-Plex-Token') && !key.includes('api_key'));
+    assert.notEqual(key,artworkCacheKey(url,'revision-1',scopeB));
+    assert.notEqual(key,artworkCacheKey(url,'revision-2',scopeA));
+  }
+  assert.equal(artworkCacheKey(plex,'rev','account-a'),
+    artworkCacheKey(plex.replace('1.2.1','1.2.2'),'rev','account-a'));
+  assert.notEqual(artworkCacheKey(plex,'rev','account-a'),
+    artworkCacheKey(plex.replace('private-plex-token','another-plex-token'),'rev','account-a'));
+});
+
+test('opening the upgraded artwork DB purges old authenticated URL keys', async () => {
+  let cleared=0, version=0;
+  const factory={open(name,v) {
+    assert.equal(name,'plezy-artwork-v1');
+    version=v;
+    const request={
+      result:{objectStoreNames:{contains:()=>true}},
+      transaction:{objectStore:()=>({clear:()=>{cleared++;}})}
+    };
+    queueMicrotask(()=>{
+      request.onupgradeneeded({oldVersion:1});
+      request.onsuccess();
+    });
+    return request;
+  }};
+  const cache=new ArtworkCache({indexedDB:factory});
+  await cache.open();
+  assert.equal(version,2);
+  assert.equal(cleared,1);
+});
+
+function memoryArtworkDB(rows=new Map()) {
+  return {rows, transaction(_store,mode) {
+    const tx={oncomplete:null,onerror:null,onabort:null};
+    tx.objectStore=()=>({
+      put(entry) {
+        rows.set(entry.key,entry);
+        queueMicrotask(()=>tx.oncomplete?.());
+      },
+      openCursor() {
+        const request={onsuccess:null,result:null};
+        const keys=[...rows.keys()];
+        let i=0;
+        const next=()=>{
+          if(i>=keys.length) {
+            request.result=null;
+            request.onsuccess?.();
+            queueMicrotask(()=>tx.oncomplete?.());
+            return;
+          }
+          const key=keys[i++];
+          request.result={key,delete:()=>rows.delete(key),continue:()=>queueMicrotask(next)};
+          request.onsuccess?.();
+        };
+        queueMicrotask(next);
+        return request;
+      }
+    });
+    return tx;
+  }};
+}
+
+test('server removal purges only its persisted and RAM artwork', async () => {
+  const db=memoryArtworkDB();
+  const revoked=[];
+  const cache=new ArtworkCache({indexedDB:null,
+    urls:{createObjectURL:()=> 'blob:test',revokeObjectURL:url=>revoked.push(url)}});
+  cache.open=async()=>db;
+  const a=artworkCacheKey('https://plex.test/a?X-Plex-Token=secret-a','1','scope-a');
+  const b=artworkCacheKey('https://plex.test/b?X-Plex-Token=secret-b','1','scope-b');
+  await cache.save(a,blob());
+  await cache.save(b,blob());
+  cache.remember(a,blob());
+  cache.remember(b,blob());
+  cache.protect([a,b]);
+  assert.equal(db.rows.size,2);
+  await cache.removeScope('scope-a');
+  assert.equal(db.rows.has(a),false);
+  assert.equal(db.rows.has(b),true);
+  assert.equal(cache.memory.has(a),false);
+  assert.equal(cache.memory.has(b),true);
+  assert.equal(cache.protectedKeys.has(a),false);
+  assert.equal(cache.protectedKeys.has(b),true);
+  assert.deepEqual(revoked,['blob:test']);
+  await cache.save(a,blob());
+  assert.equal(db.rows.has(a),false,'removed account must not persist while revoked');
+  cache.allowScope('scope-a');
+  await cache.save(a,blob());
+  assert.equal(db.rows.has(a),true,'explicit re-login can populate fresh artwork');
+});
+
+test('slow pre-removal artwork fetch cannot restore a removed account after re-login', async () => {
+  const deliveries=[];
+  let created=0;
+  const cache=new ArtworkCache({indexedDB:null,
+    urls:{createObjectURL:()=> 'blob:fetch-'+(++created),revokeObjectURL:()=>{}},
+    fetch:()=>new Promise(resolve=>deliveries.push(resolve))});
+  const key=artworkCacheKey('https://plex.test/a?X-Plex-Token=secret','1','scope-a');
+  const url='https://plex.test/a?X-Plex-Token=secret';
+  const old=cache.resolve(key,url);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(deliveries.length,1);
+  await cache.removeScope('scope-a');
+  cache.allowScope('scope-a');
+  const fresh=cache.resolve(key,url);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(deliveries.length,2);
+  deliveries[0](new Response(blob(),{headers:{'content-type':'image/png'}}));
+  assert.equal(await old,'');
+  assert.equal(cache.memory.has(key),false);
+  deliveries[1](new Response(blob(),{headers:{'content-type':'image/png'}}));
+  assert.equal(await fresh,'blob:fetch-1');
+  assert.equal(cache.memory.has(key),true);
+});
+
+test('a pending IndexedDB open cannot write a removed account after deletion', async () => {
+  const db=memoryArtworkDB();
+  let finishOpen;
+  const pendingOpen=new Promise(resolve=>{finishOpen=resolve;});
+  const cache=new ArtworkCache({indexedDB:null});
+  cache.open=()=>pendingOpen;
+  const key=artworkCacheKey('https://jf.test/a?api_key=secret','1','scope-a');
+  const write=cache.save(key,blob());
+  const removal=cache.removeScope('scope-a');
+  finishOpen(db);
+  await Promise.all([write,removal]);
+  assert.equal(db.rows.has(key),false);
+});
+
+
+test('direct-loaded artwork hints remain isolated when another server is removed', async () => {
+  const cache=new ArtworkCache({indexedDB:null});
+  const url='https://plex.test/poster?X-Plex-Token=private';
+  cache.markDirectImage(url,'scope-a');
+  cache.markDirectImage(url,'scope-b');
+  assert.equal(cache.directLoaded.size,2);
+  assert.ok(![...cache.directLoaded.keys()].some(key=>key.includes('private')));
+  await cache.removeScope('scope-a');
+  assert.equal(cache.sawDirectImage(url,'scope-a'),false);
+  assert.equal(cache.sawDirectImage(url,'scope-b'),true);
+});

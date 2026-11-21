@@ -260,11 +260,38 @@ test('enhanced SRT playback setting persists and the removed ASS control never a
   })).toEqual([false,false]);
   await expect(page.getByRole('button',{name:'Enhanced ASS playback'})).toHaveCount(0);
 });
-test('removing a server removes its token',async({page})=>{
-  await mockServer(page);await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();
+test('removing a server clears its token and persistent artwork',async({page})=>{
+  await mockServer(page);
+  await page.route('http://media.test/Items/movie/Images/Primary**',route=>route.fulfill({
+    body:'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>',
+    headers:{'Content-Type':'image/svg+xml','Access-Control-Allow-Origin':'*'}
+  }));
+  const artworkKeys=()=>page.evaluate(()=>new Promise(resolve=>{
+    const request=indexedDB.open('plezy-artwork-v1',2);
+    request.onerror=()=>resolve([]);
+    request.onsuccess=()=>{
+      const db=request.result,keys=[];
+      const tx=db.transaction('images','readonly');
+      const cursor=tx.objectStore('images').openCursor();
+      cursor.onsuccess=()=>{
+        const row=cursor.result;
+        if(row){keys.push(String(row.key));row.continue();}
+      };
+      tx.oncomplete=()=>{db.close();resolve(keys);};
+      tx.onabort=()=>{db.close();resolve([]);};
+      tx.onerror=()=>{db.close();resolve([]);};
+    };
+  }));
+  await page.goto('/');
+  await expect(page.locator('main .card .poster img').first()).toHaveClass(/artwork-loaded/);
+  await expect.poll(async()=>(await artworkKeys()).length).toBeGreaterThan(0);
+  const keys=await artworkKeys();
+  expect(keys.every(key=>!key.includes('test-token')&&!key.includes('api_key'))).toBe(true);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByRole('button',{name:'Test cinema',exact:true}).click();
   await page.getByRole('button',{name:'Remove from this TV'}).click();
   expect(await page.evaluate(()=>localStorage.getItem('plezy.webos'))).not.toContain('test-token');
+  await expect.poll(artworkKeys).toEqual([]);
 });
 test('Back 461 opens an exit confirmation and traps navigation inside it',async({page})=>{
   await page.goto('/');await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{keyCode:461,bubbles:true})));
@@ -1729,7 +1756,7 @@ test('artwork persists through reload and decoded memory hits render before inse
   const first=page.locator('main .card .poster img').first();
   await expect(first).toHaveClass(/artwork-loaded/);
   await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
-    const request=indexedDB.open('plezy-artwork-v1',1);
+    const request=indexedDB.open('plezy-artwork-v1',2);
     request.onerror=()=>resolve(0);
     request.onsuccess=()=>{
       const tx=request.result.transaction('images','readonly');
@@ -2007,7 +2034,7 @@ test('persisted Home and library artwork paint ready on the first DOM frame afte
   await expect.poll(()=>page.locator('main .shelf .poster img.artwork-loaded').count()).toBe(4);
   // The async disk write is not on the image-load critical path.
   await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
-    const req=indexedDB.open('plezy-artwork-v1',1);
+    const req=indexedDB.open('plezy-artwork-v1',2);
     req.onerror=()=>resolve(0);
     req.onsuccess=()=>{
       const tx=req.result.transaction('images','readonly');
@@ -2272,7 +2299,7 @@ test('scrolling reads disk artwork even while six download slots are blocked',as
   // Seed a previously downloaded, currently offscreen file after initial page
   // preparation. Its load must bypass the six blocked network requests.
   await target.evaluate(img=>new Promise(resolve=>{
-    const request=indexedDB.open('plezy-artwork-v1',1);
+    const request=indexedDB.open('plezy-artwork-v1',2);
     request.onsuccess=()=>{
       const tx=request.result.transaction('images','readwrite');
       const blob=new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>'],{type:'image/svg+xml'});

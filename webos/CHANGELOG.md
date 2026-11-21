@@ -1,3 +1,9 @@
+## 1.22.14 — Remove credentials from persisted artwork cache
+
+- Persist account-scoped artwork fingerprints instead of storing authenticated Plex/Jellyfin/Emby image URLs in IndexedDB keys.
+- Remove a disconnected server's persisted and in-memory artwork without deleting other servers' caches, and reject stale in-flight work after removal or credential replacement.
+- Clear unsafe legacy URL-keyed artwork on first IndexedDB schema upgrade and add browser/unit regression tests.
+
 ## 1.22.13 — Prevent slow playback reporting from blocking Stop and restart
 
 - Coalesce unsent progress heartbeats; send final stopped position without waiting behind a growing queue.

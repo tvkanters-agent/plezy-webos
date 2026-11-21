@@ -155,6 +155,15 @@ function setClient() {
   libraryCache = null; libraryCacheFor = null; libraryLoading = false;
 }
 function addServer(server) {
+  // A refreshed connection can replace an existing token under the same ID.
+  // Discard the old account scope now, so later removal cannot leave it behind.
+  const previous = state.servers.find(s => s.id === server.id);
+  if (previous && catalogScope(previous) !== catalogScope(server)) {
+    const previousScope = catalogScope(previous);
+    savedCatalog.removeScope(previousScope).catch(() => {});
+    artworkCache.removeScope(previousScope).catch(() => {});
+  }
+  artworkCache.allowScope(catalogScope(server));
   state.servers = state.servers.filter(s => s.id !== server.id).concat(server);
   state.active = server.id; persist(); setClient(); go({type: 'home'}, false);
 }
@@ -1068,8 +1077,9 @@ function artworkImage(url, persistent, failed, revision = '') {
   // Revisioned artwork persists until metadata changes. Artwork without a
   // revision can still be reused immediately in RAM for this session, but
   // is never persisted and therefore cannot go stale across launches.
-  const diskKey = persistent ? artworkCacheKey(url, revision) : '';
-  const key = persistent ? (diskKey || 'session:' + url) : '';
+  const scope = catalogScope(activeServer());
+  const diskKey = persistent ? artworkCacheKey(url, revision, scope) : '';
+  const key = persistent ? (diskKey || artworkCacheKey(url, 'session', scope)) : '';
   if (key) {
     if (diskKey) img.setAttribute('data-artwork-cache', '1');
     img.setAttribute('data-artwork-key', key);
@@ -1077,7 +1087,7 @@ function artworkImage(url, persistent, failed, revision = '') {
   img.setAttribute('data-artwork-url', url);
   img.onload = () => {
     if (key && img.src.indexOf('blob:') === 0) artworkCache.markReady(key);
-    else if (img.src === url) artworkCache.markDirectImage(url);
+    else if (img.src === url) artworkCache.markDirectImage(url, scope);
     if (img.classList.contains('artwork-ready')) return;
     // A second frame guarantees the transparent starting style was painted,
     // even when IndexedDB or the browser cache resolves during initial layout.
@@ -1098,7 +1108,7 @@ function artworkImage(url, persistent, failed, revision = '') {
   if (ready) {
     img.classList.add('artwork-ready');
     img.src = ready; // Set before DOM insertion for the first rendered frame.
-  } else if (artworkCache.sawDirectImage(url)) {
+  } else if (artworkCache.sawDirectImage(url, scope)) {
     // Native image cache hits decode synchronously. Only skip the fade if
     // Chromium confirms this image is actually ready before DOM insertion.
     img.src = url;
@@ -1282,7 +1292,7 @@ async function prewarmPosters(items, sourceApi = api, options = {}) {
   for (const item of items.slice(0, limit)) {
     const url = sourceApi.image(item, options);
     if (!url) continue;
-    const key = artworkCacheKey(url, sourceApi.artworkVersion(item, options));
+    const key = artworkCacheKey(url, sourceApi.artworkVersion(item, options), catalogScope(sourceApi.server));
     if (key) keys.push(key);
   }
   if (options.protectFirst) artworkCache.protect(keys.slice(0, options.protectFirst));
@@ -1296,7 +1306,7 @@ async function prewarmShelves(shelves, sourceApi = api) {
   for (const item of landing) {
     const url = sourceApi.image(item);
     if (!url) continue;
-    const key = artworkCacheKey(url, sourceApi.artworkVersion(item));
+    const key = artworkCacheKey(url, sourceApi.artworkVersion(item), catalogScope(sourceApi.server));
     if (key) keys.push(key);
   }
   artworkCache.protect(keys);
@@ -1308,7 +1318,7 @@ async function prewarmDetail({item, parentShow}, sourceApi) {
   await prewarmPosters([posterItem], sourceApi, {detail:true, landscape:episode});
   const hero = item.background ? item : parentShow;
   if (sourceApi instanceof Plex && hero?.background) {
-    const key = artworkCacheKey(sourceApi.backdrop(hero), sourceApi.backdropVersion(hero));
+    const key = artworkCacheKey(sourceApi.backdrop(hero), sourceApi.backdropVersion(hero), catalogScope(sourceApi.server));
     if (key) await artworkCache.prewarm([key]);
   }
 }
@@ -2986,7 +2996,9 @@ function settingsSubpage(page,serverId) {
           state.active=server.id;persist();setClient();go({type:'home'},false);
         },'server-open'),
       settingsTile('Remove from this TV','Removes the saved account token and catalog.','hidden',()=>{
-        savedCatalog.removeScope(catalogScope(server)).catch(()=>{});
+        const scope = catalogScope(server);
+        savedCatalog.removeScope(scope).catch(()=>{});
+        artworkCache.removeScope(scope).catch(()=>{});
         state.servers=state.servers.filter(s=>s.id!==server.id);persist();setClient();go({type:'settings'},false);
       },'server-remove')
     ]);
