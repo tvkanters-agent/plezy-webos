@@ -18,11 +18,48 @@ const scoped = new Map([
   ['webos/src/pixi-subtitles.js', ['playback', 'settings', 'episode-menus']]
 ]);
 
+
+// Version-only release metadata must not force full E2E for an isolated fix.
+// Compare whole JSON objects after masking ONLY the package/app version fields;
+// any dependency, manifest, or other content change requires full coverage.
+export function isVersionOnlyContent(file, before, after) {
+  if (before === after) return false;
+  if (file === 'webos/src/core.js') {
+    const re = /(export const VERSION\s*=\s*')\d+\.\d+\.\d+(';)/;
+    if (!re.test(before) || !re.test(after)) return false;
+    return before.replace(re, '$1VERSION_ONLY$2') ===
+      after.replace(re, '$1VERSION_ONLY$2');
+  }
+  if (!['webos/package.json', 'webos/package-lock.json',
+    'webos/public/appinfo.json'].includes(file)) return false;
+  try {
+    const a = JSON.parse(before), b = JSON.parse(after);
+    const semver = /^\d+\.\d+\.\d+$/;
+    if (!semver.test(a.version) || !semver.test(b.version) ||
+        a.version === b.version) return false;
+    if (file === 'webos/package-lock.json') {
+      if (!a.packages || !b.packages || !a.packages[''] || !b.packages[''] ||
+          a.packages[''].version !== a.version ||
+          b.packages[''].version !== b.version) return false;
+      a.packages[''].version = b.packages[''].version = 'VERSION_ONLY';
+    }
+    a.version = b.version = 'VERSION_ONLY';
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch (_) {
+    return false;
+  }
+}
+const releaseVersionFiles = [
+  'webos/package.json', 'webos/package-lock.json',
+  'webos/src/core.js', 'webos/public/appinfo.json'
+];
+
 const full = () => ({mode: 'full', specs: []});
-export function selectE2E(files) {
+export function selectE2E(files, versionOnlyPaths = new Set()) {
   if (!Array.isArray(files) || !files.length) return full();
   const specs = new Set();
   for (const name of files) {
+    if (versionOnlyPaths.has(name)) continue;
     if (/^webos\/[^/]+\.md$/.test(name) ||
         /^webos\/releases\/[^/]+\.md$/.test(name) ||
         name === 'webos/.gitignore' || name === 'AGENTS.md') continue;
@@ -51,7 +88,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const changed = execFileSync('git',
         ['diff', '--no-renames', '--name-only', 'HEAD^1', 'HEAD'],
         {encoding: 'utf8', maxBuffer: 1024 * 1024});
-      selected = selectE2E(changed.split('\n').filter(Boolean));
+      const paths = changed.split('\n').filter(Boolean);
+      const versionOnly = new Set();
+      for (const file of paths) {
+        if (!releaseVersionFiles.includes(file)) continue;
+        try {
+          const oldContent = execFileSync('git', ['show', 'HEAD^1:' + file],
+            {encoding: 'utf8', maxBuffer: 1024 * 1024});
+          const newContent = execFileSync('git', ['show', 'HEAD:' + file],
+            {encoding: 'utf8', maxBuffer: 1024 * 1024});
+          if (isVersionOnlyContent(file, oldContent, newContent))
+            versionOnly.add(file);
+        } catch (_) { /* Deleted/renamed files must force full coverage. */ }
+      }
+      selected = selectE2E(paths, versionOnly);
       if (selected.specs.some(file => !existsSync(file))) selected = full();
     } catch (err) {
       console.error('PR diff unavailable: using full E2E (' + err.message + ')');
