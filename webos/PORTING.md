@@ -52,7 +52,7 @@ Only currently implemented webOS options appear: Video Playback (Player,
 Subtitles and Auto-play & Skip), Manage Libraries, Services (Simkl and MDBList), Connections,
 and About. The original General and Appearance pages, and native-only playback
 preferences, are omitted rather than populated with invented settings. Server
-connection details and the separate SRT/ASS playback switches are existing webOS-only
+connection details and the enhanced SRT playback switch are existing webOS-only
 controls placed in the closest original group. First-run server connection and
 standalone Simkl linking remain available. Flutter's Material rows are rendered
 as grouped HTML/CSS and inline SVGs because webOS Chromium 53 cannot run Flutter
@@ -629,6 +629,21 @@ Media Captions receives the current media clock on animation frames only while S
 Episode menu wrappers retain a separate catalog identity while their play and overflow controls retain stable focus IDs. Catalog reconciliation can therefore preserve unchanged rows and restore the specific control. As with WatchStateNotifier, a server-acknowledged aggregate watched action updates mounted children, their source metadata and saved child pages without remounting artwork; older revalidation cannot undo it. Later loaded children inherit the aggregate action while the route stays mounted.
 
 Source-track PUT follows PlexClient.selectStreams and treats HTTP success as success regardless of an XML/empty body. Rapid changes merge their options and position before awaiting old-session cleanup, and paused track changes pause again after the first resumed decoder frame (LG needs Play to decode that frame). Subtitle offset storage is scoped by the existing account/server fingerprint plus item ID; ambiguous old unscoped offsets are not migrated. Only the latest pending episode Play action may launch after metadata arrives.
+
+### Enhanced ASS removal (1.22.10)
+
+Enhanced ASS/SSA playback was removed after incorrect rendering and unreliable
+startup/seek synchronization on LG webOS. ASS/SSA always uses Plex's original
+HLS burn-in, regardless of previously persisted `assPlayback` or
+`enhancedPlayback` values. The ASS switch, SubtitlesOctopus/libass worker,
+font/track caches, incremental event loader and build assets are removed.
+
+Enhanced SRT/VTT remains opt-in and unchanged in intent: compatible direct
+playback with a PixiJS overlay, or a clean HLS stream with embedded SRT
+extraction. SRT-to-SRT and SRT-to-Off change only the overlay, without
+reopening the decoder. Changing between SRT and ASS must reopen playback,
+because Plex must add or remove the burned-in subtitle pixels. The current
+media position, selected tracks and playing/paused state are preserved.
 
 ### Guarded native Direct Play
 

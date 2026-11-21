@@ -54,16 +54,12 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   await connected(page);
   await page.getByRole('button',{name:'Video Playback',exact:true}).click();
   const srt=page.getByRole('button',{name:'Enhanced SRT playback'});
-  const ass=page.getByRole('button',{name:'Enhanced ASS playback'});
+  await expect(page.getByRole('button',{name:'Enhanced ASS playback'})).toHaveCount(0);
   await expect(srt).toHaveAttribute('aria-pressed','false');
-  await expect(ass).toHaveAttribute('aria-pressed','false');
   await srt.click();
   await expect(srt).toHaveAttribute('aria-pressed','true');
-  await expect(ass).toHaveAttribute('aria-pressed','false');
   await expect(srt).toBeFocused();
   const quality=page.getByRole('button',{name:'Quality',exact:true});
-  await page.keyboard.press('ArrowDown');
-  await expect(ass).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(quality).toBeFocused();
   await page.keyboard.press('Enter');
@@ -89,7 +85,7 @@ test('Playback settings preserve toggle focus and use selection/input dialogs',a
   await expect(intro).toBeFocused();
   expect(await page.evaluate(()=>{
     const state=JSON.parse(localStorage.getItem('plezy.webos'));
-    return [state.srtPlayback,state.assPlayback,state.quality,state.autoSkipDelay,state.introPattern];
+    return [state.srtPlayback,Object.prototype.hasOwnProperty.call(state,'assPlayback'),state.quality,state.autoSkipDelay,state.introPattern];
   })).toEqual([true,false,'transcode',12,'']);
 });
 

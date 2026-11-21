@@ -85,19 +85,19 @@ test('track selection cannot be replaced by the file default; local text need no
 test('Plex native URL, MIME, sidecar and HLS fallback preserve version, position and track IDs',async()=>{
   const oldWindow=globalThis.window;globalThis.window={PalmSystem:{}};
   try {
-    const m=media();m.Part[0].Stream.push({streamType:3,id:90,codec:'ass',key:'/sub.ass',selected:1});
+    const m=media();m.Part[0].Stream.push({streamType:3,id:90,codec:'srt',key:'/sub.srt',selected:1});
     const item={id:'123',duration:1200,raw:{Media:[media('avi'),m]}};
     const api=new Plex({url:'http://plex.test/prefix',token:'token'},'tv');
     const calls=[];api.get=async(path,params,options)=>{
       calls.push({path,params,options});return {MediaContainer:{Metadata:[{}]}};
     };
-  const options={srtPlayback:true,assPlayback:true,mediaIndex:1,start:125.25,subtitle:90,audio:21};
+  const options={srtPlayback:true,mediaIndex:1,start:125.25,subtitle:90,audio:21};
     const session=await api.playback(item,options);
     assert.equal(session.transcode,false);
     assert.equal(session.mimeType,'video/x-matroska');
     assert.equal(new URL(session.url).pathname,'/prefix/library/parts/55/file.mkv');
     assert.equal(session.start,125.25);
-    assert.equal(session.subtitleAsset.format,'ass');
+    assert.equal(session.subtitleAsset.format,'srt');
     assert.equal(calls[0].params.audioStreamID,21);
     assert.equal(calls[0].params.subtitleStreamID,90);
     await session.extrasPromise;

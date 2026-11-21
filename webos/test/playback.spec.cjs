@@ -1,8 +1,7 @@
 const {test,expect} = require('@playwright/test');
 const {readFile} = require('node:fs/promises');
 const path = require('node:path');
-const {assFixture, srtFixture} = require('./fixtures/matroska.cjs');
-const packagedEntry = require('node:url').pathToFileURL(path.resolve(__dirname,'../dist/index.html')).href;
+const {srtFixture} = require('./fixtures/matroska.cjs');
 const plexSubtitlePath = '/subtitles/:/transcode/universal/start';
 async function setup(page, extra = {}, version, pendingStops = [], skipSettings = {}, metadataForRequest = null, bifBytes = null, subtitleResponse = null, waitForPlayback = true, mkvFixture = null, entryUrl = '/') {
   const video = await readFile(path.join(__dirname,'fixtures/test.webm'));
@@ -10,7 +9,7 @@ async function setup(page, extra = {}, version, pendingStops = [], skipSettings 
   let metadataRequests = 0;
   // Existing renderer/Direct Play regressions explicitly exercise the opt-in
   // path; the compatibility-mode case below switches it off.
-  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({srtPlayback:true,assPlayback:true,...skipSettings,deviceId:'device',active:'plex',
+  await page.addInitScript(({pendingStops,skipSettings})=>localStorage.setItem('plezy.webos',JSON.stringify({srtPlayback:true,...skipSettings,deviceId:'device',active:'plex',
     servers:[{id:'plex',kind:'plex',name:'Plex',url:'http://plex.test',token:'fixture'}],
     simkl:{accessToken:'simkl_at_fixture',refreshToken:'simkl_rt_fixture',expiresAt:Date.now()+600000,scope:'media:write',pendingStops}})),{pendingStops,skipSettings});
   const item = {ratingKey:'movie',type:'movie',title:'Test Movie',duration:120000,Guid:[{id:'imdb://tt1234567'}],
@@ -79,7 +78,7 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
   for (const codec of ['srt','ass']) {
     const {calls}=await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
       Part:[{id:'part',key:'/video.webm',Stream:[
-        {streamType:3,id:32,codec,selected:1}]}]}]},undefined,[],{srtPlayback:false,assPlayback:false},
+        {streamType:3,id:32,codec,selected:1}]}]}]},undefined,[],{srtPlayback:false},
         null,null,null,false);
     // Chromium desktop cannot decode HLS; validate the URL and UI without
     // treating a fake video/webm response as a functioning HLS stream.
@@ -110,6 +109,42 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
     await expect(page.getByRole('slider',{name:'Subtitle sync offset'})).toHaveCount(0);
   }
 });
+test('enhanced SRT track changes and Off avoid decoder reload; ASS selects Plex burn-in',async({page})=>{
+  await page.addInitScript(()=>{
+    window.plezyVideoLoads=0;
+    const original=HTMLMediaElement.prototype.load;
+    HTMLMediaElement.prototype.load=function(){
+      window.plezyVideoLoads++;
+      return original.apply(this,arguments);
+    };
+  });
+  const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'part',key:'/video.webm',Stream:[
+      {streamType:3,id:31,codec:'srt',languageCode:'eng',selected:1,key:'/subtitles.srt'},
+      {streamType:3,id:32,codec:'srt',languageCode:'fra',key:'/subtitles.srt'},
+      {streamType:3,id:33,codec:'ass',languageCode:'spa',key:'/subtitles.ass'}
+    ]}]}]},undefined,[],{},null,null,async()=>{
+    return '1\n00:00:10,000 --> 00:00:11,000\nSRT fast switch\n';
+  });
+  const loads=await page.evaluate(()=>window.plezyVideoLoads);
+  const trackSheet=page.getByRole('button',{name:'Audio & Subtitles'});
+  await trackSheet.click();
+  await page.locator('.player-track-column').last().getByRole('button',{name:/French/}).click();
+  await expect(page.locator('.player-track-column').last().getByRole('button',{name:/French/}))
+    .toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>window.plezyVideoLoads)).toBe(loads);
+  await page.locator('.player-track-column').last().getByRole('button',{name:'Off',exact:true}).click();
+  expect(await page.evaluate(()=>window.plezyVideoLoads)).toBe(loads);
+  await page.locator('.player-track-column').last().getByRole('button',{name:/English/}).click();
+  expect(await page.evaluate(()=>window.plezyVideoLoads)).toBe(loads);
+  await page.locator('.player-track-column').last().getByRole('button',{name:/Spanish/}).click();
+  await expect.poll(()=>calls.some(url=>url.pathname.endsWith('/start.m3u8') &&
+    url.searchParams.get('subtitles')==='burn')).toBe(true);
+  expect(await page.evaluate(()=>window.plezyVideoLoads)).toBeGreaterThan(loads);
+  expect(calls.some(url=>url.pathname==='/library/streams/33.ass')).toBe(false);
+  expect(await page.evaluate(()=>typeof window.SubtitlesOctopus)).toBe('undefined');
+});
+
 function buildBif(image) {
   const count=2, tableEnd=64+(count+1)*8;
   const bytes=Buffer.alloc(tableEnd+2*image.length);
@@ -1586,72 +1621,6 @@ test('the sync slider retimes rendered SRT on Chromium 53 without a seek or burn
   expect(errors).toEqual([]);
 });
 
-for (const [legacy, embedded] of [[false,false],[true,false],[true,true]]) {
-  test('sync slider retimes '+(embedded?'embedded':'external')+' ASS canvas pixels using '+(legacy?'legacy':'WASM')+' libass',async({page})=>{
-    test.setTimeout(90000);
-    page.on('console',message=>console.log('ASS '+(legacy?'legacy':'WASM')+': '+message.text()));
-    page.on('pageerror',error=>console.log('ASS error: '+error.message));
-    page.on('response',response=>{
-      if(response.status()>=400 && new URL(response.url()).hostname==='127.0.0.1')
-        console.log('ASS asset HTTP '+response.status()+': '+new URL(response.url()).pathname);
-    });
-    await page.addInitScript(legacy=>{
-      Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
-      if(legacy) window.WebAssembly=undefined;
-    },legacy);
-    const errors=[];
-    page.on('pageerror',error=>errors.push(error.message));
-    const {calls}=await setup(page,{Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
-      Part:[{id:'part',key:'/video.webm',Stream:[
-        {streamType:3,id:31,codec:'ass',selected:1,...(embedded?{}:{key:'/library/streams/31'})}
-      ]}]}]},undefined,[],{diagnosticsEnabled:!legacy},null,null,async url=>{
-        const subtitlePath=embedded?plexSubtitlePath:'/library/streams/31.ass';
-        if(url.pathname!==subtitlePath) return '<html>Not Found</html>';
-        return '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n'+
-          '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'+
-          'Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n'+
-          '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'+
-          'Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,OFFSET CUE\n';
-      },true,null,legacy ? '/' : packagedEntry);
-    await page.locator('[data-action="pause"]').click();
-    await page.locator('video').evaluate(video=>{video.currentTime=10.5;});
-    const canvas=page.locator('#player canvas.libassjs-canvas');
-    await expect(canvas).toBeVisible({timeout:60000});
-    const hasPixels=()=>canvas.evaluate(canvas=>{
-      const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-      for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
-      return false;
-    });
-    await expect.poll(hasPixels,{timeout:60000}).toBe(true);
-    const comparison=page.locator('.ass-color-comparison canvas');
-    if (!legacy) {
-      await expect(comparison).toBeVisible();
-      expect(await comparison.evaluate(canvas=>canvas.width)).toBeGreaterThan(0);
-    } else await expect(comparison).toHaveCount(0);
-    await page.getByRole('button',{name:'Playback settings'}).click();
-    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
-    const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
-    await slider.evaluate(input=>{
-      input.value='2000';input.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    await expect.poll(hasPixels).toBe(false);
-    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
-    await expect.poll(hasPixels).toBe(true);
-    await slider.evaluate(input=>{
-      input.value='-2000';input.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    await expect.poll(hasPixels).toBe(false);
-    await page.locator('video').evaluate(video=>{video.currentTime=8.5;});
-    await expect.poll(hasPixels).toBe(true);
-    expect(calls.some(url=>embedded
-      ? url.pathname===plexSubtitlePath && url.searchParams.get('subtitleStreamID')==='31'
-      : url.pathname==='/library/streams/31.ass' && url.searchParams.get('encoding')==='utf-8')).toBe(true);
-    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))).toHaveLength(0);
-    expect(errors).toEqual([]);
-  });
-}
-
-
 test('embedded SRT uses the selected track and changes visible cues while clean HLS plays',async({page})=>{
   let finishDownload;
   const download=new Promise(resolve=>{finishDownload=resolve;});
@@ -1824,62 +1793,37 @@ test('failed MKV byte ranges and Plex extraction silently retry HLS with burned 
   expect(starts()).toHaveLength(2);
 });
 
-for (const [codec,index,position] of [['srt',2,2.5],['ass',3,3.5]]) {
-  test('MKV ' + codec.toUpperCase() + ' sync works from original file when the decoder omits dimensions and Plex extraction is unavailable',async({page})=>{
-    await page.addInitScript(()=>{
-      window.WebAssembly=undefined;
-      // The hardware video plane can decode frames before exposing its size.
-      for (const key of ['videoWidth','videoHeight'])
-        Object.defineProperty(HTMLVideoElement.prototype,key,{get:()=>0});
-
-      Object.values=undefined; Object.entries=undefined; window.ResizeObserver=undefined;
-    });
-    const {calls}=await setup(page,{Media:[{aspectRatio:2.4,container:'mkv',videoCodec:'h264',audioCodec:'aac',
-      Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
-        {streamType:3,id:31,codec:'srt',index:2,selected:index===2},
-        {streamType:3,id:32,codec:'ass',index:3,selected:index===3}
-      ]}]}]},undefined,[],{},null,null,null,true,null,
-      codec==='ass' ? packagedEntry : '/');
-    const video=page.locator('video');
-    await page.locator('[data-action="pause"]').click();
-    await video.evaluate((element,time)=>{element.currentTime=time;},position);
-
-    const srt=page.locator('.player-captions');
-    const canvas=page.locator('#player canvas.libassjs-canvas');
-    const cueDrawn=codec==='srt' ? async()=> (await srt.textContent()).includes('Embedded SRT')
-      : ()=>canvas.evaluate(element=>{
-        const pixels=element.getContext('2d').getImageData(0,0,element.width,element.height).data;
-        for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
-        return false;
-      });
-    await expect.poll(cueDrawn,{timeout:10000}).toBe(true);
-    if (codec === 'ass') {
-      const ratio = await canvas.evaluate(el => el.clientWidth / el.clientHeight);
-      expect(ratio).toBeCloseTo(2.4, 2);
-      await expect(srt.locator('canvas.plezy-pixi-subtitles')).toHaveCount(0);
-      const box = await canvas.boundingBox();
-      expect(box.y).toBeGreaterThanOrEqual(0);
-      expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize().height + 1);
-    } else {
-      await expect(srt.locator('canvas.plezy-pixi-subtitles')).toBeVisible();
-    }
-
-
-    await page.getByRole('button',{name:'Playback settings'}).click();
-    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
-    const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
-    await slider.evaluate(input=>{
-      input.value='3000'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    await expect.poll(cueDrawn).toBe(false);
-    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
-    await expect.poll(cueDrawn).toBe(true);
-    expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
-    expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(false);
-    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
-      .toEqual(['none']);
+test('embedded MKV SRT sync works when the decoder omits dimensions and Plex extraction is unavailable',async({page})=>{
+  await page.addInitScript(()=>{
+    window.WebAssembly=undefined;
+    for(const key of ['videoWidth','videoHeight'])
+      Object.defineProperty(HTMLVideoElement.prototype,key,{get:()=>0});
+    Object.values=undefined;Object.entries=undefined;window.ResizeObserver=undefined;
   });
-}
+  const {calls}=await setup(page,{Media:[{aspectRatio:2.4,container:'mkv',videoCodec:'h264',audioCodec:'aac',
+    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
+      {streamType:3,id:31,codec:'srt',index:2,selected:1},
+      {streamType:3,id:32,codec:'ass',index:3}
+    ]}]}]});
+  await page.locator('[data-action="pause"]').click();
+  await page.locator('video').evaluate(video=>{video.currentTime=2.5;});
+  const captions=page.locator('.player-captions');
+  await expect(captions).toContainText('Embedded SRT',{timeout:10000});
+  await expect(captions.locator('canvas.plezy-pixi-subtitles')).toBeVisible();
+  await page.getByRole('button',{name:'Playback settings'}).click();
+  await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
+  const slider=page.getByRole('slider',{name:'Subtitle sync offset'});
+  await slider.evaluate(input=>{
+    input.value='3000';input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await expect(captions).not.toContainText('Embedded SRT');
+  await page.getByRole('button',{name:'Reset subtitle sync'}).click();
+  await expect(captions).toContainText('Embedded SRT');
+  expect(calls.some(url=>url.pathname==='/library/parts/embedded/file.mkv')).toBe(true);
+  expect(calls.some(url=>url.pathname===plexSubtitlePath)).toBe(false);
+  expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8'))
+    .map(url=>url.searchParams.get('subtitles'))).toEqual(['none']);
+});
 
 for (const enabled of [false,true]) {
   test('embedded SRT diagnostics ' + (enabled ? 'show on the TV when opted in' : 'do not exist when off'),
@@ -1905,327 +1849,6 @@ for (const enabled of [false,true]) {
       }
     });
 }
-
-for (const blocked of [false,true]) {
-  test('selected MKV ASS dialogue survives a ' + (blocked ? 'blocked' : 'ready but blank') + ' worker', async ({page}) => {
-    await page.addInitScript(blocked => {
-      String.prototype.padEnd = undefined;
-      window.Worker = class extends EventTarget {
-        constructor() {
-          super();
-          if (blocked) throw new Error('Worker creation blocked');
-        }
-        postMessage(message) {
-          if (message.target === 'worker-init')
-            Promise.resolve().then(() => this.dispatchEvent(new MessageEvent('message',{data:{target:'ready'}})));
-        }
-        terminate() {}
-      };
-    },blocked);
-    const {calls} = await setup(page,{Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
-      Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',Stream:[
-        {streamType:3,id:32,codec:'ass',index:3,selected:1}
-      ]}]}]},undefined,[],{},null,null,null,true,null,packagedEntry);
-    await page.locator('[data-action="pause"]').click();
-    await page.locator('video').evaluate(video=>{video.currentTime=3.5;});
-    const cue = page.locator('.player-captions [part="cue"]');
-    await expect(cue).toContainText('Embedded ASS',{timeout:15000});
-    await expect(cue).toBeVisible();
-    await page.getByRole('button',{name:'Playback settings'}).click();
-    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
-    await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(slider=>{
-      slider.value='3000'; slider.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    await expect(cue).toHaveCount(0);
-    await page.getByRole('button',{name:'Reset subtitle sync'}).click();
-    await expect(cue).toContainText('Embedded ASS');
-    expect(calls.filter(url=>url.pathname.endsWith('/start.m3u8')).map(url=>url.searchParams.get('subtitles')))
-      .toEqual(['none']);
-  });
-}
-
-test('animated ASS sign layers paint together between video time updates', async ({page}) => {
-  await page.addInitScript(() => {
-    window.WebAssembly = undefined;
-    document.addEventListener('timeupdate', event => event.stopImmediatePropagation(), true);
-    // Date.now() on an older TV can give two different libass frames the
-    // same millisecond timestamp. Force that collision in every browser run:
-    // animations and paused-seek clears must still reach the canvas.
-    const NativeWorker = window.Worker;
-    window.Worker = class extends NativeWorker {
-      constructor(...args) {
-        super(...args);
-        this.addEventListener('message', event => {
-          if (event.data?.target === 'canvas' && event.data.op === 'renderCanvas')
-            event.data.time = 1;
-        });
-      }
-    };
-  });
-  const script = [
-    '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 320', 'PlayResY: 180',
-    '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    'Dialogue: 0,0:00:00.00,0:00:30.00,Default,,0,0,0,,{\\an7\\pos(10,10)\\bord0\\shad0\\1c&H00FF00&\\p1}m 0 0 l 20 0 20 20 0 20',
-    'Dialogue: 1,0:00:00.00,0:00:30.00,Default,,0,0,0,,{\\an7\\move(20,60,290,60,0,15000)\\bord0\\shad0\\1c&H0000FF&\\p1}m 0 0 l 20 0 20 20 0 20'
-  ].join('\n');
-  await setup(page, {Media:[{container:'mp4',videoCodec:'h264',audioCodec:'aac',
-    Part:[{id:'part',key:'/video.webm',Stream:[
-      {streamType:3,id:31,codec:'ass',selected:1,key:'/library/streams/31'}]}]}]},
-    undefined, [], {}, null, null, () => script);
-  const canvas = page.locator('#player canvas.libassjs-canvas');
-  const position = () => canvas.evaluate(element => {
-    const probe = document.createElement('canvas');
-    probe.width = 320; probe.height = 180;
-    const ctx = probe.getContext('2d');
-    ctx.drawImage(element,0,0,320,180);
-    const pixels = ctx.getImageData(0,0,320,180).data;
-    let green = false, red = -1;
-    for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i+3] < 200) continue;
-      if (pixels[i+1] > 200 && pixels[i] < 30) green = true;
-      if (red < 0 && pixels[i] > 200 && pixels[i+1] < 30) red = (i / 4) % 320;
-    }
-    return green ? red : -1;
-  });
-  await expect.poll(position).toBeGreaterThan(0);
-  const start = await position();
-  await expect.poll(position).toBeGreaterThan(start + 3);
-  await page.locator('[data-action="pause"]').click();
-  // A no-op resize must never reset the visible canvas. Upstream compares
-  // style.top ('0px') to top (0), then unnecessarily reassigns canvas.width.
-  const resizePixels=await canvas.evaluate(element=>{
-    const visible=()=>{
-      const pixels=element.getContext('2d').getImageData(0,0,element.width,element.height).data;
-      for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
-      return false;
-    };
-    const before=visible();
-    window.dispatchEvent(new Event('resize'));
-    return {before,after:visible()};
-  });
-  expect(resizePixels).toEqual({before:true,after:true});
-});
-
-test('compressed MKV ASS draws before the final ranges arrive and keeps the applied sync', async ({page}) => {
-  await page.addInitScript(() => { window.WebAssembly = undefined; });
-  const font = await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
-  const fixture = assFixture(6000, 'ass', font);
-  let releaseTail;
-  const tail = new Promise(resolve => { releaseTail = resolve; });
-  const {calls} = await setup(page, {Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
-    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
-      {streamType:3,id:32,codec:'ass',index:0,selected:1}
-    ]}]}]}, undefined, [], {}, null, null, null, true, {
-    source:fixture.source, beforeRead:start => start === fixture.lastCluster ? tail : undefined
-  });
-  const video = page.locator('video');
-  const canvas = page.locator('#player canvas.libassjs-canvas');
-  const cueDrawn = () => canvas.evaluate(element => {
-    const pixels = element.getContext('2d').getImageData(0,0,element.width,element.height).data;
-    for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) return true;
-    return false;
-  });
-  try {
-    await page.locator('[data-action="pause"]').click();
-    await video.evaluate(element => { element.currentTime = 0.5; });
-    await expect.poll(cueDrawn).toBe(true);
-    // The packaged fallback lacks Hangul. Two distinct glyph images rule
-    // out drawing the same missing-glyph box with that fallback.
-    const glyphImage = () => canvas.evaluate(element => element.toDataURL());
-    const firstGlyph = await glyphImage();
-    await video.evaluate(element => { element.currentTime = 6.5; });
-    await expect.poll(async () => await cueDrawn() && await glyphImage() !== firstGlyph).toBe(true);
-    await video.evaluate(element => { element.currentTime = 0.5; });
-    await expect.poll(glyphImage).toBe(firstGlyph);
-    await page.getByRole('button',{name:'Playback settings'}).click();
-    await page.getByRole('button',{name:'Subtitle sync',exact:true}).click();
-    await page.getByRole('slider',{name:'Subtitle sync offset'}).evaluate(input => {
-      input.value = '1000';
-      input.dispatchEvent(new Event('input',{bubbles:true}));
-    });
-    await expect.poll(cueDrawn).toBe(false);
-    await video.evaluate(element => { element.currentTime = 103.5; });
-    await expect.poll(cueDrawn).toBe(false);
-  } finally {
-    releaseTail();
-  }
-  await expect.poll(cueDrawn).toBe(true);
-  expect(calls.filter(url => url.pathname.endsWith('/start.m3u8')).map(url => url.searchParams.get('subtitles')))
-    .toEqual(['none']);
-  expect(calls.some(url => url.pathname === plexSubtitlePath)).toBe(false);
-});
-
-test('embedded ASS fonts stay cached after restarting the app',async({page})=>{
-  const assRequests=[];
-  page.on('request',request=>{
-    if (request.url().includes('/libass/')) assRequests.push(request.url());
-  });
-  const font=await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
-  const fixture=assFixture(6000,'ass',font);
-  const ranges=[];
-  const metadata={Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
-    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
-      {streamType:3,id:32,codec:'ass',index:0,selected:1}
-    ]}]}]};
-  await setup(page,metadata,undefined,[],{},null,null,null,true,
-    {source:fixture.source,onRange:(start,end)=>ranges.push({start,length:end-start+1})});
-  const paint=async()=>page.locator('video').evaluate(video=>{video.currentTime=0.5;});
-  const painted=()=>page.locator('#player canvas.libassjs-canvas').evaluate(canvas=>{
-    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-    for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
-    return false;
-  });
-  await page.locator('[data-action="pause"]').click();
-  await paint();
-  await expect.poll(painted,{timeout:30000}).toBe(true);
-  await expect.poll(()=>ranges.filter(entry=>entry.length===font.length).length).toBe(1);
-  // Wait for the asynchronous IndexedDB write; the next load is a new JS
-  // process context and cannot use the previous module's in-memory cache.
-  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
-    const open=indexedDB.open('plezy-ass-fonts-v1',1);
-    open.onsuccess=()=>{
-      const count=open.result.transaction('fonts').objectStore('fonts').count();
-      count.onsuccess=()=>{resolve(count.result);open.result.close();};
-      count.onerror=()=>resolve(0);
-    };
-    open.onerror=()=>resolve(0);
-  }))).toBeGreaterThan(0);
-  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
-    const open=indexedDB.open('plezy-ass-tracks-v1',1);
-    open.onsuccess=()=>{
-      const count=open.result.transaction('tracks').objectStore('tracks').count();
-      count.onsuccess=()=>{resolve(count.result);open.result.close();};
-      count.onerror=()=>resolve(0);
-    };
-    open.onerror=()=>resolve(0);
-  }))).toBeGreaterThan(0);
-  const indexedReads=ranges.filter(entry=>entry.start===0&&entry.length===32768).length;
-  await page.reload();
-  await page.getByRole('button',{name:'Test Movie',exact:true}).click();
-  await page.getByRole('button',{name:'Play',exact:true}).first().click();
-  await page.locator('[data-action="pause"]').click();
-  await paint();
-  await expect.poll(painted,{timeout:30000}).toBe(true);
-  expect(ranges.filter(entry=>entry.length===font.length)).toHaveLength(1);
-  expect(ranges.filter(entry=>entry.start===0&&entry.length===32768)).toHaveLength(indexedReads);
-  expect(assRequests.length).toBeGreaterThan(0);
-  const appVersion=JSON.parse(await readFile(path.join(__dirname,'../dist/appinfo.json'),'utf8')).version;
-  expect(assRequests.every(url=>url.includes('/libass/v'+appVersion+'/'))).toBe(true,
-    'an IPK update must never reuse an earlier version of a worker script');
-});
-
-test('reopening ASS and switching episodes reuses the compiled worker and same-series fonts',async({page})=>{
-  await page.addInitScript(()=>{
-    window.WebAssembly=undefined;
-    window.assWorkerCreations=0;
-    window.assDebugMessages=[];
-    const OriginalWorker=window.Worker;
-    window.Worker=function(url) {
-      window.assWorkerCreations++;
-      const worker=new OriginalWorker(url);
-      window.assDebugWorker=worker;
-      const send=worker.postMessage.bind(worker);
-      worker.postMessage=function(data,...rest){
-        if (['video','set-track','create-events','plezy-force-frame'].includes(data?.target)) {
-          window.assDebugMessages.push({target:data.target,currentTime:data.currentTime,
-            paused:data.isPaused,events:data.events?.length,
-            script:data.content?.match(/Dialogue:/g)?.length});
-          if(window.assDebugMessages.length>40)window.assDebugMessages.shift();
-        }
-        return send(data,...rest);
-      };
-      return worker;
-    };
-    window.Worker.prototype=OriginalWorker.prototype;
-  });
-  const font=await readFile(path.resolve(__dirname,'../../assets/go-noto-kurrent-hangul.ttf'));
-  const fixture=assFixture(6000,'ass',font);
-  const reads=[];
-  const metadata={Media:[{container:'mkv',videoCodec:'h264',audioCodec:'aac',
-    Part:[{id:'embedded',key:'/library/parts/embedded/file.mkv',size:fixture.source.length,Stream:[
-      {streamType:3,id:32,codec:'ass',index:0,selected:1}
-    ]}]}]};
-  const mkvFixture={source:fixture.source,onRange:(start,end)=>reads.push({start,length:end-start+1})};
-  const {calls}=await setup(page,metadata,undefined,[],{},null,null,null,true,
-    mkvFixture);
-  const paint=async()=>page.locator('video').evaluate(video=>{video.currentTime=0.5;});
-  const hasGlyph=()=>page.locator('#player canvas.libassjs-canvas').evaluate(canvas=>{
-    const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-    for(let i=3;i<pixels.length;i+=4) if(pixels[i]) return true;
-    return false;
-  });
-  await page.locator('[data-action="pause"]').click();
-  await paint();
-  await expect.poll(hasGlyph,{timeout:30000}).toBe(true);
-  await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
-    const open=indexedDB.open('plezy-ass-tracks-v1',1);
-    open.onsuccess=()=>{
-      const request=open.result.transaction('tracks').objectStore('tracks').count();
-      request.onsuccess=()=>{resolve(request.result);open.result.close();};
-      request.onerror=()=>resolve(0);
-    };
-    open.onerror=()=>resolve(0);
-  }))).toBeGreaterThan(0);
-  const firstWorkers=await page.evaluate(()=>window.assWorkerCreations);
-  const firstIndexReads=reads.filter(entry=>entry.start===0&&entry.length===32768).length;
-  expect(firstWorkers).toBe(1);
-  await page.locator('[data-action="stop"]').click();
-  await expect(page.locator('#player')).toBeHidden();
-  await page.getByRole('button',{name:'Play',exact:true}).first().click();
-  await page.locator('[data-action="pause"]').click();
-  await paint();
-  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
-  await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
-  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
-  expect(reads.filter(entry=>entry.start===0&&entry.length===32768).length).toBe(firstIndexReads);
-  // A sibling episode has different timed dialogue, but identical font bytes.
-  // Its new track must replace the prior events without recompiling libass.
-  const sibling=assFixture(7000,'ass',font);
-  metadata.Media[0].Part[0].id='embedded-sibling';
-  metadata.Media[0].Part[0].size=sibling.source.length;
-  mkvFixture.source=sibling.source;
-  const priorMetadataReads=calls.filter(url=>url.pathname==='/library/metadata/movie').length;
-  await page.locator('[data-action="stop"]').click();
-  await expect(page.locator('#player')).toBeHidden();
-  // playbackClosed refreshes the detail's in-place item before the next Play.
-  await expect.poll(()=>calls.filter(url=>url.pathname==='/library/metadata/movie').length)
-    .toBeGreaterThan(priorMetadataReads);
-  await page.getByRole('button',{name:'Play',exact:true}).first().click();
-  await page.locator('[data-action="pause"]').click();
-  await paint();
-  await expect.poll(hasGlyph,{timeout:15000}).toBe(true);
-  await page.locator('video').evaluate(video=>{video.currentTime=6.5;});
-  try {
-    await expect.poll(hasGlyph).toBe(false);
-  } catch (error) {
-    const snapshot=await page.evaluate(()=>{
-      const video=document.querySelector('#player video');
-      return {currentTime:video?.currentTime,duration:video?.duration,
-        paused:video?.paused,seeking:video?.seeking,readyState:video?.readyState,
-        framesCreated:window.assWorkerCreations};
-    });
-    const events=await page.evaluate(()=>new Promise(resolve=>{
-      const worker=window.assDebugWorker;
-      if(!worker)return resolve(null);
-      const timer=setTimeout(()=>{worker.removeEventListener('message',onMessage);resolve('timeout');},3000);
-      function onMessage(event){
-        if(event.data?.target!=='get-events')return;
-        clearTimeout(timer);worker.removeEventListener('message',onMessage);
-        resolve(event.data.events?.map(e=>[e.Start,e.Duration,e.Text?.slice(0,50)]));
-      }
-      worker.addEventListener('message',onMessage);
-      worker.postMessage({target:'get-events'});
-    }));
-    console.error('ASS GAP FAIL SNAPSHOT:',JSON.stringify(snapshot));
-    console.error('ASS GAP EVENTS:',JSON.stringify(events));
-    console.error('ASS GAP MESSAGES:',JSON.stringify(await page.evaluate(()=>window.assDebugMessages)));
-    throw error;
-  }
-  await page.locator('video').evaluate(video=>{video.currentTime=7.5;});
-  await expect.poll(hasGlyph).toBe(true);
-  expect(await page.evaluate(()=>window.assWorkerCreations)).toBe(firstWorkers);
-  expect(reads.filter(entry=>entry.length===font.length)).toHaveLength(1);
-});
 
 test('embedded MKV SRT displays the first cue while later cluster reads are blocked', async ({page}) => {
   const fixture = srtFixture(6000);

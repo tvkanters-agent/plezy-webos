@@ -23,21 +23,22 @@ test('D-pad favors overlapping rows and columns and never moves backwards', () =
   assert.equal(nextFocus(origin,candidates,'up'), null);
 });
 test('corrupt storage recovers without throwing', () => { const state=readState({getItem:()=>'{broken'}); assert.deepEqual(state.servers,[]); assert.equal(state.deviceId.length,32); });
-test('SRT and ASS settings are independent and migrate the old opt-in',()=>{
-  for (const [saved,srt,ass] of [
-    [{},false,false],[{enhancedPlayback:true},true,true],
-    [{enhancedPlayback:false},false,false],[{enhancedPlayback:'true'},false,false],
-    [{srtPlayback:true},true,false],[{assPlayback:true},false,true],
-    [{enhancedPlayback:true,srtPlayback:false},false,true],
-    [{enhancedPlayback:true,assPlayback:false},true,false],
-    [{srtPlayback:'true',assPlayback:1},false,false]
+test('SRT setting preserves old opt-in migration but never restores enhanced ASS',()=>{
+  for(const [saved,srt] of [
+    [{},false],[{enhancedPlayback:true},true],
+    [{enhancedPlayback:false},false],[{enhancedPlayback:'true'},false],
+    [{srtPlayback:true},true],[{assPlayback:true},false],
+    [{enhancedPlayback:true,srtPlayback:false,assPlayback:true},false],
+    [{enhancedPlayback:true,assPlayback:false},true],
+    [{srtPlayback:'true',assPlayback:1},false]
   ]) {
     const state=readState({getItem:()=>JSON.stringify(saved)});
     assert.equal(state.srtPlayback,srt);
-    assert.equal(state.assPlayback,ass);
+    assert.equal(Object.prototype.hasOwnProperty.call(state,'assPlayback'),false);
   }
-  assert.equal(readState({getItem:()=>'{broken'}).srtPlayback,false);
-  assert.equal(readState({getItem:()=>'{broken'}).assPlayback,false);
+  const broken=readState({getItem:()=>'{broken'});
+  assert.equal(broken.srtPlayback,false);
+  assert.equal(Object.prototype.hasOwnProperty.call(broken,'assPlayback'),false);
 });
 test('general diagnostics defaults off, requires true and upgrades the previous SRT setting',()=>{
   for (const [saved,expected] of [

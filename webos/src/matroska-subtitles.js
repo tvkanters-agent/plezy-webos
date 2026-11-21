@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {unzlibSync} from 'fflate';
-import {assFontCache} from './ass-font-cache.js';
 import {nativeWebOS} from './plex-direct-play.js';
 
 // Read indexed text blocks from the Plex part. Element IDs and timestamps:
@@ -10,7 +9,6 @@ const SEEK_HEAD = 0x114d9b74;
 const INFO = 0x1549a966;
 const TRACKS = 0x1654ae6b;
 const CUES = 0x1c53bb6b;
-const ATTACHMENTS = 0x1941a469;
 const CLUSTER = 0x1f43b675;
 const BLOCK_GROUP = 0xa0;
 const BLOCK = 0xa1;
@@ -409,76 +407,13 @@ function formatCaptions(frames, track, ass) {
   return header + '\n' + events.sort((a,b) => a.order - b.order).map(event => event.line).join('\n') + '\n';
 }
 
-// Read attachment headers separately so cover art and other large payloads
-// never enter the subtitle buffer. libass selects faces by their font tables.
-async function attachedFonts(read, offset, scope) {
-  const fonts = [];
-  let remaining = MAX_TOTAL_READ;
-  // The old code made one Plex HTTP range request for *every* tiny EBML
-  // field (file header, field header, filename). Read a bounded metadata
-  // window instead, then skip the usually huge FileData without fetching it
-  // when the font was already cached for another episode.
-  const rootWindow = await read(offset, 4096);
-  const header = element(rootWindow, 0);
-  if (header.id !== ATTACHMENTS || !Number.isSafeInteger(header.end))
-    throw invalid('invalid attachment index');
-  const end = offset + header.end;
-  let count = 0;
-  let pos = offset + header.start;
-  for (; pos < end && count++ < 256;) {
-    const window = pos + 12 <= offset + rootWindow.length
-      ? rootWindow.subarray(pos - offset) : await read(pos, Math.min(4096, end - pos));
-    const file = element(window, 0);
-    if (pos + file.end > end) throw invalid('truncated attachment metadata');
-    if (file.id === 0x61a7) {
-      let name = '', data, crc;
-      const smallRead = (start, length) => start >= pos && start + length <= pos + window.length
-        ? Promise.resolve(window.subarray(start - pos, start - pos + length)) : read(start, length);
-      for (let child = pos + file.start; child < pos + file.end;) {
-        const entry = element(await smallRead(child, Math.min(12, pos + file.end - child)), 0);
-        if (child + entry.end > pos + file.end) throw invalid('invalid attachment field');
-        const length = entry.end - entry.start;
-        if (entry.id === 0x466e && length > 0 && length <= 1024)
-          name = decodeText(await smallRead(child + entry.start, length));
-        if (entry.id === 0xbf && length === 4)
-          crc = Array.from(await smallRead(child + entry.start, length), b => b.toString(16).padStart(2,'0')).join('');
-        if (entry.id === 0x465c) data = {offset:child + entry.start, length};
-        child += entry.end;
-      }
-      if (data && /\.(?:ttf|otf|ttc|woff2?)$/i.test(name)) {
-        if (!(data.length > 0 && data.length <= remaining))
-          throw invalid('embedded fonts exceed the attachment read limit');
-        name = name.split(/[\\/]/).pop();
-        let bytes = await assFontCache.get(scope, name, data.length, crc);
-        if (bytes && !crc) {
-          // Matroska doesn't require an attachment checksum. The small
-          // metadata window normally includes the font's first bytes;
-          // compare them before trusting a same-name/same-size cache match.
-          const sample = await smallRead(data.offset, Math.min(256, data.length));
-          if (sample.some((value,index) => value !== bytes[index])) bytes = null;
-        }
-        if (!bytes) {
-          bytes = await read(data.offset, data.length);
-          assFontCache.put(scope, name, bytes, crc);
-        }
-        fonts.push({name, bytes, crc});
-        remaining -= data.length;
-      }
-    }
-    pos += file.end;
-  }
-  if (pos < end) throw invalid('font attachment catalog exceeds the supported entry count');
-  return fonts;
-}
-
-export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead, onFonts, onTiming} = {}) {
+export async function extractMatroskaSubtitle(asset, signal, {position = 0, preview, onRead, onTiming} = {}) {
+  if (asset.format !== 'srt') throw invalid('only embedded SRT is supported');
   const startedAt = onTiming ? Date.now() : 0;
   const native = nativeWebOS();
   const request = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native, onTiming);
-  // The TV shares its connection with the video decoder. Its fetch shim
-  // cannot cancel the actual network request, so serialize abortable XHRs
-  // across *both* the subtitle and font readers. They can still overlap
-  // decoding, cache probes and CPU work without doubling video contention.
+  // The TV shares its connection with the video decoder. Serialize SRT
+  // range reads so a subtitle request cannot contend with video startup.
   let pending = Promise.resolve();
   const serialize = source => (offset, length) => {
     const next = pending.then(() => source(offset, length));
@@ -501,37 +436,16 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
   for (let offset = segment.start, count = 0; offset < segment.end && count < 128; count++) {
     const entry = element(offset + 12 <= prefix.length ? prefix.subarray(offset) : await read(offset, 12), 0);
     if (entry.id === CLUSTER) break;
-    if ([INFO, TRACKS, CUES, ATTACHMENTS].includes(entry.id)) positions.set(entry.id, offset);
+    if ([INFO, TRACKS, CUES].includes(entry.id)) positions.set(entry.id, offset);
     if (entry.id === SEEK_HEAD) await readSeekHead(offset);
     offset += entry.end;
-    if (complete() && (!onFonts || positions.has(ATTACHMENTS))) break;
+    if (complete()) break;
   }
-  while ((!complete() || (onFonts && !positions.has(ATTACHMENTS))) && heads.size < 16) {
+  while (!complete() && heads.size < 16) {
     const offset = positions.get(SEEK_HEAD);
     if (offset === undefined || heads.has(offset)) break;
     await readSeekHead(offset);
   }
-  // Font I/O and index/nearest-cluster I/O can proceed independently. The
-  // first ASS preview still waits for the fonts to preserve authored glyphs.
-  // Later clusters never pay for another attachment read or worker restart.
-  const fontRange = rangeReader(asset.partUrl, asset.partSize, signal, onRead, native, onTiming);
-  // Do not turn failed attachment reads into []: that permanently poisons
-  // the completed-track cache. Capture errors immediately so other indexed
-  // clusters can finish without an unhandled promise rejection.
-  const fontPromise = onFonts && positions.has(ATTACHMENTS)
-    ? attachedFonts(native ? serialize(fontRange) : fontRange,
-      positions.get(ATTACHMENTS), asset.fontScope)
-      .then(fonts => ({fonts}), error => ({error}))
-    : Promise.resolve({fonts:[]});
-  let fontsPublished = false;
-  const publishFonts = async () => {
-    if (fontsPublished || !onFonts) return;
-    const result = await fontPromise;
-    if (signal.aborted) throw abortError();
-    if (result.error) throw result.error;
-    onFonts(result.fonts);
-    fontsPublished = true;
-  };
   if (!complete()) throw invalid('the file has no usable seek index');
   const [info, tracks, index] = await Promise.all([INFO, TRACKS, CUES].map(id => readMetadata(read, positions.get(id), id)));
   const scale = uint(info, record(info), 0x2ad7b1) ?? 1000000;
@@ -545,10 +459,9 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
     groups.get(cue.cluster).push(cue);
   }
   const frames = [];
-  const ass = asset.format === 'ass';
   const target = position * 1000000000 / scale;
   const ordered = Array.from(groups.values()).map(group => ({group,
-    distance:Math.min(...group.map(cue => ass ? Math.max(cue.time - target, target - cue.time - (cue.duration || 0), 0) : Math.abs(cue.time - target)))}))
+    distance:Math.min(...group.map(cue => Math.abs(cue.time - target)))}))
     .sort((a,b) => a.distance - b.distance);
   async function readGroup({group}) {
     const offset = group[0].cluster;
@@ -573,17 +486,15 @@ export async function extractMatroskaSubtitle(asset, signal, {position = 0, prev
       frames.push({start:cue.time * scale / 1000000, end:(cue.time + duration) * scale / 1000000, text:block.text});
     }
   }
-  const initialBatch = ass ? Math.max(1, ordered.filter(entry => entry.distance === 0).length) : 1;
+  const initialBatch = 1;
   for (let start = 0, batch = initialBatch; start < ordered.length;) {
     await parallel(ordered.slice(start, start + batch), readGroup);
     start += batch;
     if (preview && start < ordered.length) {
-      if (ass) await publishFonts();
-      await preview(formatCaptions(frames, track, ass));
+      await preview(formatCaptions(frames, track, false));
     }
     batch = start === initialBatch ? Math.max(12, initialBatch) : Math.max(48, batch * 2);
   }
-  await publishFonts();
   if (onTiming) onTiming('complete', Date.now() - startedAt);
-  return formatCaptions(frames, track, ass);
+  return formatCaptions(frames, track, false);
 }

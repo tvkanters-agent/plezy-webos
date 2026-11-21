@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {subtitleStyle} from './subtitle-style.js';
-export const VERSION = '1.22.9';
+export const VERSION = '1.22.10';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app
@@ -90,12 +90,10 @@ export function readState(storage) {
     return {deviceId: typeof state.deviceId === 'string' && state.deviceId ? state.deviceId : id(),
       servers, active: typeof state.active === 'string' ? state.active : '',
       quality: state.quality === 'transcode' ? 'transcode' : 'auto',
-      // Upgrade the former single switch independently for each format.
-      // Explicit per-format choices always override the migrated value.
+      // Migrate the former single enhanced-playback switch to SRT only.
+      // Never restore the removed ASS option from saved state.
       srtPlayback: state.srtPlayback === true ||
         (state.srtPlayback === undefined && state.enhancedPlayback === true),
-      assPlayback: state.assPlayback === true ||
-        (state.assPlayback === undefined && state.enhancedPlayback === true),
       // One opt-in switch gates all current and future diagnostic features.
       // Honor users who enabled the SRT-specific v1.18.0 switch on upgrade.
       diagnosticsEnabled: state.diagnosticsEnabled === true || state.subtitleDiagnostics === true,
@@ -114,7 +112,7 @@ export function readState(storage) {
         ? state.hiddenLibraryIds.filter(x => typeof x === 'string').slice(0,100) : [],
       ...subtitleStyle(state)};
   } catch (_) { return {deviceId: id(), servers: [], active: '', quality: 'auto',
-    srtPlayback: false, assPlayback: false,
+    srtPlayback: false,
     diagnosticsEnabled: false,
     skipIntroMode: 'button', skipCreditsMode: 'button',
     autoSkipDelay: 5, forceSkipMarkerFallback: false, introPattern: '', creditsPattern: '',
