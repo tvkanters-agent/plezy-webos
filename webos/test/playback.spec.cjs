@@ -2000,3 +2000,48 @@ test('diagnostics reveal why the MKV reader used the Plex subtitle endpoint', as
   await expect(panel).toContainText('Source: Plex sidecar (MKV failed)');
   await expect(panel).toContainText('MKV failed: MKV subtitles: Plex did not serve a byte range (HTTP 200)');
 });
+
+test('Stop waits for the final Plex timeline before refreshing mounted and saved Resume', async ({page}) => {
+  let savedOffsetMs = 0, detailReads = 0, stopRequested = false, releaseStop;
+  const pendingStop = new Promise(resolve => { releaseStop = resolve; });
+  await setup(page, {}, undefined, [], {}, async (request, item) => {
+    detailReads++;
+    return {...item, viewOffset: savedOffsetMs};
+  });
+  const play = page.locator('#main .detail-play');
+  await expect(play).toHaveAttribute('aria-label', 'Play');
+  await page.locator('video').evaluate(video => { video.currentTime = 1.151; });
+  await expect.poll(() => page.locator('video').evaluate(video => video.currentTime)).toBeGreaterThan(1);
+  await page.route('http://plex.test/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/:/timeline') return route.fallback();
+    if (url.searchParams.get('state') === 'stopped') {
+      stopRequested = true;
+      await pendingStop;
+      savedOffsetMs = Number(url.searchParams.get('time'));
+    }
+    return route.fulfill({contentType:'application/xml', body:'<MediaContainer />'});
+  });
+
+  const originalDetail = await page.locator('#main .detail').elementHandle();
+  const readsBeforeStop = detailReads;
+  await page.getByRole('button', {name:'Stop', exact:true}).click();
+  await expect(page.locator('#player')).toBeHidden();
+  await expect.poll(() => stopRequested).toBe(true);
+  expect(detailReads).toBe(readsBeforeStop, 'metadata must not race the final report');
+  await expect(play).toHaveAttribute('aria-label', 'Play');
+  releaseStop();
+
+  await expect(play).toHaveAttribute('aria-label', /^Resume · /);
+  expect(await originalDetail.evaluate(element => element.isConnected)).toBe(true);
+  await expect.poll(async () => page.evaluate(() => new Promise(resolve => {
+    const open = indexedDB.open('plezy-catalog-v1', 1);
+    open.onerror = () => resolve(null);
+    open.onsuccess = () => {
+      const rows = open.result.transaction('pages', 'readonly').objectStore('pages').getAll();
+      rows.onerror = () => resolve(null);
+      rows.onsuccess = () => resolve(rows.result.find(row =>
+        row.key.includes(':detail:') && row.data?.item?.id === 'movie')?.data?.item?.resume ?? null);
+    };
+  }))).toBeGreaterThan(0);
+});
