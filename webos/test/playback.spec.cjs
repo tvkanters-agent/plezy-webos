@@ -308,10 +308,12 @@ test('previous and next chapter controls use the same traversal as Plezy',async(
   await expect(prev).toBeVisible();
   await next.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
-  await page.locator('video').evaluate(video=>{video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
+  // Seeks now resume automatically, so freeze the clock before checking the
+  // exact three-second chapter restart threshold.
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=13;video.dispatchEvent(new Event('timeupdate'));});
   await prev.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeLessThan(1);
-  await page.locator('video').evaluate(video=>{video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
+  await page.locator('video').evaluate(video=>{video.pause();video.currentTime=14;video.dispatchEvent(new Event('timeupdate'));});
   await prev.click();
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(10);
 });
@@ -640,13 +642,39 @@ test('Back cancels unconfirmed remote seek and then exits the player',async({pag
   await page.keyboard.press('Escape');
   await expect(page.locator('#player')).toBeHidden();
 });
-test('a paused player remains paused after confirming a remote seek',async({page})=>{
+test('a remote seek from paused automatically resumes after committing',async({page})=>{
   await setup(page);
   await page.locator('video').evaluate(video=>video.pause());
   await page.keyboard.press('Escape');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
   await expect.poll(()=>page.locator('video').evaluate(video=>video.currentTime)).toBeGreaterThanOrEqual(9);
+  await expect.poll(()=>page.locator('video').evaluate(video=>video.paused)).toBe(false);
+});
+
+test('Pause during buffering after a paused seek prevents late automatic playback',async({page})=>{
+  await setup(page);
+  await page.locator('video').evaluate(video=>video.pause());
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await page.locator('video').evaluate(video=>{
+    window.seekPlayCalls=0;
+    window.seekPauseCalls=0;
+    const nativePause=video.pause.bind(video);
+    video.pause=()=>{window.seekPauseCalls++;return nativePause();};
+    // The LG play request can remain unresolved while waiting for data.
+    video.play=()=>{window.seekPlayCalls++;return new Promise(()=>{});};
+  });
+  await page.keyboard.press('Enter');
+  await expect.poll(()=>page.evaluate(()=>window.seekPlayCalls)).toBe(1);
+  await page.keyboard.press('Space');
+  await page.locator('video').dispatchEvent('seeked');
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  const beforeLatePlay=await page.evaluate(()=>window.seekPauseCalls);
+  await page.locator('video').dispatchEvent('playing');
+  expect(await page.evaluate(()=>window.seekPauseCalls)).toBeGreaterThan(beforeLatePlay);
+  await page.waitForTimeout(1300);
+  expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(1);
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
 });
 
