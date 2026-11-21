@@ -229,15 +229,19 @@ test('Stop during an unfinished HLS startup retires Plex session before immediat
     await expect(page.locator('#player')).toBeHidden();
     await expect.poll(()=>stopRequests).toBe(1);
     await page.locator('#main .detail-play').click();
-    await expect(page.locator('#player')).toBeVisible();
     await page.waitForTimeout(100);
     const startedSessions=()=>page.evaluate(()=>
       new Set(window.interruptedHlsLoads.map(url=>new URL(url).searchParams.get('session'))).size);
-    // LG's video.load() during Stop may still reference the old HLS URL.
-    // Count distinct Plex sessions, not native load() calls on that URL.
+    // Wait before checking visibility: the new player deliberately remains
+    // hidden until Plex retires the old HLS session. Waiting for it to show
+    // first would cross the three-second fallback deadline.
+    // LG's video.load() during Stop may still reference the old HLS URL,
+    // so count distinct Plex sessions rather than native load() calls.
     expect(await startedSessions()).toBe(1,
       'the new Plex session must not start while the prior transcode stop is pending');
+    await expect(page.locator('#player')).toBeHidden();
     releaseStop();
+    await expect(page.locator('#player')).toBeVisible();
     await expect.poll(startedSessions).toBe(2);
   } finally { releaseStop(); }
 });
