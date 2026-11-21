@@ -1,3 +1,9 @@
+## 1.22.22 — Stop background playback during negotiation
+
+- Capture Pause intent when the app is hidden before server playback negotiation finishes.
+- Preserve the paused state through audio-track reopening and resume-frame seeks on LG.
+- Verify pending starts, resumes, track changes, stationary background time and explicit foreground Play using Playwright.
+
 ## 1.22.21 — Reconcile Plex Recommended shelves without full remounts
 
 - Update changed Recommended cards incrementally, preserving unaffected shelf/card nodes, artwork and focus.
