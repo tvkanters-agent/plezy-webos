@@ -203,3 +203,13 @@ test('MDBList valid 404 misses remain cached while HTTP 500 failures retry',asyn
    [{source:'imdb',value:7.7}]);
  assert.equal(failures,2);
 });
+
+test('MDBList verification retains actionable HTTP errors without leaking the key',async()=>{
+ const {verifyMdblistKey}=await import('../src/ratings.js');
+ const {request}=await import('../src/core.js');
+ await assert.rejects(
+   verifyMdblistKey('private-mdblist-key',(url,options)=>
+     request(url,{...options,fetchImpl:async()=>new Response('',{status:401})})),
+   error=>/MDBList verification failed \(HTTP 401\)/.test(error.message)&&
+     !error.message.includes('private-mdblist-key'));
+});
