@@ -12,7 +12,8 @@ const TOUCH_INTERVAL_MS = 60000;
 // A successor cache is valid only for the precise ordered IDs of its predecessor.
 // Metadata-only changes do not invalidate it. Exact IDs avoid hash collisions.
 function pageLineage(page) {
-  return Array.isArray(page?.items) ? JSON.stringify(page.items.map(item => item.id)) : null;
+  // Version the signature to reject successors saved by older, unscoped flights.
+  return Array.isArray(page?.items) ? JSON.stringify([2, page.items.map(item => item.id)]) : null;
 }
 
 function fingerprint(value) {
@@ -232,18 +233,21 @@ export class PersistentCatalogCache {
   // replace a page when different; a failed request leaves the saved page.
   // Every open has a fresh task, even if the data is in memory.
   async page(scope, key, loader, {force = false, priority = false,
-    predecessorKey = null} = {}) {
+    predecessor = null} = {}) {
     const id = this.id(scope, key);
-    // A forced refresh supersedes an ordinary in-flight revalidation. A
-    // second forced caller can still share an already-forced request.
+    const predecessorId = predecessor && this.id(scope, predecessor.key);
+    const lineage = predecessor ? pageLineage(predecessor.page) : undefined;
+    // Coalesce only when callers are extending the same mounted ordering.
+    // A forced refresh also supersedes an ordinary in-flight revalidation.
     let flight = this.inflight.get(id);
-    if (!flight || (force && !flight.force)) {
+    if (!flight || flight.predecessorId !== predecessorId || flight.lineage !== lineage ||
+        (force && !flight.force)) {
       const serial = (this.generations.get(id) || 0) + 1;
       this.generations.set(id, serial);
       const requested = Promise.resolve().then(loader);
       // Handle rejections immediately, including during a slow IDB open.
       const live = requested.then(value => ({value}), error => ({error}));
-      flight = {serial, live, force};
+      flight = {serial, live, force, predecessorId, lineage};
       this.inflight.set(id, flight);
       const active = flight;
       live.then(() => {
@@ -251,13 +255,11 @@ export class PersistentCatalogCache {
       });
     }
     const {serial, live} = flight;
-    // Capture the ordered predecessor IDs before this request settles, so
-    // an in-flight result cannot acquire a newer page's cache lineage.
-    const predecessorId = predecessorKey === null ? null : this.id(scope, predecessorKey);
-    const preceding = predecessorId ? await this.read(predecessorId) : null;
-    const lineage = predecessorId ? pageLineage(preceding) : undefined;
-    const stillCurrent = async () => !predecessorId || (lineage !== null &&
-      pageLineage(await this.read(predecessorId)) === lineage);
+    const canSave = async () => {
+      if (predecessorId && (lineage === null ||
+          pageLineage(await this.read(predecessorId)) !== lineage)) return false;
+      return this.generations.get(id) === serial;
+    };
     const cached = force ? null : await this.read(id, priority);
     // Legacy successors without lineage cannot safely follow a refreshed
     // first page. A live error must leave that page unavailable, not mixed.
@@ -265,7 +267,7 @@ export class PersistentCatalogCache {
         (!predecessorId || (lineage !== null && this.memory.get(id)?.lineage === lineage))) {
       const fresh = live.then(async result => {
         if (result.error) return {error:result.error,changed:false};
-        if (this.generations.get(id) !== serial || !await stillCurrent())
+        if (!await canSave())
           return {value:result.value,changed:false};
         const changed = JSON.stringify(cached) !== JSON.stringify(result.value);
         this.remember(id, result.value, undefined, priority, null, lineage);
@@ -276,7 +278,7 @@ export class PersistentCatalogCache {
     }
     const result = await live;
     if (result.error) throw result.error;
-    if (this.generations.get(id) === serial && await stillCurrent()) {
+    if (await canSave()) {
       this.remember(id, result.value, undefined, priority, null, lineage);
       this.write(id, result.value, priority, lineage).catch(() => {});
     }
