@@ -1262,7 +1262,10 @@ export class Player {
   }
   toggle() {
     if (!this.session) return;
-    const pause = this.resumeAfterSeekTarget != null || !this.video.paused;
+    // A Pause command during a seek is an explicit veto, even when the
+    // decoder was already paused before the preview started.
+    const pause = this.seeking || this.remoteSeeking ||
+      this.resumeAfterSeekTarget != null || !this.video.paused;
     this.openIntentPlaying = !pause;
     this.pauseAfterOpen = false;
     this.clearResumeAfterSeek();
@@ -1397,11 +1400,11 @@ export class Player {
   commitSeek() {
     if (!this.seeking) return false;
     const point = this.seekPreview;
-    const shouldResume = this.seekWasPlaying;
     this.scrubbing = false; this.remoteSeeking = false; this.seeking = false;
     this.hideAfterSeek = true;
     this.hideSeekPreview();
-    this.seekTo(point, false, shouldResume);
+    // Confirming a seek is a new Play intent, even if the source was paused.
+    this.seekTo(point, false, true);
     this.seekWasPlaying = false;
     this.hideControls();
     return true;
@@ -1530,8 +1533,9 @@ export class Player {
     const total = this.timelineDuration();
     if (!(total > 0)) return;
     const target = clamp(position, 0, Math.max(0, total - 0.1));
-    const shouldResume = resumePlayback === null
-      ? this.resumeAfterSeekTarget != null || !this.video.paused : resumePlayback;
+    // Seeking normally starts playback once the decoder is ready, including
+    // seeks started from Pause. Only an explicit pause/override vetoes it.
+    const shouldResume = resumePlayback !== false;
     this.clearResumeAfterSeek();
     if (shouldResume) this.queueResumeAfterSeek(target);
     if (fromSkipMarker) this.hideAfterSeek = false;
