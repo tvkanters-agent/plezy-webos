@@ -979,3 +979,20 @@ Subtitle clock updates are sent before forced redraws on pause/seek, so the
 worker cannot render the old time after installing newly available sign events.
 
 This does not modify cached font databases or the versioned ASS worker loader.
+
+### Account-scoped artwork cache and credential removal (1.22.14)
+
+The Chromium 53 IndexedDB artwork cache must never persist authenticated image
+URLs as object-store keys: Plex supplies `X-Plex-Token`, while Jellyfin/Emby
+supply `api_key`. Artwork keys now combine the existing token-free catalog
+account scope with a deterministic URL-and-revision fingerprint. The request
+still fetches the original authenticated URL; cache lookup retains independent
+revisions, dimensions and accounts without storing tokens in disk key strings.
+
+Removing a server also invalidates its scoped artwork in RAM and IndexedDB
+without touching other server scopes. Scope generations reject late fetches,
+disk reads, and queued writes after removal, even if the same server is linked
+again. Previously persisted URL keys cannot be securely attributed to the new
+scopes, so upgrading `plezy-artwork-v1` to schema version 2 deletes its old
+entries **once**; artwork refills normally. This is a webOS/IndexedDB-specific
+security adaptation, not a change to Flutter's image-loading UX.

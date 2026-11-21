@@ -8,17 +8,32 @@ export const ARTWORK_MEMORY_BYTES = 24 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 3 * 1024 * 1024;
 const MAX_DECODED_BYTES = 96 * 1024 * 1024; // Approximate bitmap RAM budget.
 
-// Plex photo URLs include X-Plex-Version (our app release number); this is
-// unrelated to the server's artwork version and must not bust the disk cache.
-export function artworkCacheKey(url, revision) {
-  if (!revision) return '';
-  try {
-    const normalized = new URL(url);
-    normalized.searchParams.delete('X-Plex-Version');
-    return normalized.href + '|revision=' + encodeURIComponent(revision);
-  } catch (_) {
-    return url + '|revision=' + encodeURIComponent(revision);
+// URLs contain Plex/Jellyfin credentials. Never store the URL (or token) as an
+// IndexedDB key. Separate accounts using the same server via catalogScope.
+function scopePrefix(scope) {
+  return 'artwork:' + encodeURIComponent(scope) + ':';
+}
+function keyPrefix(key) {
+  return key.startsWith('artwork:') ? key.slice(0, key.lastIndexOf(':') + 1) : '';
+}
+function fingerprint(value) {
+  let a = 2166136261, b = 5381;
+  for (let i = 0; i < value.length; i++) {
+    a = Math.imul(a ^ value.charCodeAt(i), 16777619);
+    b = Math.imul(b, 33) ^ value.charCodeAt(i);
   }
+  return (a >>> 0).toString(16) + '-' + (b >>> 0).toString(16);
+}
+// X-Plex-Version describes the client release, not the image revision.
+export function artworkCacheKey(url, revision, scope = '') {
+  if (!revision) return '';
+  let normalized = url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('X-Plex-Version');
+    normalized = parsed.href;
+  } catch (_) { /* Hash the original URL if it cannot be parsed. */ }
+  return scopePrefix(scope) + fingerprint(normalized + '|revision=' + encodeURIComponent(revision));
 }
 
 export class ArtworkCache {
@@ -38,6 +53,8 @@ export class ArtworkCache {
     this.pending = new Map();
     this.diskMisses = new Set();
     this.diskPending = new Map();
+    this.scopeEpochs = new Map();
+    this.revokedScopes = new Set();
     this.unsupportedOrigins = new Map();
     this.dbPromise = null;
     this.writes = 0;
@@ -47,15 +64,29 @@ export class ArtworkCache {
     // decoded bitmaps; first-frame reuse is confirmed synchronously by <img>.
     this.directLoaded = new Map();
   }
-  sawDirectImage(url) {
-    if (!this.directLoaded.has(url)) return false;
-    this.directLoaded.delete(url);
-    this.directLoaded.set(url, true);
+  epoch(key) { return this.scopeEpochs.get(keyPrefix(key)) || 0; }
+  isActive(key, epoch) {
+    const prefix = keyPrefix(key);
+    return !this.revokedScopes.has(prefix) && (epoch === undefined || this.epoch(key) === epoch);
+  }
+  allowScope(scope) {
+    this.revokedScopes.delete(scopePrefix(scope));
+  }
+  directKey(url, scope = '') {
+    return scopePrefix(scope) + fingerprint(url);
+  }
+  sawDirectImage(url, scope = '') {
+    const key = this.directKey(url, scope);
+    if (!this.directLoaded.has(key)) return false;
+    this.directLoaded.delete(key);
+    this.directLoaded.set(key, true);
     return true;
   }
-  markDirectImage(url) {
-    if (this.directLoaded.has(url)) this.directLoaded.delete(url);
-    this.directLoaded.set(url, true);
+  markDirectImage(url, scope = '') {
+    const key = this.directKey(url, scope);
+    if (!this.isActive(key)) return;
+    if (this.directLoaded.has(key)) this.directLoaded.delete(key);
+    this.directLoaded.set(key, true);
     // Bounded metadata only; Chromium remains responsible for decoded bytes.
     if (this.directLoaded.size > 512) this.directLoaded.delete(this.directLoaded.keys().next().value);
   }
@@ -63,7 +94,7 @@ export class ArtworkCache {
   // an arbitrarily long library. Repeated visits refresh the protection order.
   protect(keys) {
     for (const key of keys) {
-      if (!key) continue;
+      if (!key || !this.isActive(key)) continue;
       this.protectedKeys.delete(key);
       this.protectedKeys.add(key);
     }
@@ -96,6 +127,7 @@ export class ArtworkCache {
     }
   }
   peek(key) {
+    if (!this.isActive(key)) return null;
     const entry = this.memory.get(key);
     if (!entry) return null;
     this.memory.delete(key);
@@ -126,7 +158,7 @@ export class ArtworkCache {
     if (this.urls && this.urls.revokeObjectURL) this.urls.revokeObjectURL(entry.src);
   }
   remember(key, blob) {
-    if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES ||
+    if (!this.isActive(key) || !blob || !blob.size || blob.size > MAX_ENTRY_BYTES ||
         !this.urls || !this.urls.createObjectURL) return null;
     const existing = this.peek(key);
     if (existing) return existing;
@@ -169,11 +201,16 @@ export class ArtworkCache {
     if (this.dbPromise) return this.dbPromise;
     this.dbPromise = new Promise(resolve => {
       let request;
-      try { request = this.factory.open('plezy-artwork-v1', 1); }
+      try { request = this.factory.open('plezy-artwork-v1', 2); }
       catch (_) { resolve(null); return; }
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = event => {
         const db = request.result;
         if (!db.objectStoreNames.contains('images')) db.createObjectStore('images', {keyPath: 'key'});
+        else if (event.oldVersion < 2) {
+          // v1 persisted authenticated URLs as keys. Purge them once for all
+          // accounts; old records cannot be safely assigned to new scopes.
+          request.transaction.objectStore('images').clear();
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => resolve(null);
@@ -214,7 +251,8 @@ export class ArtworkCache {
   // bounded viewport queue is reserved for network misses. There
   // must be NO network fetches in this method.
   async prewarm(keys) {
-    const unique = [...new Set(keys.filter(Boolean))];
+    const unique = [...new Set(keys.filter(key => key && this.isActive(key)))];
+    const epochs = new Map(unique.map(key => [key, this.epoch(key)]));
     const missing = unique.filter(key => !this.peekReady(key) && !this.memory.has(key) && !this.diskMisses.has(key));
     const db = missing.length ? await this.open() : null;
     const rows = !db ? [] : await new Promise(resolve => {
@@ -235,29 +273,36 @@ export class ArtworkCache {
         tx.onerror = () => resolve([]);
       } catch (_) { resolve([]); }
     });
+    const currentRows = rows.filter(row => this.isActive(row.key, epochs.get(row.key)));
     if (db) {
-      const found = new Set(rows.map(row => row.key));
-      missing.forEach(key => { if (!found.has(key)) this.diskMisses.add(key); });
+      const found = new Set(currentRows.map(row => row.key));
+      missing.forEach(key => {
+        if (this.isActive(key, epochs.get(key)) && !found.has(key)) this.diskMisses.add(key);
+      });
     }
     // Update disk LRU once per day at most, in one background transaction.
     // Rehydrated artwork is actively used and should not be evicted first just
     // because it bypasses resolve()'s single-item read/touch path.
     const now = this.now();
-    const stale = rows.filter(row =>
+    const stale = currentRows.filter(row =>
       now - (Number(row.stored.used) || 0) > 86400000 ||
       this.protectedKeys.has(row.key) && !row.stored.priority);
     if (stale.length) {
       try {
         const tx = db.transaction('images', 'readwrite');
         const store = tx.objectStore('images');
-        stale.forEach(row => store.put({...row.stored, used: now,
-          priority: !!row.stored.priority || this.protectedKeys.has(row.key)}));
+        stale.forEach(row => {
+          if (this.isActive(row.key, epochs.get(row.key))) store.put({...row.stored, used: now,
+            priority: !!row.stored.priority || this.protectedKeys.has(row.key)});
+        });
       } catch (_) { /* Persistence is optional. */ }
     }
     // The image decoder can fail or be slow on older webOS versions. Never
     // block the screen indefinitely waiting for a malformed cached image.
-    rows.forEach(row => this.remember(row.key, row.blob));
-    const decoding = unique.map(key => this.decode(key));
+    currentRows.forEach(row => {
+      if (this.isActive(row.key, epochs.get(row.key))) this.remember(row.key, row.blob);
+    });
+    const decoding = unique.filter(key => this.isActive(key, epochs.get(key))).map(key => this.decode(key));
     if (!decoding.length) return;
     let timeout;
     try {
@@ -267,11 +312,14 @@ export class ArtworkCache {
       ]);
     } finally { clearTimeout(timeout); }
   }
-  async save(key, blob) {
+  async save(key, blob, epoch = this.epoch(key)) {
+    // Only the new, credential-free format is allowed on disk.
+    if (!keyPrefix(key) || !this.isActive(key, epoch)) return;
     this.diskMisses.delete(key);
     const db = await this.open();
-    if (!db) return;
+    if (!db || !this.isActive(key, epoch)) return;
     const write = () => new Promise((resolve, reject) => {
+      if (!this.isActive(key, epoch)) { resolve(); return; }
       try {
         const tx = db.transaction('images', 'readwrite');
         tx.objectStore('images').put({key, blob, used: this.now(), bytes: blob.size,
@@ -292,7 +340,9 @@ export class ArtworkCache {
       // Quota can be much smaller on older LG TVs. Evict aggressively once,
       // then let normal image loading continue even if storage still fails.
       await this.prune(undefined, true);
-      try { await write(); } catch (_) { /* Storage optional. */ }
+      if (this.isActive(key, epoch)) {
+        try { await write(); } catch (_) { /* Storage optional. */ }
+      }
     }
   }
   async prune(maxBytes, quotaFailure = false) {
@@ -348,6 +398,8 @@ export class ArtworkCache {
     catch (_) { /* Best effort. */ }
   }
   async cachedSource(key, persistent = true) {
+    if (!this.isActive(key)) return null;
+    const epoch = this.epoch(key);
     const hit = this.peek(key);
     if (hit) return hit;
     if (!persistent || this.diskMisses.has(key)) return null;
@@ -355,6 +407,7 @@ export class ArtworkCache {
     // and remember a confirmed miss for the rest of the session.
     if (this.diskPending.has(key)) return this.diskPending.get(key);
     const read = this.read(key).then(stored => {
+      if (!this.isActive(key, epoch)) return null;
       if (!stored) {
         this.diskMisses.add(key);
         return null;
@@ -371,19 +424,26 @@ export class ArtworkCache {
   }
   // A single fetch per URL serves concurrent instances (e.g. shelf and detail).
   resolve(key, url = key, persistent = true) {
+    if (!this.isActive(key)) return Promise.resolve('');
+    const epoch = this.epoch(key);
     const hit = this.peek(key);
     if (hit) return Promise.resolve(hit);
     if (this.pending.has(key)) return this.pending.get(key);
-    const task = this.resolveUncached(key, url, persistent).then(src => src || url, () => url);
+    const task = this.resolveUncached(key, url, persistent, epoch)
+      .then(src => this.isActive(key, epoch) ? src || url : '',
+        () => this.isActive(key, epoch) ? url : '');
     this.pending.set(key, task);
-    task.then(() => this.pending.delete(key));
+    task.then(() => {
+      if (this.pending.get(key) === task) this.pending.delete(key);
+    });
     return task;
   }
-  async resolveUncached(key, url, persistent) {
+  async resolveUncached(key, url, persistent, epoch) {
     // Server images without a trustworthy revision may stay in RAM during this
     // app session, but must never survive a restart as stale IndexedDB rows.
     if (persistent && !this.diskMisses.has(key)) {
       const src = await this.cachedSource(key);
+      if (!this.isActive(key, epoch)) return '';
       if (src) return src;
     }
     let origin = '';
@@ -403,11 +463,12 @@ export class ArtworkCache {
       if (type && !/^image\//i.test(type) && !/^application\/octet-stream/i.test(type))
         return url;
       const blob = await response.blob();
+      if (!this.isActive(key, epoch)) return '';
       if (!blob || !blob.size || blob.size > MAX_ENTRY_BYTES) return url;
       const src = this.remember(key, blob);
       if (!src) return url;
       // Persist without delaying first paint.
-      if (persistent) this.save(key, blob).catch(() => {});
+      if (persistent) this.save(key, blob, epoch).catch(() => {});
       return src;
     } catch (_) {
       // A fetch rejection can mean a transient disconnect, not just CORS.
@@ -415,5 +476,35 @@ export class ArtworkCache {
       this.unsupportedOrigins.set(origin, this.now() + 30000);
       return url;
     }
+  }
+  async removeScope(scope) {
+    const prefix = scopePrefix(scope);
+    // Immediately block new writes; an outstanding fetch or IndexedDB open
+    // cannot resurrect removed credentials after the deletion transaction.
+    this.scopeEpochs.set(prefix, (this.scopeEpochs.get(prefix) || 0) + 1);
+    this.revokedScopes.add(prefix);
+    for (const key of this.memory.keys()) if (key.startsWith(prefix)) this.drop(key);
+    for (const key of this.protectedKeys) if (key.startsWith(prefix)) this.protectedKeys.delete(key);
+    for (const key of this.pending.keys()) if (key.startsWith(prefix)) this.pending.delete(key);
+    for (const key of this.diskPending.keys()) if (key.startsWith(prefix)) this.diskPending.delete(key);
+    for (const key of this.diskMisses) if (key.startsWith(prefix)) this.diskMisses.delete(key);
+    // Direct-image hints are scoped too; retain other accounts' LRU entries.
+    for (const key of this.directLoaded.keys())
+      if (key.startsWith(prefix)) this.directLoaded.delete(key);
+    const db = await this.open();
+    if (!db) return;
+    await new Promise(resolve => {
+      try {
+        const tx = db.transaction('images', 'readwrite');
+        const cursor = tx.objectStore('images').openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          if (String(row.key).startsWith(prefix)) row.delete();
+          row.continue();
+        };
+        tx.oncomplete = resolve; tx.onabort = resolve; tx.onerror = resolve;
+      } catch (_) { resolve(); }
+    });
   }
 }
