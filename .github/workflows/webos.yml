@@ -131,26 +131,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Compare the fixed commit parent rather than mutable master.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          ref: ${{ github.sha }}
+      - name: Check whether this push increased the webOS version
+        id: eligibility
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          # Fetch the original pre-push tip even if master has advanced since.
+          git fetch --no-tags --depth=1 origin "$PUSH_BEFORE"
+          decision=$(node webos/scripts/ci-release-eligible.mjs "$PUSH_BEFORE" "$GITHUB_SHA")
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
+        if: steps.eligibility.outputs.decision == 'publish'
         with:
           name: plezy-webos-ipk
           path: release-assets
       - name: Publish versioned webOS release when release notes exist
+        if: steps.eligibility.outputs.decision == 'publish'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          # Stop same-version follow-up runs racing the actual version bump.
-          # Missing parent history is an error, never permission to publish.
-          decision=$(node webos/scripts/ci-release-eligible.mjs)
-          if [ "$decision" != "publish" ]; then
-            echo "Version was not increased by this commit; skipping release."
-            exit 0
-          fi
           version=$(node -p "require('./webos/package.json').version")
           notes="webos/releases/v${version}.md"
           if [ ! -f "$notes" ]; then exit 0; fi
