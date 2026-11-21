@@ -23,13 +23,61 @@ test('every committed seek requests Play even for an unpaused LG pipeline stuck 
   assert.equal(player.resumeAfterSeekTarget,40);
 });
 
-test('a deliberately paused pointer/chapter seek stays paused', t => {
+test('a seek from paused starts playback instead of inheriting the decoder pause', t => {
   const {player,plays} = makePlayer(t);
   player.video.paused = true;
   player.seekTo(40);
-  assert.equal(plays(),0);
-  assert.equal(player.resumeAfterSeekTarget,null);
+  assert.equal(plays(),1);
+  assert.equal(player.resumeAfterSeekTarget,40);
   assert.equal(player.video.currentTime,40);
+});
+
+test('confirming a remote preview from paused resumes, but canceling it does not', t => {
+  const {player,plays} = makePlayer(t, {
+    hideSeekPreview() {}, hideControls() {}
+  });
+  player.video.paused = true;
+  player.remoteSeeking = true;
+  player.seeking = true;
+  player.seekWasPlaying = false;
+  player.seekPreview = 50;
+  player.cancelRemoteSeek();
+  assert.equal(plays(),0);
+  assert.equal(player.video.currentTime,20);
+
+  player.remoteSeeking = true;
+  player.seeking = true;
+  player.seekWasPlaying = false;
+  player.commitSeek();
+  assert.equal(plays(),1);
+  assert.equal(player.resumeAfterSeekTarget,50);
+});
+
+test('Pause during a seek from paused cancels automatic recovery through buffering', t => {
+  const {player,plays} = makePlayer(t);
+  player.video.paused = true;
+  player.seekTo(40);
+  assert.equal(plays(),1);
+  player.toggle();
+  assert.equal(player.video.paused,true);
+  assert.equal(player.resumeAfterSeekTarget,null);
+  player.video.seeking = false;
+  player.resumeAfterSeekLanded = true;
+  player.tryResumeAfterSeek();
+  assert.equal(plays(),1, 'late decoder readiness must not restart a deliberate pause');
+});
+
+test('Play/Pause during a paused remote preview means Pause, not Play', t => {
+  const {player,plays} = makePlayer(t, {hideSeekPreview() {}});
+  player.video.paused = true;
+  player.remoteSeeking = true;
+  player.seeking = true;
+  player.seekWasPlaying = false;
+  player.toggle();
+  assert.equal(plays(),0);
+  assert.equal(player.video.paused,true);
+  assert.equal(player.remoteSeeking,false);
+  assert.equal(player.seeking,false);
 });
 
 test('buffering longer than fifteen seconds retains the seek play intent', t => {
