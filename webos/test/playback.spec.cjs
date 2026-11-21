@@ -657,6 +657,9 @@ test('Pause during buffering after a paused seek prevents late automatic playbac
   await page.keyboard.press('ArrowRight');
   await page.locator('video').evaluate(video=>{
     window.seekPlayCalls=0;
+    window.seekPauseCalls=0;
+    const nativePause=video.pause.bind(video);
+    video.pause=()=>{window.seekPauseCalls++;return nativePause();};
     // The LG play request can remain unresolved while waiting for data.
     video.play=()=>{window.seekPlayCalls++;return new Promise(()=>{});};
   });
@@ -665,8 +668,12 @@ test('Pause during buffering after a paused seek prevents late automatic playbac
   await page.keyboard.press('Space');
   await page.locator('video').dispatchEvent('seeked');
   await expect(page.locator('video')).toHaveJSProperty('paused',true);
+  const beforeLatePlay=await page.evaluate(()=>window.seekPauseCalls);
+  await page.locator('video').dispatchEvent('playing');
+  expect(await page.evaluate(()=>window.seekPauseCalls)).toBeGreaterThan(beforeLatePlay);
   await page.waitForTimeout(1300);
   expect(await page.evaluate(()=>window.seekPlayCalls)).toBe(1);
+  await expect(page.locator('video')).toHaveJSProperty('paused',true);
 });
 
 test('confirming a remote seek wakes a paused decoder without waiting for seeked',async({page})=>{
