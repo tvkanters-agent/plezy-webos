@@ -1,3 +1,8 @@
+## 1.22.25 — Fix replay after stopping a native HLS resume
+
+- Retire the LG video element when Stop interrupts HLS startup so replay opens with a fresh decoder.
+- Release the resume frame as soon as LG reports the requested position, even when its playback clock updates after the first playing event.
+
 ## 1.22.24 — Prevent interrupted HLS startup from poisoning replay
 
 - Retire an interrupted Plex HLS transcode session before starting playback again, without delaying Stop itself.

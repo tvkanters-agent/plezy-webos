@@ -49,113 +49,7 @@ export class Player {
     this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporter = null; this.reportWarning = false;
     this.pendingPlayback = null; this.pendingStartupTeardown = null;
-    this.video.addEventListener('loadedmetadata', () => {
-      this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
-    });
-    this.video.addEventListener('canplay', () => {
-      this.status.textContent = ''; this.resume();
-      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawCanplay = true;
-      this.tryResumeAfterSeek();
-      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
-        this.showBuffering(false);
-      this.startAfterInitialSeek();
-      if (!this.initialSeekPending && this.video.readyState >= 2) this.scheduleEmbeddedSubtitle();
-    });
-    this.video.addEventListener('loadeddata', () => {
-      this.resume();
-      if (!this.initialSeekPending) { this.hasFirstFrame = true; this.update(); }
-      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
-        this.showBuffering(false);
-      this.startAfterInitialSeek();
-      this.scheduleEmbeddedSubtitle();
-      this.checkStartupProgress();
-    });
-    this.video.addEventListener('stalled', () => {
-      this.onPlaybackStarved();
-    });
-    this.video.addEventListener('timeupdate', () => {
-      if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
-      this.applySubtitleSyncOffset();
-      this.update();
-      this.checkStartupProgress();
-      this.tryResumeAfterSeek();
-    });
-    this.video.textTracks?.addEventListener?.('addtrack', () => this.applySubtitleSyncOffset());
-    this.video.addEventListener('loadedmetadata', () => this.applySubtitleSyncOffset());
-    this.video.addEventListener('playing', () => {
-      this.status.textContent = '';
-      this.resume();
-      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawPlaying = true;
-      this.tryResumeAfterSeek();
-      // HTMLMediaElement.playing guarantees decoder playback; webOS 4.4 can
-      // report readyState 1 during real frames. Do not hide a real intro prompt
-      // behind an unreliable HAVE_CURRENT_DATA gate.
-      this.startAfterInitialSeek(true);
-      if (!this.initialSeekPending) this.hasFirstFrame = true;
-      // LG's hardware video plane can already be playing while the web view
-      // still reports zero dimensions or an unchanged media clock. Give its
-      // decoder a short head start, then read nearby MKV subtitles instead of
-      // waiting for the later video-dimension/clock confirmation.
-      if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('playing', Date.now() - this.subtitleDiagnostics.openedAt);
-      this.scheduleEmbeddedSubtitle();
-      this.update();
-      this.focusSkipMarkerIfReady();
-      // Reopening for a track change must retain a deliberately paused title.
-      // LG still needs Play to decode its initial/resume frame before pausing.
-      if (this.pauseAfterOpen && !this.initialSeekPending) {
-        this.pauseAfterOpen = false;
-        this.video.pause();
-        this.update();
-        this.checkStartupProgress();
-        return;
-      }
-      if(!this.initialSeekPending) this.showBuffering(false);
-      this.report('playing');
-      this.track('start');
-      if (this.hideAfterSeek) {this.hideAfterSeek = false; this.hideControls();return;}
-      // Decoder resume must not reopen chrome the user explicitly hid.
-      if (this.controls.classList.contains('hidden-controls')) return;
-      this.reveal();
-      // Video.load() and decoder buffering may move focus to <body>.
-      // Restore the active transport control, but not over user choices.
-      if (this.controls.contains(document.activeElement) || document.activeElement === this.skipButton) return;
-      if (this.root.contains(document.activeElement) &&
-          document.activeElement !== this.video && document.activeElement !== this.root) return;
-      const control = this.lastControlFocus;
-      if (control?.isConnected && !control.hidden && control.getClientRects().length)
-        control.focus();
-      else this.root.querySelector('[data-action="pause"]').focus();
-    });
-    this.video.addEventListener('pause', () => {
-      this.tryResumeAfterSeek();
-      this.checkStartupProgress();
-      // Waiting/stalled can outlive a paused decoder (notably near EOF).
-      // Keep the first-frame and active seek-preview loading gates intact.
-      if (!this.initialSeekPending && !this.seeking && !this.video.seeking)
-        this.showBuffering(false);
-      if (this.session && !this.closing && !this.remoteSeeking) {
-        this.report('paused'); this.track('pause');
-        // Decoder pause events can arrive after Back hides the chrome.
-        // Only an explicit Pause action should reveal it (toggle does so).
-        if (!this.hideAfterSeek && !this.controls.classList.contains('hidden-controls')) this.reveal();
-      }
-    });
-    this.video.addEventListener('waiting', () => {
-      this.onPlaybackStarved();
-    });
-    this.video.addEventListener('seeking', () => {
-      if (this.session && !this.remoteSeeking && !this.atMediaEnd()) this.showBuffering(true);
-    });
-    this.video.addEventListener('seeked', () => {
-      this.startAfterInitialSeek();
-      if (!this.initialSeekPending &&
-          (this.video.readyState >= 2 || this.video.paused || this.atMediaEnd()))
-        this.showBuffering(false);
-      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekLanded = true;
-      this.tryResumeAfterSeek();
-    });
-    this.video.addEventListener('ended', () => this.close(true));
-    this.video.addEventListener('error', () => this.failed());
+    this.bindVideoEvents(this.video);
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
@@ -257,6 +151,119 @@ export class Player {
         this.cancelRemoteSeek(); this.video.pause();
       }
     });
+  }
+  bindVideoEvents(video) {
+    const on = (event, handler, target = video) => target.addEventListener?.(event, () => {
+      if (this.video === video && this.session) handler();
+    });
+    on('loadedmetadata', () => {
+      this.resume(); this.startAfterInitialSeek(); this.tryResumeAfterSeek();
+    });
+    on('canplay', () => {
+      this.status.textContent = ''; this.resume();
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawCanplay = true;
+      this.tryResumeAfterSeek();
+      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
+        this.showBuffering(false);
+      this.startAfterInitialSeek();
+      if (!this.initialSeekPending && this.video.readyState >= 2) this.scheduleEmbeddedSubtitle();
+    });
+    on('loadeddata', () => {
+      this.resume();
+      if (!this.initialSeekPending) { this.hasFirstFrame = true; this.update(); }
+      if (!this.initialSeekPending && this.video.readyState >= 2 && !this.video.seeking)
+        this.showBuffering(false);
+      this.startAfterInitialSeek();
+      this.scheduleEmbeddedSubtitle();
+      this.checkStartupProgress();
+    });
+    on('stalled', () => {
+      this.onPlaybackStarved();
+    });
+    on('timeupdate', () => {
+      this.startAfterInitialSeek();
+      if (this.atMediaEnd() && !this.initialSeekPending) this.showBuffering(false);
+      this.applySubtitleSyncOffset();
+      this.update();
+      this.checkStartupProgress();
+      this.tryResumeAfterSeek();
+    });
+    if (video.textTracks) on('addtrack', () => this.applySubtitleSyncOffset(), video.textTracks);
+    on('loadedmetadata', () => this.applySubtitleSyncOffset());
+    on('playing', () => {
+      this.status.textContent = '';
+      this.resume();
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekSawPlaying = true;
+      this.tryResumeAfterSeek();
+      // HTMLMediaElement.playing guarantees decoder playback; webOS 4.4 can
+      // report readyState 1 during real frames. Do not hide a real intro prompt
+      // behind an unreliable HAVE_CURRENT_DATA gate.
+      this.startAfterInitialSeek(true);
+      if (!this.initialSeekPending) this.hasFirstFrame = true;
+      // LG's hardware video plane can already be playing while the web view
+      // still reports zero dimensions or an unchanged media clock. Give its
+      // decoder a short head start, then read nearby MKV subtitles instead of
+      // waiting for the later video-dimension/clock confirmation.
+      if (this.subtitleDiagnostics) this.subtitleDiagnostics.record('playing', Date.now() - this.subtitleDiagnostics.openedAt);
+      this.scheduleEmbeddedSubtitle();
+      this.update();
+      this.focusSkipMarkerIfReady();
+      // Reopening for a track change must retain a deliberately paused title.
+      // LG still needs Play to decode its initial/resume frame before pausing.
+      if (this.pauseAfterOpen && !this.initialSeekPending) {
+        this.pauseAfterOpen = false;
+        this.video.pause();
+        this.update();
+        this.checkStartupProgress();
+        return;
+      }
+      if(!this.initialSeekPending) this.showBuffering(false);
+      this.report('playing');
+      this.track('start');
+      if (this.hideAfterSeek) {this.hideAfterSeek = false; this.hideControls();return;}
+      // Decoder resume must not reopen chrome the user explicitly hid.
+      if (this.controls.classList.contains('hidden-controls')) return;
+      this.reveal();
+      // Video.load() and decoder buffering may move focus to <body>.
+      // Restore the active transport control, but not over user choices.
+      if (this.controls.contains(document.activeElement) || document.activeElement === this.skipButton) return;
+      if (this.root.contains(document.activeElement) &&
+          document.activeElement !== this.video && document.activeElement !== this.root) return;
+      const control = this.lastControlFocus;
+      if (control?.isConnected && !control.hidden && control.getClientRects().length)
+        control.focus();
+      else this.root.querySelector('[data-action="pause"]').focus();
+    });
+    on('pause', () => {
+      this.tryResumeAfterSeek();
+      this.checkStartupProgress();
+      // Waiting/stalled can outlive a paused decoder (notably near EOF).
+      // Keep the first-frame and active seek-preview loading gates intact.
+      if (!this.initialSeekPending && !this.seeking && !this.video.seeking)
+        this.showBuffering(false);
+      if (this.session && !this.closing && !this.remoteSeeking) {
+        this.report('paused'); this.track('pause');
+        // Decoder pause events can arrive after Back hides the chrome.
+        // Only an explicit Pause action should reveal it (toggle does so).
+        if (!this.hideAfterSeek && !this.controls.classList.contains('hidden-controls')) this.reveal();
+      }
+    });
+    on('waiting', () => {
+      this.onPlaybackStarved();
+    });
+    on('seeking', () => {
+      if (this.session && !this.remoteSeeking && !this.atMediaEnd()) this.showBuffering(true);
+    });
+    on('seeked', () => {
+      this.startAfterInitialSeek();
+      if (!this.initialSeekPending &&
+          (this.video.readyState >= 2 || this.video.paused || this.atMediaEnd()))
+        this.showBuffering(false);
+      if (this.resumeAfterSeekTarget != null) this.resumeAfterSeekLanded = true;
+      this.tryResumeAfterSeek();
+    });
+    on('ended', () => this.close(true));
+    on('error', () => this.failed());
   }
   get active() { return !this.root.hidden; }
   skipMode(marker) {
@@ -950,9 +957,9 @@ export class Player {
     }, 200);
   }
   loadSource(session) {
-    const nativeResume = typeof window.PalmSystem !== 'undefined' ||
+    this.nativeSource = typeof window.PalmSystem !== 'undefined' ||
       /web0s|webos|netcast/i.test(navigator.userAgent);
-    if (nativeResume) {
+    if (this.nativeSource) {
       // LG's equivalent of Plezy's Media(start:): pass milliseconds to the
       // pipeline BEFORE load/play. This was the working one-buffer legacy
       // behavior before the custom playback/subtitle pipeline was introduced.
@@ -1006,10 +1013,16 @@ export class Player {
   }
   startAfterInitialSeek(playing = false) {
     if(!this.initialSeekPending || this.pendingStart || !this.session)return;
-    if(this.video.seeking || (!playing && this.video.readyState<2) ||
-       Math.abs(this.video.currentTime-this.initialSeekTarget)>1)return;
-    this.initialSeekPending=false;
-    this.hasFirstFrame = playing || this.video.readyState >= 2;
+    if (playing) this.initialSeekSawPlaying = true;
+    const nativeHls = this.nativeSource && this.session.transcode;
+    // LG can emit playing before it publishes the clock at the resume point.
+    // Keep that frame evidence even if the later clock update has readyState 1.
+    const ready = playing || this.video.readyState >= 2 || (nativeHls && this.initialSeekSawPlaying);
+    const position = this.video.currentTime;
+    if (this.video.seeking || !ready || !Number.isFinite(position) ||
+        position < this.initialSeekTarget - 1 || (!nativeHls && position > this.initialSeekTarget + 1)) return;
+    this.initialSeekPending = false;
+    this.hasFirstFrame = true;
     this.video.style.visibility='visible';
     if (this.skipButton) this.update();
     this.checkStartupProgress();
@@ -1149,6 +1162,7 @@ export class Player {
     this.previewFrames = null;
     this.hideSeekPreview();
     const session = this.session, api = this.api;
+    const replaceVideo = this.nativeSource && session?.transcode && !this.startupComplete;
     // An explicit Stop may race Plex's transcode teardown even if LG has
     // already reported startup complete. Track changes remain non-blocking
     // once their old decoder has reached a confirmed first frame.
@@ -1176,10 +1190,22 @@ export class Player {
     this.initialSeekPending = false;
     this.initialSeekTarget = 0;
     this.scrubbing = false;
-    this.video.style.visibility='visible';
-    this.video.pause(); this.video.removeAttribute('src');
-    Array.from(this.video.querySelectorAll('source')).forEach(source => source.remove());
-    this.video.load();
+    this.initialSeekSawPlaying = false;
+    this.nativeSource = false;
+    const video = this.video;
+    video.style.visibility = 'visible';
+    video.pause(); video.removeAttribute('src');
+    Array.from(video.querySelectorAll('source')).forEach(source => source.remove());
+    if (replaceVideo) {
+      // Discard the unfinished LG decoder with its DOM element, like Plezy
+      // disposes the native player on exit. Late events belong to that element.
+      this.subtitleOverlay?.dispose();
+      this.subtitleOverlay = null;
+      this.video = video.cloneNode(false);
+      video.parentNode.replaceChild(this.video, video);
+      this.bindVideoEvents(this.video);
+    }
+    video.load();
     // Never await playback reporting (or server-side transcode teardown) when
     // stopping/reopening the hardware decoder. The per-session reporter owns
     // its final stopped report and cannot feed stale heartbeats into a new one.
