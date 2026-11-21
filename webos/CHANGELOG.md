@@ -1,3 +1,10 @@
+## 1.22.31 — Fix watched action on reopened Plex details
+
+- Reconcile delayed Plex watched/unwatched acknowledgments with the reopened detail of the same title, including its accessible button label.
+- Ensure watch actions follow the currently displayed command even if cached media state changes behind the UI.
+- Keep unrelated titles and accounts unchanged and preserve Simkl synchronization after Back.
+- Cover both watch directions with Playwright regressions.
+
 ## 1.22.29 — Restrict release publication to the version-bump commit
 
 - Validate every master commit, but only publish its IPK when that commit increased the app version compared with its first parent.
