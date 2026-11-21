@@ -249,7 +249,8 @@ export class Player {
       if (!this.skipButton.contains(event.target)) this.reveal();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.session) {
+      // Negotiation can still be pending: the visible player has no session yet.
+      if (document.hidden && this.active && !this.closing) {
         this.openIntentPlaying = false; this.pauseAfterOpen = true;
         this.clearResumeAfterSeek(); this.seekWasPlaying = false;
         this.cancelRemoteSeek(); this.video.pause();
@@ -766,13 +767,15 @@ export class Player {
     this.reveal();
   }
   async open(api, item, options = {}, preserveTracking = false, trackSheetFocus = null, playing = true) {
-    this.openIntentPlaying = playing;
+    this.openIntentPlaying = playing && !document.hidden;
     const tracking = preserveTracking ? this.playbackTracking : null;
     this.closing = false;
     const cleanup = this.release(false, preserveTracking);
     const generation = this.generation;
     await cleanup;
     if (generation !== this.generation) return;
+    // A background event during cleanup can precede the player's visibility.
+    if (document.hidden) this.openIntentPlaying = false;
     this.api = api; this.item = item; this.options = options;
     const playbackPreferences = this.preferences();
     // The API chooses the route from the *selected* format and its setting.
@@ -991,6 +994,9 @@ export class Player {
     this.video.style.visibility='visible';
     if (this.skipButton) this.update();
     this.checkStartupProgress();
+    // LG needs Play to decode a resume frame. Pause as soon as its seek has
+    // landed; the decoder may not dispatch another playing event afterward.
+    if (this.pauseAfterOpen) this.video.pause();
     this.showBuffering(false);
     // Native resumed playback may not dispatch another playing event.
     // Start embedded SRT loading once the first frame is confirmed.

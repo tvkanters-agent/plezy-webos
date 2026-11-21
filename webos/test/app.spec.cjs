@@ -441,6 +441,89 @@ test('real HTML video resumes, seeks, pauses and reports stop',async({page})=>{
   await expect.poll(()=>calls.some(c=>c.path==='/Sessions/Playing/Stopped'&&c.body.PositionTicks>=500000000)).toBe(true);
   expect(await page.locator('video').getAttribute('src')).toBe(null);
 });
+
+for (const resume of [false,true]) {
+ test('backgrounding pending ' + (resume?'resume':'start') + ' negotiation pauses until explicit Play',async({page})=>{
+  const {readFile}=await import('node:fs/promises');
+  const movie=await readFile(require('node:path').join(__dirname,'fixtures/test.webm'));
+  await mockServer(page);
+  let release;
+  await page.route('http://media.test/Items/movie/PlaybackInfo**',async route=>{
+    await new Promise(resolve=>{release=resolve;});
+    await route.fulfill({json:{PlaySessionId:'pending',MediaSources:[{Id:'source',SupportsDirectPlay:true,MediaStreams:[]}]}});
+  });
+  await page.route('http://media.test/Videos/movie/stream**',route=>serveVideo(route,movie));
+  await page.goto('/');
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await page.getByRole('button',{name:resume?'Resume · 0:20':'Play from beginning',exact:true}).click();
+  await expect(page.locator('#player')).toBeVisible();
+  await expect.poll(()=>!!release).toBe(true);
+  await page.evaluate(()=>{
+    Object.defineProperty(document,'hidden',{configurable:true,value:true});
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  release();
+  const video=page.locator('#player video');
+  await expect.poll(()=>video.evaluate(v=>v.readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(()=>video.evaluate(v=>v.paused)).toBe(true);
+  if(resume) await expect.poll(()=>video.evaluate(v=>v.currentTime)).toBeGreaterThanOrEqual(19);
+  const stoppedAt=await video.evaluate(v=>v.currentTime);
+  await page.waitForTimeout(450);
+  expect(Math.abs(await video.evaluate(v=>v.currentTime)-stoppedAt)).toBeLessThan(0.15);
+  await page.evaluate(()=>{
+    Object.defineProperty(document,'hidden',{configurable:true,value:false});
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.locator('#player [data-action="pause"]').click();
+  await expect.poll(()=>video.evaluate(v=>v.paused)).toBe(false);
+  const resumedAt=await video.evaluate(v=>v.currentTime);
+  await expect.poll(()=>video.evaluate(v=>v.currentTime)).toBeGreaterThan(resumedAt+0.25);
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+ });
+}
+
+test('backgrounding pending audio-track negotiation retains Pause intent',async({page})=>{
+  const {readFile}=await import('node:fs/promises');
+  const movie=await readFile(require('node:path').join(__dirname,'fixtures/test.webm'));
+  await mockServer(page);
+  let negotiations=0,release;
+  await page.route('http://media.test/Items/movie/PlaybackInfo**',async route=>{
+    negotiations++;
+    if(negotiations===2)await new Promise(resolve=>{release=resolve;});
+    await route.fulfill({json:{PlaySessionId:'audio-'+negotiations,MediaSources:[{
+      Id:'source',SupportsDirectPlay:true,TranscodingUrl:'/Videos/movie/stream',
+      MediaStreams:[{Index:0,Type:'Audio',Codec:'aac',Language:'eng',IsDefault:true},
+                    {Index:1,Type:'Audio',Codec:'aac',Language:'fra'}]
+    }]}});
+  });
+  await page.route('http://media.test/Videos/movie/stream**',route=>serveVideo(route,movie));
+  await page.goto('/');
+  await page.getByRole('button',{name:'The Test Film',exact:true}).first().click();
+  await page.getByRole('button',{name:'Play from beginning',exact:true}).click();
+  const video=page.locator('#player video');
+  await expect.poll(()=>video.evaluate(v=>v.paused)).toBe(false);
+  await page.getByRole('button',{name:'Audio & Subtitles'}).click();
+  await page.locator('.player-track-column').first().getByRole('button',{name:/French/}).click();
+  await expect.poll(()=>!!release).toBe(true);
+  await page.evaluate(()=>{
+    Object.defineProperty(document,'hidden',{configurable:true,value:true});
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  release();
+  await expect.poll(()=>video.evaluate(v=>v.readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(()=>video.evaluate(v=>v.paused)).toBe(true);
+  const stoppedAt=await video.evaluate(v=>v.currentTime);
+  await page.waitForTimeout(450);
+  expect(Math.abs(await video.evaluate(v=>v.currentTime)-stoppedAt)).toBeLessThan(0.15);
+  await page.evaluate(()=>{
+    Object.defineProperty(document,'hidden',{configurable:true,value:false});
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.locator('#player [data-action="close-options"]').click();
+  await page.locator('#player [data-action="pause"]').click();
+  await expect.poll(()=>video.evaluate(v=>v.paused)).toBe(false);
+});
+
 test('backgrounding the app pauses video',async({page})=>{
   const {readFile}=await import('node:fs/promises');const movie=await readFile(require('node:path').join(__dirname,'fixtures/test.webm'));
   await mockServer(page);await page.route('http://media.test/Videos/movie/stream**',route=>serveVideo(route,movie));
