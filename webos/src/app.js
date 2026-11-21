@@ -1437,6 +1437,7 @@ async function paginated(loader, currentRevision, options = {}) {
   // The first page may be a persisted snapshot. Refresh callbacks replace
   // only the grid, preserving focus and scroll; unchanged pages never repaint.
   let start = 0, loading = false, completed = false, listening = false;
+  let pageGeneration = 0, forceShiftedPages = false;
   const loadedPages = new Map();
   let watchedOverride;
   const watchExceptions = new Map();
@@ -1602,7 +1603,7 @@ async function paginated(loader, currentRevision, options = {}) {
   }
   async function applyFresh(offset, initialPage, update) {
     const watchEpoch = detailWatchEpoch;
-    const isCurrentPage = () => windowed ? loadedPages.get(offset) === initialPage : loadedPages.has(offset);
+    const isCurrentPage = () => loadedPages.get(offset) === initialPage;
     if (!update || !update.changed || mountedRevision !== revision ||
         !grid.isConnected || !isCurrentPage()) return;
     const requestRevision = mountedRevision;
@@ -1614,10 +1615,20 @@ async function paginated(loader, currentRevision, options = {}) {
     if (watchedOverride !== undefined)
       update.value.items.forEach(applyWatchOverride);
     loadedPages.set(offset, update.value);
-    // A changed page length invalidates offsets of its successors.
-    if (initialPage.items.length !== update.value.items.length) {
+    // Plex offsets refer to positions, not title IDs. An insert, removal or
+    // reorder can shift every later page without changing this page's length.
+    // Keep metadata-only updates cheap, but never join different orderings.
+    const shifted = initialPage.items.length !== update.value.items.length ||
+      initialPage.items.some((item, index) => item.id !== update.value.items[index].id);
+    if (shifted) {
       for (const key of Array.from(loadedPages.keys()))
         if (key > offset) loadedPages.delete(key);
+      // Invalidate an already-started later load (even if its offset is
+      // reused) and bypass persisted pages from the previous ordering.
+      ++pageGeneration;
+      forceShiftedPages = true;
+      loading = false;
+      pendingFocus = null;
     }
     let next = 0;
     for (const [key, page] of loadedPages) next = Math.max(next, key + page.items.length);
@@ -1670,11 +1681,13 @@ async function paginated(loader, currentRevision, options = {}) {
     errorMessage.textContent = '';
     const offset = start;
     const requestRevision = mountedRevision;
+    const requestGeneration = pageGeneration;
     const canApply = () => mountedRevision === revision && grid.isConnected &&
+      requestGeneration === pageGeneration &&
       (!windowed || (requestRevision === mountedRevision && offset === start));
     try {
       const response = options.initialPage && start === 0
-        ? options.initialPage : await loader(start);
+        ? options.initialPage : await loader(start, forceShiftedPages);
       options.initialPage = null;
       const page = response && Object.prototype.hasOwnProperty.call(response, 'value')
         ? response.value : response;
@@ -1716,9 +1729,11 @@ async function paginated(loader, currentRevision, options = {}) {
         retry.hidden = false;
       }
     } finally {
-      loading = false;
-      if (mountedRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
-        requestAnimationFrame(check);
+      if (requestGeneration === pageGeneration) {
+        loading = false;
+        if (mountedRevision === revision && grid.isConnected && !completed && !errorMessage.textContent)
+          requestAnimationFrame(check);
+      }
     }
   }
   function check() {
@@ -1808,17 +1823,17 @@ async function render(prepared = null) {
       main.append(tabs);
       const contentStartedAt = beginContentEntrance();
       if (currentApi instanceof Plex && view === 'collections') {
-        await paginated(start => savedPage('collections:' + route.library.id + ':' + start,
+        await paginated((start, shifted) => savedPage('collections:' + route.library.id + ':' + start,
           () => currentApi.collections(route.library.id, start),
-          {force:forceRefresh, priority:start === 0}), currentRevision,
+          {force:forceRefresh || shifted, priority:start === 0}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst(main, focusFromRail ? preferredPaneControl() : null, focusFromRail);
         return;
       }
       if (currentApi instanceof Plex && view === 'playlists') {
-        await paginated(start => savedPage('playlists:' + start,
+        await paginated((start, shifted) => savedPage('playlists:' + start,
           () => currentApi.playlists(start),
-          {force:forceRefresh, priority:start === 0}), currentRevision,
+          {force:forceRefresh || shifted, priority:start === 0}), currentRevision,
           {startedAt:contentStartedAt});
         if (valid()) focusFirst();
         return;
@@ -1927,12 +1942,12 @@ async function render(prepared = null) {
       filters.hidden = true; watchFilters.hidden = true;
       main.append(toolbar, filters, watchFilters);
       const libraryRoute = {...route};
-      const libraryLoader = (start, count) => savedPage(
+      const libraryLoader = (start, count, shifted = false) => savedPage(
         'browse:' + JSON.stringify([libraryRoute.library.id, selected, selectedFilter,
           libraryRoute.alpha || '', start, count || null]),
         () => currentApi.list(libraryRoute.library.id, start, selected, selectedFilter, count,
           currentApi instanceof Jellyfin ? libraryRoute.alpha : undefined),
-        {force:forceRefresh, priority:start === 0 && !libraryRoute.alpha});
+        {force:forceRefresh || shifted, priority:start === 0 && !libraryRoute.alpha});
       if (currentApi instanceof Plex && selected === 'title') {
         // Flutter LibraryBrowseTab starts the first page and firstCharacter
         // fetch together; hide the rail on an unsupported server/failed index.
@@ -1945,7 +1960,7 @@ async function render(prepared = null) {
         const firstResult = await libraryLoader(0).catch(error => ({error}));
         if (!valid()) return;
         if (firstResult.error) {
-          await paginated(start => libraryLoader(start), currentRevision,
+          await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision,
             {startedAt:contentStartedAt});
         } else if (firstResult.value.total >= 80) {
           await prewarmPosters(firstResult.value.items, currentApi, {protectFirst:24});
@@ -1990,7 +2005,7 @@ async function render(prepared = null) {
             }).catch(() => {});
           }).catch(() => {});
         } else {
-          await paginated(start => libraryLoader(start), currentRevision,
+          await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision,
             {initialPage:firstResult, startedAt:contentStartedAt});
         }
       } else if (currentApi instanceof Jellyfin) {
@@ -1999,10 +2014,10 @@ async function render(prepared = null) {
         const firstPage = await libraryLoader(0).catch(error => ({error}));
         if (!valid()) return;
         if (firstPage.error) {
-          await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt});
+          await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision, {startedAt:contentStartedAt});
         } else if (firstPage.value.total >= 80 || route.alpha) {
           main.classList.add('has-alpha-bar');
-          await paginated(start => libraryLoader(start), currentRevision,
+          await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision,
             {initialPage:firstPage, startedAt:contentStartedAt});
           if (!valid()) return;
           activeAlphabet = mountMediaBrowserAlphabet({
@@ -2010,11 +2025,11 @@ async function render(prepared = null) {
             onPrefixChange: next => go({...route, alpha:next, alphaFocus:true}, false)
           });
         } else {
-          await paginated(start => libraryLoader(start), currentRevision,
+          await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision,
             {initialPage:firstPage, startedAt:contentStartedAt});
         }
       } else {
-        await paginated(start => libraryLoader(start), currentRevision, {startedAt:contentStartedAt,
+        await paginated((start, shifted) => libraryLoader(start, undefined, shifted), currentRevision, {startedAt:contentStartedAt,
           windowed:currentApi instanceof Plex && (selected === 'recent' || selected === 'release')});
       }
       if (valid() && route.alphaFocus && activeAlphabet) activeAlphabet.focus();
