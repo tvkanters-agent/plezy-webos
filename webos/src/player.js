@@ -54,8 +54,6 @@ export class Player {
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
     root.querySelector('[data-action="forward"]').onclick = () => this.seek(30);
-    root.querySelector('[data-action="previous-chapter"]').onclick = () => this.seekChapter(false);
-    root.querySelector('[data-action="next-chapter"]').onclick = () => this.seekChapter(true);
     root.querySelector('[data-action="stop"]').onclick = () => this.close();
     this.skipButton.onclick = () => this.activateSkipMarker();
     root.addEventListener('pointerdown', () => this.cancelAutoSkipFromInteraction());
@@ -452,8 +450,8 @@ export class Player {
     });
     const available = !!session.chapters?.length;
     this.root.querySelector('[data-chapters]').hidden = !available;
-    for (const action of ['chapter-options', 'previous-chapter', 'next-chapter'])
-      this.root.querySelector('[data-action="' + action + '"]').hidden = !available;
+    // Keep the menu disc in place while chapter metadata is arriving.
+    this.root.querySelector('[data-action="chapter-options"]').disabled = !available;
     this.chapterBoundaryDuration = null;
     this.renderChapterBoundaries();
     if (!this.sheet.hidden && this.openSheetAction === 'chapter-options')
@@ -817,8 +815,7 @@ export class Player {
     this.scrubbing = false;
     if (!trackSheetFocus) this.sheet.hidden = true;
     this.root.querySelector('[data-chapters]').hidden = true;
-    this.root.querySelector('[data-action="previous-chapter"]').hidden = true;
-    this.root.querySelector('[data-action="next-chapter"]').hidden = true;
+    this.root.querySelector('[data-action="chapter-options"]').disabled = true;
     this.chapterBoundaryDuration = null;
     const gaps = this.root?.querySelector('.chapter-gaps');
     if (gaps) gaps.textContent = '';
@@ -890,8 +887,6 @@ export class Player {
         select.value = options[kind] === undefined ? (chosen ? String(chosen.id) : defaultOption.value)
           : String(options[kind]);
       }
-      this.root.querySelector('[data-action="tracks-options"]').hidden =
-        session.audio.length <= 1 && session.subtitles.length === 0;
       if (trackSheetFocus) this.openSheet('tracks-options', trackSheetFocus);
       this.populateChapterControls(session);
       // Keep the opening frame invisible until the resume target has been
