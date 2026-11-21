@@ -1,3 +1,10 @@
+## 1.22.27 — Fix Back navigation during pending playback and detail updates
+
+- Cancel queued native HLS replay when Back or another navigation leaves its originating detail view, without reordering Plex Stop/teardown or breaking immediate replay.
+- Complete Plex watched/unwatched cache persistence and Simkl history sync after Back on the same account, without touching disposed detail controls.
+- Remove empty community-rating pills in detached detail snapshots when provider lookups return no ratings.
+- Add browser and unit regressions for the interrupted HLS replay, delayed watched/unwatched acknowledgments, and empty ratings before, during, and after Back.
+
 ## 1.22.26 — Preserve queued webOS releases on consecutive merges
 
 - Isolate every master workflow run in its own concurrency group so rapid merges cannot discard a pending version's validation and publication.
