@@ -49,6 +49,7 @@ export class Player {
     this.initialSeekTarget = 0;
     this.generation = 0; this.session = null; this.reporter = null; this.reportWarning = false;
     this.pendingPlayback = null; this.pendingStartupTeardown = null;
+    this.pendingOpenGeneration = null;
     this.bindVideoEvents(this.video);
     root.querySelector('[data-action="pause"]').onclick = () => this.toggle();
     root.querySelector('[data-action="backward"]').onclick = () => this.seek(-10);
@@ -266,6 +267,8 @@ export class Player {
     on('error', () => this.failed());
   }
   get active() { return !this.root.hidden; }
+  // An HLS replay can be queued behind teardown while the player is hidden.
+  get pendingOpen() { return this.root.hidden && this.pendingOpenGeneration === this.generation; }
   skipMode(marker) {
     const prefs = this.preferences();
     return marker?.type === 'credits' ? prefs.skipCreditsMode || 'button'
@@ -780,6 +783,7 @@ export class Player {
     this.closing = false;
     const cleanup = this.release(false, preserveTracking);
     const generation = this.generation;
+    this.pendingOpenGeneration = generation;
     await cleanup;
     if (generation !== this.generation) return;
     // A cancelled HLS startup may still be stopping on Plex or finishing
@@ -787,6 +791,7 @@ export class Player {
     // The wait is bounded, and ordinary decoder replacements never use it.
     await this.waitForStartupTeardown();
     if (generation !== this.generation) return;
+    this.pendingOpenGeneration = null;
     // A background event during cleanup can precede the player's visibility.
     if (document.hidden) this.openIntentPlaying = false;
     this.api = api; this.item = item; this.options = options;
@@ -1148,6 +1153,7 @@ export class Player {
     this.stopSyncHold();
     this.syncHoldFired = false;
     ++this.generation;
+    this.pendingOpenGeneration = null;
     clearTimeout(this.embeddedSubtitleTimer);
     this.embeddedSubtitleTimer = null;
     this.subtitleLoadSession = null;

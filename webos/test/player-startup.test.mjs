@@ -476,3 +476,40 @@ test('scrubbing during burn-in startup requests previews immediately and follows
   assert.equal(requests,1);
   assert.deepEqual(repaints,[60]);
 });
+
+test('Back cancellation retires a hidden HLS replay without starting a new decoder',async()=>{
+  let resolveNegotiation,resolveStop,starts=0,stops=0;
+  const api={
+    playback(){starts++;if(starts===1)return new Promise(resolve=>{resolveNegotiation=resolve;});
+      throw new Error('cancelled launch unexpectedly reached Plex negotiation');},
+    stop(){stops++;return new Promise(resolve=>{resolveStop=resolve;});}
+  };
+  const control={hidden:false,textContent:'',focus(){},classList:{add(){},remove(){}}};
+  const player=Object.assign(Object.create(Player.prototype),{
+    generation:0,session:null,root:{hidden:true,querySelector(){return control;},
+      classList:{remove(){}}},video:{style:{},currentTime:0,paused:true,
+      pause(){},removeAttribute(){},querySelectorAll(){return [];},load(){}},
+    sheet:{hidden:true},status:{textContent:''},preferences:()=>({}),
+    report(){return null;},track(){},clearSkipMarker(){},showBuffering(){},
+    reveal(){},onClose(){}
+  });
+  const oldDocument=globalThis.document;
+  globalThis.document={hidden:false};
+  try {
+    const first=player.open(api,{id:'movie',title:'Test'},{start:85});
+    for(let i=0;i<10&&!resolveNegotiation;i++)await Promise.resolve();
+    await player.close();
+    const replay=player.open(api,{id:'movie',title:'Test'},{start:85});
+    await Promise.resolve();
+    assert.equal(player.pendingOpen,true,'the replay waits behind the old HLS cleanup');
+    await player.close(); // Back on the detail page cancels the hidden launch.
+    assert.equal(player.pendingOpen,false);
+    resolveNegotiation({transcode:true,sessionId:'old'});
+    for(let i=0;i<10&&!resolveStop;i++)await Promise.resolve();
+    assert.equal(stops,1,'old negotiation must still be stopped');
+    resolveStop();
+    await Promise.all([first,replay]);
+    assert.equal(starts,1,'a cancelled replay cannot negotiate or create another source');
+    assert.equal(player.active,false);
+  } finally {globalThis.document=oldDocument;}
+});
