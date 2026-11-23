@@ -4,6 +4,7 @@ import {VERSION, baseUrl, id, readState, saveState, nextFocus, time} from './cor
 import {client, Jellyfin, Plex, mediaSourceTracks, plexPin, pollPlexPin, plexServers} from './api.js';
 import {Player} from './player.js';
 import {EpisodeTrackPreferences} from './episode-track-preferences.js';
+import {savePlexShowTracks} from './plex-show-tracks.js';
 import {previewDetailTracks} from './detail-track-status.js';
 import {DEFAULT_INTRO_PATTERN, DEFAULT_CREDITS_PATTERN} from './skip-markers.js';
 import {ArtworkCache, artworkCacheKey} from './artwork-cache.js';
@@ -57,7 +58,7 @@ const simklTracker = new SimklTracker(() => state.simkl, session => {
 }, message => notify(message));
 let playbackReturn = null;
 const player = new Player(document.querySelector('#player'), notify, playbackClosed, simklTracker, () => state,
-  (item, mediaIndex, kind, track) => episodeTrackChoices.record(item, mediaIndex, kind, track));
+  recordTrackChoice);
 // Plezy keeps the detail route beneath playback. Never clear/refetch that
 // page after hiding the player: it flashes blank and discards remote focus.
 function playbackClosed(reportDone) {
@@ -154,6 +155,19 @@ function persist() {
 }
 function activeServer() { return state.servers.find(s => s.id === state.active) || state.servers[0]; }
 let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
+function syncPlexTrackChoices() {
+  const source = api;
+  if (!(source instanceof Plex)) return;
+  episodeTrackChoices.flush(async (show, choices, current) => {
+    await savePlexShowTracks(source, show, choices, current);
+    if (current()) notify('Saved matching episode tracks to Plex.');
+  },
+    () => api === source, () => notify('Could not save all tracks to Plex. Plezy will retry on the next launch.'));
+}
+function recordTrackChoice(item, mediaIndex, kind, track) {
+  episodeTrackChoices.record(item, mediaIndex, kind, track, api instanceof Plex);
+  syncPlexTrackChoices();
+}
 function setClient() {
   if (player.pendingOpen) { ++playbackLaunch; player.close(); }
   // Never reuse catalog metadata across accounts or server connections.
@@ -163,6 +177,7 @@ function setClient() {
   const server = activeServer();
   episodeTrackChoices = new EpisodeTrackPreferences(tvStorage(), catalogScope(server));
   api = server ? client(server, state.deviceId) : null;
+  syncPlexTrackChoices();
   // The mounted DOM still belongs to the previous account at this point.
   // Reset its route before the next go() can mistakenly cache it as a tab
   // belonging to the newly selected server.
@@ -612,7 +627,7 @@ async function showMediaTrackSheet(item, resolveEpisode = null) {
       tracksForKind.forEach(track => {
         const label = track.primary || track.label;
         const choice = button('', () => {
-          episodeTrackChoices.record(detailed, mediaIndex, kind, track);
+          recordTrackChoice(detailed, mediaIndex, kind, track);
           updateDetailTrackStatus?.(detailed);
           // Keep both columns open so audio and subtitle can be chosen in one
           // visit. Update only this column's tick and pressed state.

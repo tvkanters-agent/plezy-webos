@@ -32,7 +32,7 @@ async function seasonServer(page, multi = false, configure) {
     deviceId:'test',active:'plex',servers:[{id:'plex',kind:'plex',name:'Plex',
       url:'http://plex.test',token:'fixture'}]
   })));
-  await page.route('http://plex.test/**',route=>{
+  await page.context().route('http://plex.test/**',route=>{
     const req=route.request(),url=new URL(req.url());
     calls.push({path:url.pathname,method:req.method(),params:url.searchParams.toString()});
     let rows=[];
@@ -41,6 +41,20 @@ async function seasonServer(page, multi = false, configure) {
     }}});
     if(url.pathname==='/library/metadata/show')rows=[show];
     if(url.pathname==='/library/metadata/show/children')rows=[season];
+    if(url.pathname==='/library/metadata/show/grandchildren')rows=multi?[episode,second]:[episode];
+    if(req.method()==='PUT' && url.pathname.startsWith('/library/parts/')) {
+      const part=[detailed,secondDetail].map(e=>e.Media[0].Part[0]).find(p=>url.pathname==='/library/parts/'+p.id);
+      if (!part) return route.fulfill({status:404});
+      for (const [param,type] of [['audioStreamID',2],['subtitleStreamID',3]]) {
+        if (!url.searchParams.has(param)) continue;
+        const id=Number(url.searchParams.get(param));
+        const tracks=part.Stream.filter(track=>track.streamType===type);
+        if (!(type===3 && id===0) && !tracks.some(track=>track.id===id))
+          return route.fulfill({status:400});
+        tracks.forEach(track=>{track.selected=Number(track.id===id);});
+      }
+      return route.fulfill({status:200,body:''});
+    }
     if(url.pathname==='/library/metadata/season')rows=[season];
     if(url.pathname==='/library/metadata/season/children')rows=multi?[episode,second]:[episode];
     if(url.pathname==='/library/metadata/ep1')rows=[detailed];
@@ -157,7 +171,8 @@ test('season episode track choices load full metadata and reach Plex playback st
   await expect(page.locator('.episode-track-column').last().getByRole('button',{name:'Spanish'}))
     .toHaveAttribute('aria-pressed','true');
   await expect(page.locator('#dialog')).toBeVisible();
-  expect(calls.some(call=>call.path==='/library/parts/part')).toBe(false);
+  await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part' &&
+    new URLSearchParams(call.params).get('subtitleStreamID')==='22')).toBe(true);
   await page.keyboard.press('Escape');
   await expect(more).toBeFocused();
   await page.locator('.episode-row').click();
@@ -209,7 +224,8 @@ test('detail action-row status shows playable stream choices and updates without
     'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
   await page.keyboard.press('Escape');
   await expect(more).toBeFocused();
-  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part2' &&
+    new URLSearchParams(call.params).get('subtitleStreamID')==='52')).toBe(true);
   await page.getByRole('button',{name:/Season 1/}).click();
   await expect(page.locator('.detail-playback-tracks')).toHaveAttribute('aria-label',
     'Audio & Subtitles: 1080p, H.264, French · AC3, Spanish · SRT');
@@ -295,7 +311,8 @@ test('show and season context menus choose the same episode as Play, carrying it
     .toHaveAttribute('aria-pressed','true');
   await page.locator('.episode-track-column').last().getByRole('button',{name:'Off'}).click();
   await page.keyboard.press('Escape');
-  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part2' &&
+    new URLSearchParams(call.params).get('audioStreamID')==='42')).toBe(true);
   await page.locator('.episode-row').nth(1).click();
   await expect.poll(()=>calls.some(call=>{
     const params=new URLSearchParams(call.params);
@@ -388,8 +405,11 @@ test('explicit player choices survive relaunch and reach the matching tracks on 
   await page.locator('[data-action="tracks-options"]').click();
   const english=page.locator('.player-track-column').first().getByRole('button',{name:/English/});
   await expect(english).toHaveAttribute('aria-pressed','true');
+  const starts=calls.filter(call=>call.path.endsWith('/start.m3u8')).length;
   await english.click();
-  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part' &&
+    new URLSearchParams(call.params).get('audioStreamID')==='11')).toBe(true);
+  expect(calls.filter(call=>call.path.endsWith('/start.m3u8'))).toHaveLength(starts);
   await page.locator('.player-track-column').last().getByRole('button',{name:/Dialogue/}).click();
   await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part' &&
     new URLSearchParams(call.params).get('subtitleStreamID')==='22')).toBe(true);
@@ -402,6 +422,33 @@ test('explicit player choices survive relaunch and reach the matching tracks on 
       params.get('audioStreamID')==='41' && params.get('subtitleStreamID')==='51';
   })).toBe(true);
   await expect(page.locator('#player video')).toHaveAttribute('src',/audioStreamID=41/);
+});
+
+test('another Plex client sees Japanese audio and full ASS on an unopened episode',async({page})=>{
+  const calls=await seasonServer(page,true,(first,next)=>{
+    next.parentRatingKey='season2';
+    const tracks=ids=>[
+      {streamType:2,id:ids[0],languageCode:'eng',codec:'aac',selected:1},
+      {streamType:2,id:ids[1],languageCode:'jpn',codec:'aac'},
+      {streamType:3,id:ids[2],languageCode:'eng',codec:'ass',title:'Signs & Songs',selected:1},
+      {streamType:3,id:ids[3],languageCode:'eng',codec:'ass',title:'Full subtitles'}
+    ];
+    first.Media[0].Part[0].Stream=tracks([11,12,21,22]);
+    next.Media[0].Part[0].Stream=tracks([43,42,54,51]).reverse();
+  });
+  await page.getByRole('button',{name:/The First Episode/}).first().click();
+  await page.locator('.detail-play').click();
+  await page.locator('[data-action="tracks-options"]').click();
+  await page.locator('.player-track-column').first().getByRole('button',{name:/Japanese/}).click();
+  await page.locator('.player-track-column').last().getByRole('button',{name:/Full subtitles/}).click();
+  const reader=await page.context().newPage();
+  await expect.poll(async()=>{
+    const response=await reader.goto('http://plex.test/library/metadata/ep2?X-Plex-Token=fixture');
+    const {MediaContainer}=await response.json();
+    return MediaContainer.Metadata[0].Media[0].Part[0].Stream.filter(s=>s.selected).map(s=>s.id).sort();
+  }).toEqual([42,51]);
+  expect(calls.some(call=>call.path.includes('/transcode/') &&
+    new URLSearchParams(call.params).get('path')==='/library/metadata/ep2')).toBe(false);
 });
 
 test('marking a season updates every visible episode without replacing rows',async({page})=>{
