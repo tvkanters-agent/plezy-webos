@@ -896,7 +896,8 @@ main.settings-view { padding-top:38px; }
 }
 .player-settings-icon svg, .sync-offset-icon svg { display:block; width:100%; height:100%; }
 .player-settings-label { font-size:17px; white-space:nowrap; }
-.player-settings-sync-value { margin-left:auto; font-size:15px; color:#a2a5ae; white-space:nowrap; }
+/* Explicit margin works on webOS Chromium 53, where flex gap is unsupported. */
+.player-settings-sync-value { margin-left:auto; margin-right:14px; font-size:15px; color:#a2a5ae; white-space:nowrap; }
 .player-settings-chevron { color:#a2a5ae; font-size:26px; line-height:1; }
 .player-settings-sync.is-active .player-settings-icon,
 .player-settings-sync.is-active .player-settings-sync-value { color:#ffbf3e; }
