@@ -103,6 +103,19 @@ test('compatibility mode never activates enhanced subtitle or Direct Play pipeli
     await expect(sync).toHaveAttribute('aria-disabled','true');
     await expect(sync).toHaveClass(/is-disabled/);
     await expect(page.locator('.player-settings-sync-value')).toHaveText('Burned in');
+    // LG Chromium 53 ignores flex gap: the label needs explicit spacing.
+    const margin = await page.locator('.player-settings-sync-value')
+      .evaluate(element => parseFloat(getComputedStyle(element).marginRight));
+    expect(margin).toBeGreaterThanOrEqual(12);
+    // Removing the arrow's inward hooks leaves the 10/30 badges unobstructed.
+    for (const [action, path, number] of [
+      ['backward', 'M4 6v5M4.3 11a8 8 0 1 1 .9 5.5', '10'],
+      ['forward', 'M20 6v5M19.7 11a8 8 0 1 0-.9 5.5', '30']
+    ]) {
+      const icon = page.locator('.player-buttons [data-action="' + action + '"] svg');
+      await expect(icon.locator('path')).toHaveAttribute('d', path);
+      await expect(icon.locator('text')).toHaveText(number);
+    }
     await sync.focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('#toast')).toHaveText('Cannot offset burned-in subtitles');
