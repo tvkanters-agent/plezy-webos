@@ -1,6 +1,6 @@
 const {test,expect}=require('@playwright/test');
 
-async function seasonServer(page, multi = false) {
+async function seasonServer(page, multi = false, configure) {
   const calls=[];
   const episode={ratingKey:'ep1',type:'episode',title:'The First Episode',index:1,
     grandparentTitle:'Example Series',grandparentRatingKey:'show',parentRatingKey:'season',
@@ -24,6 +24,7 @@ async function seasonServer(page, multi = false) {
       {streamType:3,id:51,languageCode:'eng',codec:'srt'},
       {streamType:3,id:52,languageCode:'es',codec:'srt'}
     ]}]}]};
+  if (configure) configure(detailed, secondDetail, second);
   const show={ratingKey:'show',type:'show',title:'Example Series',leafCount:1,viewedLeafCount:0};
   const season={ratingKey:'season',type:'season',title:'Season 1',parentRatingKey:'show',
     parentTitle:'Example Series',leafCount:1,viewedLeafCount:0};
@@ -356,6 +357,51 @@ test('subtitle Off carries between episodes and player audio changes update the 
     return call.path==='/library/parts/part' && call.method==='PUT' &&
       params.get('audioStreamID')==='12' && params.get('subtitleStreamID')==='0';
   })).toBe(true);
+});
+
+test('explicit player choices survive relaunch and reach the matching tracks on a sibling',async({page})=>{
+  const calls=await seasonServer(page,true,(first,next,listing)=>{
+    delete first.grandparentRatingKey;
+    const streams=first.Media[0].Part[0].Stream;
+    streams[3].languageCode='eng';
+    streams[3].displayTitle='English (SRT)';
+    streams[3].extendedDisplayTitle='English Dialogue (SRT)';
+    const target=next.Media[0].Part[0].Stream;
+    target[0].selected=0;
+    target[1].selected=1;
+    target[2].languageCode='eng';
+    target[2].displayTitle='English (SRT)';
+    target[2].extendedDisplayTitle='English Dialogue (SRT)';
+    target[3].languageCode='eng';
+    target[3].displayTitle='English (SRT)';
+    target[3].extendedDisplayTitle='English Signs (SRT)';
+    target[3].selected=1;
+    // A listing with both track types can still omit the desired streams.
+    listing.Media[0].Part[0].Stream=[target[1],target[3]];
+  });
+  const openSeason=async()=>{
+    await page.getByRole('button',{name:'Example Series',exact:true}).first().click();
+    await page.getByRole('button',{name:/Season 1/}).click();
+  };
+  await openSeason();
+  await page.locator('.episode-row').first().click();
+  await page.locator('[data-action="tracks-options"]').click();
+  const english=page.locator('.player-track-column').first().getByRole('button',{name:/English/});
+  await expect(english).toHaveAttribute('aria-pressed','true');
+  await english.click();
+  expect(calls.filter(call=>call.method==='PUT')).toHaveLength(0);
+  await page.locator('.player-track-column').last().getByRole('button',{name:/Dialogue/}).click();
+  await expect.poll(()=>calls.some(call=>call.path==='/library/parts/part' &&
+    new URLSearchParams(call.params).get('subtitleStreamID')==='22')).toBe(true);
+  await page.reload();
+  await openSeason();
+  await page.locator('.episode-row').nth(1).click();
+  await expect.poll(()=>calls.some(call=>{
+    const params=new URLSearchParams(call.params);
+    return call.method==='PUT' && call.path==='/library/parts/part2' &&
+      params.get('audioStreamID')==='41' && params.get('subtitleStreamID')==='51';
+  })).toBe(true);
+  await expect(page.locator('#player video')).toHaveAttribute('src',/audioStreamID=41/);
 });
 
 test('marking a season updates every visible episode without replacing rows',async({page})=>{

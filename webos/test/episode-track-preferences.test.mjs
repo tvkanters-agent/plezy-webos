@@ -102,3 +102,19 @@ test('MediaBrowser series IDs scope preferences without title guesses', () => {
   deepStrictEqual(preferences.resolve({id:'jf2',type:'Episode',raw:{SeriesId:'series-17'}},0,
     tracks([audio(5,'eng')],[])),{audio:5});
 });
+
+test('a relaunch restores show choices only within the saved account and server', () => {
+  const data = new Map();
+  const storage = {getItem:key => data.get(key), setItem:(key, value) => data.set(key, value),
+    removeItem:key => data.delete(key)};
+  const first = new EpisodeTrackPreferences(storage, 'account A');
+  first.record(episode('e1'), 0, 'audio', audio(4, 'French'));
+  first.record(episode('e1'), 0, 'subtitle', {id:-1});
+  const next = episode('e2', 'showA', 'season2');
+  const available = tracks([audio(4,'eng'), audio(12,'fra')], [subtitle(11,'eng')]);
+  const resolve = scope => new EpisodeTrackPreferences(storage, scope).resolve(next,0,available);
+  deepStrictEqual(resolve('account B'), {});
+  deepStrictEqual(resolve('account A'), {audio:12,subtitle:-1});
+  EpisodeTrackPreferences.removeScope(storage, 'account A');
+  deepStrictEqual(resolve('account A'), {});
+});

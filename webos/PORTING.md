@@ -178,16 +178,18 @@ choosing by stream position. Off subtitles remain an explicit intent.
 webOS currently launches episodes from separate season/detail routes rather
 than performing MPV's in-place Next Episode navigation. To make the requested
 cross-episode choice available through these routes, the last explicit audio
-and subtitle selections are remembered per series **for the app session**.
+and subtitle selections are saved per series in TV storage under the active server/account scope.
 Selections from either pre-play episode menus or the playing TrackSheet apply
 to other episodes, including other seasons, when source track semantics match.
 Source IDs are never reused across episodes. A missing or ambiguous target
 falls through to Plex/Jellyfin's own item selection; missing lightweight
 stream catalogs are fetched before opening an episode. Choosing a new track
-supersedes earlier sibling episode choices for that kind only. Server switches
-discard the session memory. This is a webOS navigation adaptation, not a
-server-side bulk update, account-wide preference change, or a promise of
-persistence across restarts. For HLS (including enhanced SRT/ASS video),
+supersedes earlier sibling episode choices for that kind only. The TV restores the semantic choices on relaunch or return to the same
+connection. Exact stream IDs remain in memory for their originating item.
+Player clicks on checked tracks also express a preference for sibling episodes
+without restarting playback. A matching Plex extended display title can
+distinguish otherwise similar source rows. Even non-empty episode listings can contain only the server defaults, so the
+picker, detail preview and Play resolve tracks from the episode detail catalog. For HLS (including enhanced SRT/ASS video),
  the selected source audio ID must be present in the HLS start/decision URL
  as well as the part-selection PUT; custom captions continue to use the
  matched subtitle ID only in the separate subtitle asset, with HLS subtitles

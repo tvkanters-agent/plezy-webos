@@ -48,7 +48,7 @@ let detailMenu = null, ratingDialogReturnFocus = null, exitDialogReturnFocus = n
 let settingsDialogReturnFocus = null;
 let episodeTrackReturnFocus = null;
 let episodeTrackGeneration = 0;
-const episodeTrackChoices = new EpisodeTrackPreferences();
+let episodeTrackChoices;
 let updateDetailTrackStatus = null;
 window.addEventListener('resize', () => updateDetailTrackStatus?.());
 let activeAlphabet = null;
@@ -158,10 +158,10 @@ function setClient() {
   if (player.pendingOpen) { ++playbackLaunch; player.close(); }
   // Never reuse catalog metadata across accounts or server connections.
   catalogCache.clear();
-  episodeTrackChoices.clear();
   collectionIndex.clear();
   clearNavigationHistory();
   const server = activeServer();
+  episodeTrackChoices = new EpisodeTrackPreferences(tvStorage(), catalogScope(server));
   api = server ? client(server, state.deviceId) : null;
   // The mounted DOM still belongs to the previous account at this point.
   // Reset its route before the next go() can mistakenly cache it as a tab
@@ -175,6 +175,7 @@ function addServer(server) {
   const previous = state.servers.find(s => s.id === server.id);
   if (previous && catalogScope(previous) !== catalogScope(server)) {
     const previousScope = catalogScope(previous);
+    EpisodeTrackPreferences.removeScope(tvStorage(), previousScope);
     savedCatalog.removeScope(previousScope).catch(() => {});
     artworkCache.removeScope(previousScope).catch(() => {});
   }
@@ -2708,6 +2709,9 @@ async function render(prepared = null) {
   }
 }
 function sourceStreamsComplete(item, mediaIndex) {
+  // Even a non-empty Stream array on a listing may contain only the server
+  // defaults. Use episode detail as the catalog for the chooser and playback.
+  if (String(item.type).toLowerCase() === 'episode') return item.episodeDetailLoaded === true;
   return !!(item.raw?.Media?.[mediaIndex]?.Part?.[0]?.Stream ||
     item.raw?.MediaSources?.[mediaIndex]?.MediaStreams || item.raw?.MediaStreams);
 }
@@ -3173,6 +3177,7 @@ function settingsSubpage(page,serverId) {
         },'server-open'),
       settingsTile('Remove from this TV','Removes the saved account token and catalog.','hidden',()=>{
         const scope = catalogScope(server);
+        EpisodeTrackPreferences.removeScope(tvStorage(), scope);
         savedCatalog.removeScope(scope).catch(()=>{});
         artworkCache.removeScope(scope).catch(()=>{});
         state.servers=state.servers.filter(s=>s.id!==server.id);persist();setClient();go({type:'settings'},false);
