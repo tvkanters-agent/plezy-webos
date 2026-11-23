@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {subtitleStyle} from './subtitle-style.js';
-export const VERSION = '1.22.39';
+export const VERSION = '1.22.40';
 export function id() {
   const bytes = new Uint8Array(16);
   // A device ID is a local client identifier, not a secret. Some webOS app

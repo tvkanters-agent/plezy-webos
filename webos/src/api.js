@@ -121,12 +121,14 @@ export function mediaSourceTracks(item, mediaIndex = 0) {
     return {
       audio: streams.filter(s => Number(s.streamType) === 2).map((s, i) =>
         ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
-          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle || s.extendedDisplayTitle,
+          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle,
+          extendedDisplayTitle:s.extendedDisplayTitle,
           codec:s.codec, channels:s.channels,
           ...plexTrackLabel(s, 'audio', i)})),
       subtitles: streams.filter(s => Number(s.streamType) === 3).map((s, i) =>
         ({id:s.id, selected:s.selected === true || s.selected === 1 || s.selected === '1',
-          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle || s.extendedDisplayTitle,
+          language:s.languageCode || s.language, title:s.title, displayTitle:s.displayTitle,
+          extendedDisplayTitle:s.extendedDisplayTitle,
           codec:s.codec, forced:s.forced === true || s.forced === 1 || s.forced === '1',
           external:!!s.key,
           ...plexTrackLabel(s, 'subtitle', i)}))
@@ -316,7 +318,20 @@ export class Plex {
     const path = kind === 'collection' ? '/library/collections/' + enc(itemId) :
       kind === 'playlist' ? '/playlists/' + enc(itemId) : '/library/metadata/' + enc(itemId);
     const data = await this.get(path, {includeGuids: 1, includeMarkers: 1, includeChapters: 1, includeStreams: 1, checkFiles: 1});
-    return plexItem(data.MediaContainer.Metadata[0]);
+    const raw = data.MediaContainer.Metadata[0];
+    const item = plexItem(raw);
+    if (item.type !== 'episode') return item;
+    item.episodeDetailLoaded = true;
+    if (!raw.grandparentRatingKey && raw.parentRatingKey) {
+      // Some episode responses identify only the season. Resolve its parent
+      // using Plex's hierarchy so a choice can still cross season boundaries.
+      try {
+        const season = (await this.get('/library/metadata/' + enc(raw.parentRatingKey))).MediaContainer.Metadata[0];
+        if (season?.type === 'season' && season.parentRatingKey)
+          item.raw = {...raw, grandparentRatingKey:season.parentRatingKey};
+      } catch (_) { /* The episode is still playable if its season is unavailable. */ }
+    }
+    return item;
   }
   async children(itemId, start = 0, kind = '') {
     const path = kind === 'collection' ? '/library/collections/' + enc(itemId) + '/children' :
@@ -747,7 +762,11 @@ export class Jellyfin {
       IncludeItemTypes: 'Movie,Series,Episode', Limit: PAGE, Fields: FIELDS});
     return (data.Items || []).map(jellyItem);
   }
-  async detail(itemId) { return jellyItem(await this.call(this.userPath('/Items/') + enc(itemId))); }
+  async detail(itemId) {
+    const item = jellyItem(await this.call(this.userPath('/Items/') + enc(itemId)));
+    if (item.type === 'Episode') item.episodeDetailLoaded = true;
+    return item;
+  }
   async children(itemId, start = 0) { return this.list(itemId, start); }
   image(item, options = {}) {
     const raw = item.raw;

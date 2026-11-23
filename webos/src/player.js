@@ -712,7 +712,10 @@ export class Player {
             control.appendChild(secondary);
           }
           control.onclick = () => {
-            if (select.value === String(track.id)) return;
+            if (select.value === String(track.id)) {
+              this.onTrackChoice?.(this.item, this.options.mediaIndex || 0, column.kind, track);
+              return;
+            }
             select.value = String(track.id);
             Array.from(wrapper.querySelectorAll('button')).forEach(option =>
               option.setAttribute('aria-pressed', String(option === control)));

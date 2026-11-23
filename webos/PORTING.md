@@ -120,7 +120,7 @@ structure, selecting source IDs from `Part.Stream` / MediaBrowser `MediaStreams`
 The original sheet controls an existing MPV player. The requested pre-play
 episode selector is a webOS-only adaptation: it reads complete episode metadata
 if the season listing omitted streams, stores the choice for that episode in the
-active account's memory, and applies it when playback starts. Plex stream
+active account, and applies it when playback starts. Plex stream
 selection uses the port's existing part PUT + HLS restart; this cannot provide
 MPV's seamless decoder-side switching or external subtitle search on webOS.
 Tests cover IDs including zero, menu focus, watched actions and request params.
@@ -137,7 +137,7 @@ resolves the episode that the existing Play action would start (On Deck or the
 first available episode) and records that episode's choice. The established
 per-series language/role carry applies it to matching sibling episodes when
 played, without sending an arbitrary episode's stream IDs to another part.
-Changing a pre-play choice still makes no server request until playback starts.
+Movie pre-play choices take effect on playback. Plex episode choices also sync to the show as described below.
 Native Plezy has a read-only playback-track preview on show/season details;
 this selectable menu is a user-requested webOS extension. Focus/Back and
 version/part ID forwarding have browser regression coverage, not TV validation.
@@ -178,20 +178,29 @@ choosing by stream position. Off subtitles remain an explicit intent.
 webOS currently launches episodes from separate season/detail routes rather
 than performing MPV's in-place Next Episode navigation. To make the requested
 cross-episode choice available through these routes, the last explicit audio
-and subtitle selections are remembered per series **for the app session**.
+and subtitle selections are saved per series in TV storage under the active server/account scope.
 Selections from either pre-play episode menus or the playing TrackSheet apply
 to other episodes, including other seasons, when source track semantics match.
 Source IDs are never reused across episodes. A missing or ambiguous target
 falls through to Plex/Jellyfin's own item selection; missing lightweight
 stream catalogs are fetched before opening an episode. Choosing a new track
-supersedes earlier sibling episode choices for that kind only. Server switches
-discard the session memory. This is a webOS navigation adaptation, not a
-server-side bulk update, account-wide preference change, or a promise of
-persistence across restarts. For HLS (including enhanced SRT/ASS video),
- the selected source audio ID must be present in the HLS start/decision URL
- as well as the part-selection PUT; custom captions continue to use the
- matched subtitle ID only in the separate subtitle asset, with HLS subtitles
- disabled. LG hardware playback remains to be checked.
+supersedes earlier sibling episode choices for that kind only. The TV restores
+the semantic choices on relaunch or return to the same connection. Player
+clicks on checked tracks also express a preference without restarting playback.
+The chooser, preview and Play use the episode detail catalog. A listing may
+contain only defaults even when it includes some streams.
+
+The user requested that the selection be visible in other Plex clients.
+Native `PlexClient.selectStreams` persists a choice per user and media part.
+The TV enumerates the show's episodes with Plezy's paged `/grandchildren`
+endpoint, reads each episode's catalog and sends a part PUT for each matching
+edition and part. Each request carries only the changed kinds and the target
+part's own IDs. Signs-only and full-dialogue subtitle tracks are distinguished
+even when both are unforced English ASS. The app saves pending writes before
+starting the pass and resumes interrupted work for the same connection. A
+failure keeps the pass pending and shows a retry message. Playback proceeds
+independently. Enhanced SRT and ASS burn-in both use the matched audio and
+subtitle choices.
 
 ### Stable transport discs and chapter metadata
 
