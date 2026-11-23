@@ -158,10 +158,7 @@ let libraryCache = null, libraryCacheFor = null, libraryLoading = false;
 function syncPlexTrackChoices() {
   const source = api;
   if (!(source instanceof Plex)) return;
-  episodeTrackChoices.flush(async (show, choices, current) => {
-    await savePlexShowTracks(source, show, choices, current);
-    if (current()) notify('Saved matching episode tracks to Plex.');
-  },
+  episodeTrackChoices.flush((show, choices, current) => savePlexShowTracks(source, show, choices, current),
     () => api === source, () => notify('Could not save all tracks to Plex. Plezy will retry on the next launch.'));
 }
 function recordTrackChoice(item, mediaIndex, kind, track) {
